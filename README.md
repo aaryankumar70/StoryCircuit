@@ -60,7 +60,7 @@ Once YouTube confirms `status.publishAt`, YouTube handles publication independen
 │   ├── start_scheduler.bat        # Windows batch launcher
 │   ├── start_scheduler.ps1        # Windows PowerShell launcher
 │   └── upload_single_private_test.py
-├── docs-site/                     # Static GitHub Pages OAuth branding homepage & privacy policy
+├── docs/                          # Static GitHub Pages OAuth branding homepage & privacy policy
 ├── tests/                         # Pytest unit and integration test suite
 ├── requirements.txt
 └── .env.example
@@ -138,10 +138,10 @@ The unit/integration tests run fully locally with mocked external APIs and never
 
 ---
 
-### OAuth Branding Website (`docs-site/`)
-Static public pages for the Google OAuth consent screen (`GitHub Pages` branch `main`, folder `/docs-site`):
-- **Homepage:** `docs-site/index.html` ([https://aaryankumar70.github.io/StoryCircuit/](https://aaryankumar70.github.io/StoryCircuit/))
-- **Privacy Policy:** `docs-site/privacy.html` ([https://aaryankumar70.github.io/StoryCircuit/privacy.html](https://aaryankumar70.github.io/StoryCircuit/privacy.html))
+### OAuth Branding Website (`docs/`)
+Static public pages for the Google OAuth consent screen (`GitHub Pages` branch `main`, folder `/docs`):
+- **Homepage:** `docs/index.html` ([https://aaryankumar70.github.io/StoryCircuit/](https://aaryankumar70.github.io/StoryCircuit/))
+- **Privacy Policy:** `docs/privacy.html` ([https://aaryankumar70.github.io/StoryCircuit/privacy.html](https://aaryankumar70.github.io/StoryCircuit/privacy.html))
 
 ---
 
