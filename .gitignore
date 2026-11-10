@@ -1,0 +1,70 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.token
+token.json
+tokens.json
+*token*.json
+client_secret*.json
+credentials*.json
+service_account*.json
+.dashboard_secret
+
+# Local Databases, Runtime State & Logs
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Python & Test Artifacts
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Heavy Machine Learning Weights (downloaded locally)
+models/
+
+# Rendered Media Outputs, Temporary Media & Generated Sample Audio/Video
+output/
+renders/
+templates/*/renders/
+templates/*/data/
+templates/*/logs/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.wav
+*.mp3
+*.m4a
+*.ogg
+*.tmp
+*.part
+
+# Upstream Reference Archives (not part of CurioLoop release)
+upstream/
+
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Node / Scratch
+node_modules/

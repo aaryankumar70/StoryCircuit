@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CurioLoop — Short-Form Educational Video Studio &amp; YouTube Publisher</title>
+  <meta name="description" content="CurioLoop is a local-first short-form educational video creation, quality-control, and YouTube Shorts scheduling application connecting creator accounts via Google OAuth.">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav-bar">
+      <a class="brand-link" href="./">
+        <img class="brand-icon" src="assets/logo.png" alt="CurioLoop logo" width="38" height="38">
+        <span>
+          CurioLoop
+          <span class="brand-tagline">One Short. One New Curiosity.</span>
+        </span>
+      </a>
+      <nav aria-label="Main navigation">
+        <ul class="nav-links">
+          <li><a href="./" class="active">Overview</a></li>
+          <li><a href="#workflow">How It Works</a></li>
+          <li><a href="#oauth">YouTube &amp; OAuth</a></li>
+          <li><a href="#support">Support</a></li>
+          <li><a href="privacy.html">Privacy Policy</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <section class="hero" aria-labelledby="hero-title">
+        <div>
+          <span class="eyebrow">YouTube Creator Publishing Tool</span>
+          <h1 id="hero-title">Original short-form explainers, rendered locally and scheduled cleanly to YouTube.</h1>
+          <p class="hero-lead">
+            CurioLoop is a local-first video creation and publishing desktop workflow designed to produce original
+            vertical informational videos (20–30 seconds, 1080×1920) and upload or schedule them directly to the
+            creator's own YouTube channel using Google OAuth 2.0.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="privacy.html">Read Privacy Policy</a>
+            <a class="btn btn-secondary" href="#support">Contact Support</a>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <div class="hero-logo-card">
+            <img src="assets/logo.png" alt="CurioLoop cosmic mascot and wordmark" width="512" height="512">
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="workflow" aria-labelledby="workflow-title">
+        <h2 class="section-heading" id="workflow-title">What CurioLoop Does</h2>
+        <p class="section-sub">
+          Everything from script authoring to audio synthesis, visual rendering, and quality validation runs locally
+          on the creator's workstation before any video is uploaded to YouTube.
+        </p>
+        <div class="grid-3">
+          <article class="card">
+            <div class="step-num">1</div>
+            <h3>Educational Script &amp; Narration</h3>
+            <p>
+              Generates concise curiosity-driven scripts backed by verifiable reference URLs, synthesizes voiceover
+              narration locally, and builds synchronized word-level captions.
+            </p>
+          </article>
+          <article class="card">
+            <div class="step-num">2</div>
+            <h3>Local Rendering &amp; Quality Gate</h3>
+            <p>
+              Renders 9:16 H.264/AAC MP4 Shorts locally and checks duration, resolution, loudness (LUFS), peak headroom,
+              and visual timelines before allowing publication.
+            </p>
+          </article>
+          <article class="card">
+            <div class="step-num">3</div>
+            <h3>Direct Upload &amp; Scheduling</h3>
+            <p>
+              Uploads verified MP4 files directly to the creator's YouTube channel via the YouTube Data API v3, staging
+              videos as private or scheduling future publication windows (<code>status.publishAt</code>).
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="oauth" aria-labelledby="oauth-title">
+        <h2 class="section-heading" id="oauth-title">YouTube Account Connection via Google OAuth</h2>
+        <p class="section-sub">
+          Creators connect only their own YouTube account using Google's official OAuth 2.0 consent screen.
+        </p>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Explicit Creator Authorization</h3>
+            <ul class="clean-list">
+              <li>Authentication uses an Installed Desktop OAuth 2.0 client owned by the creator/operator.</li>
+              <li>Requested permissions are limited to uploading videos, reading channel upload status/schedules, and managing scheduled publish timestamps.</li>
+              <li>Creators can review, modify descriptions, pause automation, or revoke access at any time via Google Account permissions.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Privacy-First Local Architecture</h3>
+            <ul class="clean-list">
+              <li>OAuth refresh tokens and video production records remain stored locally on the operator's computer—CurioLoop operates no central multi-user server.</li>
+              <li>Unrelated Google services (such as Gmail, Drive, or Contacts) are never requested or accessed.</li>
+              <li>Use of Google API data strictly follows Google's API Services User Data Policy and Limited Use requirements.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="support" aria-labelledby="support-title">
+        <div class="callout">
+          <h2 class="section-heading" id="support-title">Support &amp; Developer Contact</h2>
+          <p class="section-sub" style="margin-bottom: 12px;">
+            For technical support, OAuth consent inquiries, or questions about locally stored application data or
+            revoking access, please contact the developer:
+          </p>
+          <ul class="clean-list">
+            <li><strong>Application Name:</strong> CurioLoop</li>
+            <li><strong>Support &amp; Privacy Email:</strong> <a href="mailto:ar54gb@gmail.com">ar54gb@gmail.com</a></li>
+            <li><strong>Google Permissions Management:</strong> <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">myaccount.google.com/permissions</a></li>
+            <li><strong>Privacy Policy:</strong> <a href="privacy.html">View full CurioLoop Privacy Policy</a></li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <span>&copy; 2026 CurioLoop Studio. Informational OAuth Application Page.</span>
+      <div class="footer-links">
+        <a href="./">Home</a>
+        <a href="privacy.html">Privacy Policy</a>
+        <a href="mailto:ar54gb@gmail.com">Support</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

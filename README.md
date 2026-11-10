@@ -28,109 +28,120 @@ Curiosity Engine selects dynamic visual storytelling styles matched to content c
 
 ---
 
-### Scheduled Jobs Architecture (Asia/Kolkata / IST)
+### Autonomous Schedule Architecture (`Asia/Kolkata` / IST)
 
-| Local Job | IST Time | Execution | Action |
+| Stage | Timing / Trigger | Execution | Action |
 | :--- | :--- | :--- | :--- |
-| `Job 1 (Generate)` | **05:30 AM IST** | Local Scheduler Daemon / Entrypoint | Discover topics, write scripts, synthesize Kokoro voice, render 2 videos, run QC, save to `output/`. |
-| `Job 2 (Publish 1)` | **10:00 AM IST** | Local Scheduler Daemon / Entrypoint | Publish Video 1 to YouTube Shorts directly via resumable MP4 upload, record video ID in local DB. |
-| `Job 3 (Publish 2)` | **06:00 PM IST** | Local Scheduler Daemon / Entrypoint | Publish Video 2 to YouTube Shorts directly via resumable MP4 upload, record video ID in local DB. |
+| `Daily Batch` | **First Windows Login / Rollover** | [`LocalScheduler`](curiosity_engine/runner/local_scheduler.py) (`--daemon`) | Reconcile state, generate missing slots only, synthesize Kokoro audio + Whisper alignment, render MP4s, run QC, and upload/schedule privately on YouTube. |
+| `Slot 1 Publish` | **12:30 PM IST** | YouTube Data API `status.publishAt` | Automatically transitions Slot 1 from `private` to `public` at 12:30 PM IST (or next eligible day if started after 12:15 PM IST). |
+| `Slot 2 Publish` | **08:30 PM IST** | YouTube Data API `status.publishAt` | Automatically transitions Slot 2 from `private` to `public` at 08:30 PM IST (or next eligible day if started after 08:15 PM IST). |
+
+Once YouTube confirms `status.publishAt`, YouTube handles publication independently—the local PC does not need to stay powered on at publication time.
 
 ---
 
 ### Project Structure
-```
-d:\yt/
+```text
+.
 ├── curiosity_engine/
-│   ├── config.py                  # Global settings, paths, and local runtime constraints
-│   ├── content/                   # Topic discovery, Gemini free tier client, scriptwriting, descriptions
-│   │   ├── gemini_client.py
-│   │   ├── topic_discovery.py
-│   │   ├── scriptwriter.py
-│   │   ├── description_generator.py
-│   │   └── curated_fallback.py
-│   ├── production/                # Faceless Shorts video pipeline
-│   │   ├── director.py
-│   │   ├── tts_engine.py          # Kokoro-82M ONNX synthesis
-│   │   ├── aligner.py             # Word-level timestamp alignment
-│   │   └── renderer.py            # Headless Chrome + FFmpeg image2pipe
-│   ├── quality/                   # Programmatic QC Gatekeeper
-│   │   └── qc_gatekeeper.py
-│   ├── distribution/              # YouTube Data API v3 direct upload & token manager
-│   │   ├── youtube_publisher.py
-│   │   ├── instagram_publisher.py
-│   │   ├── token_manager.py
-│   │   └── video_host.py
-│   ├── state/                     # Local JSON database client (data/firestore_local.json)
-│   │   └── db.py
-│   ├── runner/                    # Pipeline, local scheduler & CLI entrypoint
-│   │   ├── pipeline.py
-│   │   ├── local_scheduler.py
-│   │   └── entrypoint.py
-│   └── dashboard/                 # Lightweight localhost FastAPI management dashboard
-│       ├── app.py
-│       └── templates/index.html
-├── templates/                     # Inside Out, Paper Atlas, and Stick Story style kits
+│   ├── config.py                  # Global settings, paths, and safe local defaults
+│   ├── content/                   # Topic discovery, Gemini client, scriptwriter, descriptions, curated fallback
+│   ├── production/                # Director, Kokoro-82M ONNX TTS, Whisper word alignment, Chrome/FFmpeg renderer
+│   ├── quality/                   # Programmatic QC Gatekeeper (duration, geometry, codecs, LUFS, visual checks)
+│   ├── distribution/              # YouTube Data API v3 upload/schedule client & OAuth TokenManager
+│   ├── state/                     # Atomic local JSON store (data/firestore_local.json, excluded from Git)
+│   ├── runner/                    # Slot-independent pipeline, local scheduler daemon, automation state
+│   └── dashboard/                 # Localhost FastAPI management dashboard (127.0.0.1:8000)
+├── templates/                     # Reusable HTML/JS visual style kits (inside-out, paper-atlas, stick-story)
 ├── scripts/
-│   ├── run_scheduler.py           # Local scheduler CLI runner
+│   ├── auth_youtube.py            # Desktop Google OAuth 2.0 wizard & tokeninfo scope verifier
+│   ├── run_scheduler.py           # Safe CLI runner (--status, --dry-run, --validate, --once --confirm, --daemon)
+│   ├── manage_windows_task.py     # Single Windows Startup VBS registration & background daemon control
 │   ├── start_scheduler.bat        # Windows batch launcher
 │   ├── start_scheduler.ps1        # Windows PowerShell launcher
-│   ├── auth_youtube.py            # YouTube OAuth Desktop Flow
 │   └── upload_single_private_test.py
-├── tests/                         # Pytest test suite (100% local-first)
+├── docs-site/                     # Static GitHub Pages OAuth branding homepage & privacy policy
+├── tests/                         # Pytest unit and integration test suite
 ├── requirements.txt
 └── .env.example
 ```
 
 ---
 
-### Local Quickstart
+### Installation & Local Setup
 
-#### 1. Install Dependencies
+#### 1. System Prerequisites
+- **Python 3.10+** (verified on Python 3.14 Windows)
+- **Node.js 18+** (used by `templates/*/tools/capture.mjs` for headless frame capture)
+- **FFmpeg & FFprobe** on `PATH`
+- **Google Chrome or Microsoft Edge** (configured via `CHROME` in `.env`)
+- **Local Model Weights** (excluded from Git; place in `./models`):
+  - `./models/kokoro/kokoro-v1.0.onnx` and `./models/kokoro/voices-v1.0.bin`
+  - `./models/whisper-small/` (optional `faster-whisper` weights; falls back cleanly to inline timing if absent)
+
+#### 2. Install Python Dependencies
 ```bash
 pip install -r requirements.txt
+# Optional for running the test suite:
+pip install pytest httpx
 ```
 
-#### 2. Run Daily Video Generation (Job 1)
+#### 3. Configure Environment Variables (`.env`)
+Copy `.env.example` to `.env` and fill in your own credentials locally (**never commit `.env`**):
 ```bash
-python -m curiosity_engine.runner.entrypoint --mode=generate
+cp .env.example .env
 ```
+Key safety defaults in `curiosity_engine/config.py`:
+- `YOUTUBE_PUBLISHING_MODE=simulation` (set to `live` only when ready to upload to YouTube)
+- `YOUTUBE_PRIVACY_STATUS=private` (always kept `private` by default; scheduled videos auto-publish at `publishAt`)
+- `INSTAGRAM_PUBLISHING_MODE=disabled` (strict ₹0 default; zero Instagram network calls)
 
-#### 3. Run Publishing (Job 2 & Job 3)
+#### 4. Configure Google OAuth & YouTube Data API v3
+1. In Google Cloud Console, enable **YouTube Data API v3** and configure an **OAuth consent screen** (set to **External** and publish to **In production** to avoid 7-day Testing refresh-token expiration).
+2. Create an OAuth 2.0 Client ID of type **Desktop app** and set `YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET` in `.env`.
+3. Authorize locally and save `YOUTUBE_REFRESH_TOKEN`:
+   ```bash
+   python scripts/auth_youtube.py --scope-mode narrow   # youtube.upload + youtube.readonly
+   # Or include youtube.force-ssl for videos.update schedule cancellation/retries:
+   python scripts/auth_youtube.py --scope-mode full
+   ```
+4. Verify credentials, binaries, models, and OAuth scopes (read-only):
+   ```bash
+   python scripts/run_scheduler.py --validate
+   ```
+
+#### 5. Safe Scheduler Usage & Startup Automation
+Always run read-only diagnostics before live execution:
 ```bash
-python -m curiosity_engine.runner.entrypoint --mode=publish-1
-python -m curiosity_engine.runner.entrypoint --mode=publish-2
+python scripts/run_scheduler.py --status      # Read-only telemetry & Windows startup state
+python scripts/run_scheduler.py --dry-run     # Read-only evaluation (zero side effects)
+python scripts/run_scheduler.py --validate    # Dependency & OAuth check
+```
+Single-shot execution requires explicit confirmation (`--confirm`), and daily unattended automation is gated by `automation_state` (`enabled`) plus `YOUTUBE_PUBLISHING_MODE`:
+```bash
+python scripts/run_scheduler.py --once --confirm
+python scripts/run_scheduler.py --daemon --interval 15
+python scripts/manage_windows_task.py register   # Registers non-admin Windows Startup VBS launcher
 ```
 
-#### 4. Launch Management Dashboard
+#### 6. Launch Local Management Dashboard
 ```bash
 uvicorn curiosity_engine.dashboard.app:app --host 127.0.0.1 --port 8000
 ```
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to view today's videos, previews, quotas, and logs.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to inspect videos, edit descriptions, toggle automation pause/resume, check token health, and view read-only validation/dry-run diagnostics. The dashboard binds strictly to `127.0.0.1`, enforces a locally generated `X-Studio-Auth` header on mutating routes, and redacts tokens/secrets from API payloads.
 
-#### 5. Run Complete Acceptance Test Suite
+#### 7. Run Automated Tests
 ```bash
-python scripts/test_full_acceptance.py
+python -m pytest tests/ -v
 ```
+The unit/integration tests run fully locally with mocked external APIs and never upload real videos or touch production credentials.
 
 ---
 
-### Cloud Deployment (Google Cloud Platform)
-
-#### Prerequisites
-- Google Cloud SDK (`gcloud`) installed and authenticated.
-- A GCP project with Billing enabled (required to register Cloud Run, but operating costs remain $0 within free tier).
-
-#### One-Click Deployment
-```bash
-bash cloud/deploy.sh <YOUR_GCP_PROJECT_ID>
-```
-
-#### Credential Configuration in Secret Manager
-Store your API secrets securely in Google Secret Manager or Cloud Run Job environment variables:
-- `GEMINI_API_KEY`: From Google AI Studio (Free Tier).
-- `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`: From Google Cloud Console OAuth 2.0 Credentials with `youtube.upload` scope.
-- `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_ACCOUNT_ID`: From Meta for Developers (Graph API v21.0 with `instagram_content_publish` permission).
+### OAuth Branding Website (`docs-site/`)
+Static public pages for the Google OAuth consent screen (`GitHub Pages` branch `main`, folder `/docs-site`):
+- **Homepage:** `docs-site/index.html` ([https://aaryankumar70.github.io/StoryCircuit/](https://aaryankumar70.github.io/StoryCircuit/))
+- **Privacy Policy:** `docs-site/privacy.html` ([https://aaryankumar70.github.io/StoryCircuit/privacy.html](https://aaryankumar70.github.io/StoryCircuit/privacy.html))
 
 ---
 

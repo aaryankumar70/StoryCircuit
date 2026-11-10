@@ -1,0 +1,26 @@
+{
+  "title": "How One Bakery Burned Down London",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "lead": 0.4,
+  "outro": 1.1,
+  "gap": 0.3,
+  "music": "tension",
+  "sources": [
+    "London Museum, 'The Great Fire of London' (began 2 September 1666 in Thomas Farriner's bakery on Pudding Lane; burned for four days; about 13,200 houses, 87 parish churches and St Paul's Cathedral destroyed)",
+    "Royal Museums Greenwich, 'The Great Fire of London' (wooden houses, strong east wind, the Lord Mayor's dismissive response, houses blown up to create firebreaks)",
+    "Rebuilding Act 1667: new buildings in brick and stone"
+  ],
+  "lines": [
+    { "text": "In sixteen sixty-six, a tiny bakery fire burned down most of London.", "caps": "In *1666, | a tiny *bakery fire | burned down *London." },
+    { "text": "It started just after midnight, in Thomas Farriner's bakery on Pudding Lane.", "caps": "Just after *midnight, | in Farriner's *bakery | on Pudding *Lane." },
+    { "text": "London was packed with wooden houses, and a strong wind was blowing,", "caps": "Packed with *wooden houses, | a strong *wind" },
+    { "text": "so the flames jumped from roof to roof.", "caps": "Flames *jumped | roof to *roof." },
+    { "text": "The Lord Mayor was woken up, but he shrugged it off.", "caps": "The Lord *Mayor | shrugged it *off." },
+    { "text": "For four days, the city burned.", "caps": "For four *days, | the city *burned." },
+    { "text": "Thirteen thousand houses, eighty-seven churches, and St Paul's Cathedral were gone.", "caps": "*13,000 houses, | *87 churches, | and St Paul's | were *gone." },
+    { "text": "In the end, they blew up whole streets to stop it spreading.", "caps": "They *blew up | whole *streets | to *stop it." },
+    { "text": "And when London was rebuilt, it was built in brick and stone.", "caps": "London was *rebuilt | in *brick | and *stone." },
+    { "text": "All because of one small bakery.", "caps": "All *because of | one small *bakery.", "gap": 0.2 }
+  ]
+}

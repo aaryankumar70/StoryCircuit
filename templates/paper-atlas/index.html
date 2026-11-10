@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Paper Atlas</title>
+<style>
+@font-face { font-family: 'Inter'; font-weight: 900; src: url('fonts/Inter-Black.otf'); }
+@font-face { font-family: 'Inter'; font-weight: 800; src: url('fonts/Inter-Black.otf'); }
+@font-face { font-family: 'Caladea'; font-weight: 700; src: url('fonts/Caladea-Bold.ttf'); }
+html, body { margin: 0; background: #111; height: 100%; } body { display: flex; align-items: center; justify-content: center; }
+canvas { display: block; height: 100vh; width: auto; } body.capture canvas { height: auto; }
+#play { position: fixed; font: 900 28px Inter, sans-serif; padding: 18px 36px; border: 0; border-radius: 40px; background: #C8952F; cursor: pointer; }
+</style></head>
+<body><canvas id="cv" width="1080" height="1920"></canvas><button id="play" hidden>▶ PLAY</button>
+<script>if (location.search.includes('capture')) document.body.className = 'capture';</script>
+<script type="module" src="src/main.js"></script></body></html>

@@ -1,0 +1,26 @@
+{
+  "title": "What If You Swallow Gum?",
+  "voice": "am_michael",
+  "speed": 1.0,
+  "lead": 0.4,
+  "outro": 0.9,
+  "gap": 0.28,
+  "music": "bed",
+  "sources": [
+    "Mayo Clinic, 'Is it true that gum stays in your stomach for seven years if you swallow it?' (gum base is not digested; it passes through, usually within days)",
+    "Milov et al., Pediatrics 1998, 'Chewing gum bezoars of the gastrointestinal tract' (large amounts swallowed often, mostly by children, can cause blockages)"
+  ],
+  "lines": [
+    { "text": "What happens if you swallow your gum?", "caps": "WHAT *HAPPENS | IF YOU *SWALLOW | YOUR *GUM?" },
+    { "text": "Well, it slides down your throat and lands right in your stomach,", "caps": "WELL, IT *SLIDES | DOWN YOUR *THROAT | RIGHT IN YOUR *STOMACH" },
+    { "text": "where strong acid gets to work on it.", "caps": "WHERE STRONG *ACID | GETS TO *WORK" },
+    { "text": "The sugar and flavor dissolve pretty quickly, but the gum base is a different story.", "caps": "SUGAR *DISSOLVES | BUT THE *BASE | IS *DIFFERENT" },
+    { "text": "It's a rubbery polymer, and your body simply can't break it down.", "caps": "RUBBERY *POLYMER | YOUR BODY *CAN'T | BREAK IT *DOWN" },
+    { "text": "So does it stay there for seven years? Nope, that's a total myth.", "caps": "STAY 7 *YEARS? | *NOPE | TOTAL *MYTH" },
+    { "text": "Your gut just keeps pushing it along,", "caps": "YOUR *GUT | KEEPS IT *MOVING" },
+    { "text": "and within a few days, it's out of your system.", "caps": "A FEW *DAYS | IT'S *OUT" },
+    { "text": "But if you swallow a lot of gum all at once,", "caps": "BUT *IF... | SWALLOW A *LOT | ALL AT *ONCE" },
+    { "text": "it can clump together and actually block your gut.", "caps": "IT CAN *CLUMP | AND *BLOCK | YOUR *GUT" },
+    { "text": "So maybe, just spit it out.", "caps": "SO *MAYBE... | SPIT IT *OUT" }
+  ]
+}

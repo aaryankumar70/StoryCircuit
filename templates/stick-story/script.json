@@ -1,0 +1,27 @@
+{
+  "title": "What If The Power Went Out For 3 Days?",
+  "voice": "am_puck",
+  "speed": 1.0,
+  "lead": 0.35,
+  "outro": 1.0,
+  "gap": 0.26,
+  "music": "bed",
+  "sources": [
+    "American Red Cross, Power Outage Safety (fridge keeps food cold ~4 hours if unopened; a full freezer ~48 hours; use flashlights, not candles; disconnect electronics to avoid surge damage)",
+    "Ready.gov, Water (store at least one gallon of water per person per day)"
+  ],
+  "lines": [
+    { "text": "What would you do if the power went out for three whole days?", "caps": "What would *you | do if the *power | went *out?" },
+    { "text": "It's nine at night, and suddenly everything goes dark.", "caps": "Nine at *night | everything goes *dark." },
+    { "text": "Step one: don't touch the fridge.", "caps": "Step *one: | don't touch the *fridge." },
+    { "text": "If you keep it closed, your food stays cold for about four hours, and a full freezer lasts two days.", "caps": "Keep it *closed | food stays *cold | about four *hours | a full *freezer | lasts two *days." },
+    { "text": "Step two: grab a flashlight, not a candle.", "caps": "Step *two: | grab a *flashlight | not a *candle." },
+    { "text": "Candles and dark rooms are a real fire risk.", "caps": "*Candles? | real *fire risk." },
+    { "text": "Step three: fill some bottles with water,", "caps": "Step *three: | fill some *bottles | with *water," },
+    { "text": "about a gallon per person, every day.", "caps": "a *gallon | per *person, | every *day." },
+    { "text": "Step four: unplug your electronics,", "caps": "Step *four: | unplug your *electronics," },
+    { "text": "because when the power comes back, a surge can fry them.", "caps": "power comes *back | a *surge | can *fry them." },
+    { "text": "Day three: the lights flicker back on.", "caps": "Day *three: | the *lights | flicker back *on." },
+    { "text": "And because you were ready, you're totally fine.", "caps": "You were *ready, | so you're *fine." }
+  ]
+}

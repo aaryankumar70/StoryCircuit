@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — CurioLoop</title>
+  <meta name="description" content="CurioLoop Privacy Policy covering Google OAuth authentication, YouTube Data API usage, local credential storage, optional APIs, revocation, and Google API Limited Use compliance.">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav-bar">
+      <a class="brand-link" href="./">
+        <img class="brand-icon" src="assets/logo.png" alt="CurioLoop logo" width="38" height="38">
+        <span>
+          CurioLoop
+          <span class="brand-tagline">One Short. One New Curiosity.</span>
+        </span>
+      </a>
+      <nav aria-label="Main navigation">
+        <ul class="nav-links">
+          <li><a href="./">Overview</a></li>
+          <li><a href="./#support">Support</a></li>
+          <li><a href="privacy.html" class="active">Privacy Policy</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <div class="doc-header">
+        <span class="eyebrow">Legal &amp; Google OAuth Disclosure</span>
+        <h1>CurioLoop Privacy Policy</h1>
+        <p class="doc-meta">Effective Date: November 10, 2026 &bull; Application Type: Local-First Desktop Production &amp; Publishing Workflow</p>
+      </div>
+
+      <article class="policy-article">
+        <section class="policy-section">
+          <h2>1. Overview and Scope</h2>
+          <p>
+            CurioLoop is a local-first short-form educational video production and YouTube publishing application operated
+            on the creator's own Windows workstation. CurioLoop does not operate a remote SaaS backend, shared cloud
+            user database, third-party analytics tracker, or advertising network.
+          </p>
+          <p>
+            This static informational website (the homepage and this Privacy Policy) does not set tracking cookies,
+            collect form submissions, or run client-side behavioral scripts.
+          </p>
+        </section>
+
+        <section class="policy-section">
+          <h2>2. Google OAuth Authentication &amp; Scopes Requested</h2>
+          <p>
+            To upload and schedule videos on a creator's YouTube channel, CurioLoop uses Google OAuth 2.0 via the
+            Installed Desktop Application flow with offline access (<code>access_type=offline</code>). Depending on how
+            the operator authorizes the client, CurioLoop requests only YouTube-related scopes:
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>OAuth Scope</th>
+                  <th>Information Accessed</th>
+                  <th>Purpose in CurioLoop</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>https://www.googleapis.com/auth/youtube.upload</code></td>
+                  <td>Write access to upload MP4 videos and initial video metadata/status</td>
+                  <td>Direct resumable MP4 upload of Shorts, titles, descriptions, tags, categories, private staging, and initial <code>status.publishAt</code> scheduling on insert.</td>
+                </tr>
+                <tr>
+                  <td><code>https://www.googleapis.com/auth/youtube.readonly</code></td>
+                  <td>Channel uploads playlist ID, recent uploaded video titles/IDs, upload/privacy/rejection status, and scheduled <code>publishAt</code> timestamps</td>
+                  <td>Confirm YouTube scheduled publication times via API readback, verify upload health, and prevent duplicate video uploads.</td>
+                </tr>
+                <tr>
+                  <td><code>https://www.googleapis.com/auth/youtube.force-ssl</code> <em>(optional, when authorized)</em></td>
+                  <td>Video status update capability on videos owned by the authorized channel</td>
+                  <td>Cancel or update an existing video's scheduled <code>status.publishAt</code> setting while keeping the video private.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p style="margin-top: 14px;">
+            During authorization and health checks, CurioLoop contacts Google's official OAuth endpoints
+            (<code>https://oauth2.googleapis.com/token</code> to exchange or refresh short-lived access tokens and
+            <code>https://oauth2.googleapis.com/tokeninfo</code> to verify which scopes were granted). CurioLoop does not
+            request access to Gmail, Google Drive, Google Contacts, Calendar, or unrelated Google account data.
+          </p>
+        </section>
+
+        <section class="policy-section">
+          <h2>3. Video Uploading, Scheduling &amp; Channel Data Usage</h2>
+          <p>
+            When live YouTube publishing is enabled, CurioLoop transmits rendered MP4 files and user/generated video
+            metadata directly from the operator's local PC to YouTube Data API v3 endpoints (<code>videos.insert</code>,
+            <code>channels.list</code>, <code>playlistItems.list</code>, <code>videos.list</code>, and when updating or
+            cancelling schedules, <code>videos.update</code>).
+          </p>
+          <ul>
+            <li><strong>Duplicate Prevention:</strong> Recent items in the channel's uploads playlist are inspected by video title and matched against local database records before initiating an upload so network retries do not create duplicate uploads.</li>
+            <li><strong>API Confirmation:</strong> CurioLoop queries <code>videos.list</code> to confirm YouTube actually recorded the expected <code>privacyStatus</code>, <code>uploadStatus</code>, and <code>publishAt</code> timestamp before marking a slot scheduled.</li>
+            <li><strong>Strict Privacy Default:</strong> Configuration defaults to <code>private</code> status and scheduled videos remain private until their confirmed publication time on YouTube.</li>
+          </ul>
+        </section>
+
+        <section class="policy-section">
+          <h2>4. Local Credential &amp; Application Data Storage</h2>
+          <p>
+            CurioLoop stores credentials and operational records strictly locally on the operator's Windows machine—not
+            on external CurioLoop servers:
+          </p>
+          <ul>
+            <li><strong>OAuth Credentials (<code>.env</code>):</strong> The Desktop OAuth Client ID, Client Secret, and Refresh Token are saved locally in an untracked <code>.env</code> file protected by operating system file permissions and excluded from Git via <code>.gitignore</code>.</li>
+            <li><strong>Token Health State (<code>data/token_state.json</code>):</strong> Records non-secret health status, check timestamps, granted scope URIs, and reauthorization warning messages.</li>
+            <li><strong>Production &amp; Schedule Records (<code>data/*.json</code>, <code>data/scheduler.log</code>):</strong> Stores topic titles, scripts, verified research source URLs, rendered file paths, YouTube video IDs, QC metrics, and scheduler state on disk.</li>
+            <li><strong>Local Dashboard Isolation:</strong> The optional management dashboard binds exclusively to <code>127.0.0.1</code> (localhost), enforces a locally generated <code>X-Studio-Auth</code> secret on mutating routes, and redacts API keys, access tokens, refresh tokens, and client secrets from HTTP status payloads.</li>
+          </ul>
+          <p>
+            <strong>Transparency Note:</strong> Local <code>.env</code> and JSON state files are stored as plain local files
+            under the operator's Windows user directory rather than inside a hardware-backed OS credential vault; file
+            confidentiality relies on workstation access controls and any host disk encryption enabled by the operator.
+          </p>
+        </section>
+
+        <section class="policy-section">
+          <h2>5. Optional Third-Party Integrations &amp; External Transmissions</h2>
+          <p>
+            CurioLoop performs speech synthesis (Kokoro ONNX), word alignment (Whisper), frame rendering (local headless
+            browser + FFmpeg), and quality checks locally without sending video files to external SaaS services. In
+            addition to Google OAuth and YouTube Data API v3, the application contains two optional integrations:
+          </p>
+          <ul>
+            <li>
+              <strong>Google Gemini API (Optional):</strong> Only active if the operator supplies a <code>GEMINI_API_KEY</code>.
+              When configured, CurioLoop sends text prompts (topic discovery, educational script generation, and
+              description drafting) to <code>https://generativelanguage.googleapis.com</code>. YouTube OAuth tokens and
+              channel credentials are never included in Gemini prompts. When unconfigured, CurioLoop falls back to a local
+              curated catalog with zero Gemini requests.
+            </li>
+            <li>
+              <strong>Meta Instagram Graph API (Disabled by Default):</strong> CurioLoop includes optional Instagram Reels
+              support that defaults strictly to <code>INSTAGRAM_PUBLISHING_MODE=disabled</code>, making zero network
+              requests. If explicitly configured and enabled by the operator, credentials and video upload calls are sent
+              to <code>https://graph.instagram.com</code>.
+            </li>
+          </ul>
+          <p>
+            CurioLoop does not sell personal information, does not use Google user data for advertising or marketing, and
+            does not share Google OAuth tokens or YouTube channel data with data brokers or third-party platforms.
+          </p>
+        </section>
+
+        <section class="policy-section">
+          <h2>6. Google API Services User Data Policy &amp; Limited Use</h2>
+          <p>
+            CurioLoop's use and transfer to any other app of information received from Google APIs will adhere to the
+            <a href="https://developers.google.com/terms/api-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>,
+            including the Limited Use requirements. Access is restricted solely to user-facing video upload, scheduling,
+            and verification features authorized by the account owner.
+          </p>
+        </section>
+
+        <section class="policy-section">
+          <h2>7. Data Retention &amp; Deletion</h2>
+          <p>
+            OAuth credentials, generated scripts, rendered MP4 videos, and scheduling logs remain on the operator's local
+            workstation until deleted or replaced by the operator. Because CurioLoop maintains no remote server database,
+            deleting the local <code>.env</code>, <code>data/</code>, and <code>output/</code> files permanently deletes
+            all locally retained application data and credentials. Videos already uploaded to YouTube remain subject to
+            YouTube's Terms of Service and can be deleted or changed to private at any time in YouTube Studio.
+          </p>
+        </section>
+
+        <section class="policy-section">
+          <h2>8. Revoking Google Account Access</h2>
+          <p>You can revoke CurioLoop's access to your Google/YouTube account at any time:</p>
+          <ul>
+            <li>Visit <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">https://myaccount.google.com/permissions</a> while signed into your Google account.</li>
+            <li>Locate <strong>CurioLoop</strong> under Third-party apps &amp; services and click <strong>Remove access</strong>.</li>
+            <li>On the local machine, remove or clear <code>YOUTUBE_REFRESH_TOKEN</code> in <code>.env</code> (and optionally delete <code>data/token_state.json</code>). Once revoked, Google rejects token refreshes (<code>invalid_grant</code>) and CurioLoop automatically halts live uploads.</li>
+          </ul>
+        </section>
+
+        <section class="policy-section">
+          <h2>9. Support &amp; Contact Information</h2>
+          <p>
+            If you have questions about this Privacy Policy, need assistance revoking access or deleting locally managed
+            data, or are reviewing this application for Google OAuth verification, contact:
+          </p>
+          <ul>
+            <li><strong>Developer / Support Email:</strong> <a href="mailto:ar54gb@gmail.com">ar54gb@gmail.com</a></li>
+            <li><strong>Application Homepage:</strong> <a href="./">CurioLoop Overview</a></li>
+          </ul>
+        </section>
+      </article>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <span>&copy; 2026 CurioLoop Studio. OAuth Application Privacy Policy.</span>
+      <div class="footer-links">
+        <a href="./">Home</a>
+        <a href="privacy.html">Privacy Policy</a>
+        <a href="mailto:ar54gb@gmail.com">Support</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Curiosity Engine • Autonomous Short-Form Video Studio</title>
+  <!-- {{AUTH_SECRET_INJECTION}} -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090a0f;
+      --card-bg: #12141c;
+      --card-border: #1f2333;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --accent: #06b6d4;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 32px 24px;
+    }
+
+    .container { max-width: 1400px; margin: 0 auto; }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .logo-group h1 {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #fff 30%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo-group p {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .controls-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-outline { background: transparent; border: 1px solid var(--card-border); color: var(--text); }
+    .btn-outline:hover { background: #1f2333; }
+    .btn-danger { background: #ef444422; border: 1px solid #ef444455; color: #f87171; }
+    .btn-danger:hover { background: #ef444444; }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 2fr 1.2fr;
+      gap: 28px;
+    }
+    @media (max-width: 1024px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .videos-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 640px) {
+      .videos-row { grid-template-columns: 1fr; }
+    }
+
+    .video-card {
+      background: #0f1118;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .video-preview-wrapper {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 9/16;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .video-preview-wrapper video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .video-info {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-slot1 { background: #6366f125; color: #818cf8; border: 1px solid #6366f140; }
+    .badge-slot2 { background: #06b6d425; color: #22d3ee; border: 1px solid #06b6d440; }
+    .badge-qc-pass { background: #10b98125; color: #34d399; border: 1px solid #10b98140; }
+    .badge-qc-fail { background: #ef444425; color: #f87171; border: 1px solid #ef444440; }
+
+    .video-links {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .link-pill {
+      flex: 1;
+      text-align: center;
+      padding: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 8px;
+      text-decoration: none;
+    }
+    .link-yt { background: #ff000020; color: #ff4e4e; border: 1px solid #ff000040; }
+    .link-ig { background: #e1306c20; color: #f472b6; border: 1px solid #e1306c40; }
+
+    .quota-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .quota-item {
+      background: #181b26;
+      border: 1px solid var(--card-border);
+      padding: 14px;
+      border-radius: 10px;
+    }
+    .quota-title { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+    .quota-val { font-size: 16px; font-weight: 700; margin-top: 4px; color: #fff; font-family: 'JetBrains Mono', monospace; }
+    .quota-bar {
+      height: 4px;
+      background: #272d42;
+      border-radius: 2px;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+    .quota-fill { height: 100%; background: var(--success); width: 5%; }
+
+    .token-card {
+      background: #161a29;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .token-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .token-alert {
+      margin-top: 8px;
+      font-size: 12px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: #ef444420;
+      border: 1px solid #ef444440;
+      color: #fca5a5;
+    }
+
+    .schedule-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid #1a1e2d;
+    }
+    .schedule-item:last-child { border-bottom: none; }
+    .schedule-time { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; color: var(--accent); }
+    .schedule-desc { font-size: 13px; color: var(--text-muted); }
+
+    .log-box {
+      background: #0b0d14;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      max-height: 220px;
+      overflow-y: auto;
+      color: #94a3b8;
+    }
+    .log-line { margin-bottom: 6px; }
+    .log-err { color: #f87171; }
+    .log-info { color: #38bdf8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo-group">
+        <h1>Curiosity Engine</h1>
+        <p>Autonomous YouTube Shorts Studio • Strict ₹0 Budget Local Mode (IST)</p>
+      </div>
+      <div class="controls-group">
+        <span id="ytBadge" class="badge" style="background:#ff000020; color:#ff6b6b; border:1px solid #ff000040;">YT: SIMULATION (PRIVATE)</span>
+        <span id="igBadge" class="badge" style="background:#e1306c20; color:#f472b6; border:1px solid #e1306c40;">IG: DISABLED</span>
+        <span id="schedBadge" class="badge" style="background:#6366f120; color:#a5b4fc; border:1px solid #6366f140;">SCHEDULER: STOPPED</span>
+        <button id="toggleBtn" class="btn btn-outline" onclick="toggleAutomation()">Automation: Active</button>
+        <button class="btn btn-outline" onclick="runValidateConfig()">Validate Config</button>
+        <button class="btn btn-outline" onclick="runDryRunPreview()">Dry-Run Preview</button>
+        <button class="btn btn-primary" onclick="triggerAction('generate')">Generate Missing Slots</button>
+        <button class="btn btn-danger" onclick="triggerEmergency()">Emergency Stop</button>
+      </div>
+    </header>
+
+    <div class="dashboard-grid">
+      <!-- Left Column: Video Showcase & History -->
+      <div>
+        <div class="card">
+          <div class="card-title">
+            <span>Today's Video Schedule (Two Daily Videos)</span>
+            <span id="dateBadge" class="badge badge-slot1">Loading date...</span>
+          </div>
+          <div class="videos-row" id="videosContainer">
+            <div style="padding: 40px; text-align: center; color: var(--text-muted); grid-column: span 2;">
+              Loading video production status...
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span>Recent Video Archive & Production Records</span>
+          </div>
+          <div id="historyTable" style="font-size: 13px;">
+            Loading archive...
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Quotas, Token Health, & Schedule -->
+      <div>
+        <!-- Quotas -->
+        <div class="card">
+          <div class="card-title">Dedicated Quotas & Free-Tier Capacity</div>
+          <div class="quota-grid">
+            <div class="quota-item">
+              <div class="quota-title">YouTube Upload Bucket</div>
+              <div class="quota-val" id="ytQuota">0 / 100 uploads</div>
+              <div class="quota-bar"><div id="ytBar" class="quota-fill" style="width: 2%;"></div></div>
+            </div>
+            <div class="quota-item">
+              <div class="quota-title">Instagram Graph (v22.0)</div>
+              <div class="quota-val" id="igQuota">0 / 200 /hr</div>
+              <div class="quota-bar"><div id="igBar" class="quota-fill" style="width: 1%;"></div></div>
+            </div>
+            <div class="quota-item">
+              <div class="quota-title">Gemini API (Free Tier)</div>
+              <div class="quota-val" id="geminiQuota">0 / 1,500</div>
+              <div class="quota-bar"><div id="geminiBar" class="quota-fill" style="width: 1%;"></div></div>
+            </div>
+            <div class="quota-item">
+              <div class="quota-title">Hosting Egress (Strict ₹0)</div>
+              <div class="quota-val" id="hostingVal">₹0.00 / Free</div>
+              <div class="quota-bar"><div class="quota-fill" style="width: 0%; background: var(--accent);"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Token Health & Reauthorization Alerts -->
+        <div class="card">
+          <div class="card-title">OAuth & Token Health Management</div>
+          <div id="tokenHealthBox">
+            <div class="token-card">
+              <div class="token-header">
+                <span>YouTube OAuth 2.0</span>
+                <span id="ytTokenBadge" class="badge" style="background:#222; color:#888;">CHECKING</span>
+              </div>
+              <div id="ytTokenScopes" style="margin-top:6px; font-size:11px; color:var(--text-muted); font-family:'JetBrains Mono', monospace;"></div>
+              <div id="ytTokenAlert" style="display:none;" class="token-alert"></div>
+            </div>
+            <div class="token-card">
+              <div class="token-header">
+                <span>Instagram Long-Lived Token</span>
+                <span id="igTokenBadge" class="badge" style="background:#222; color:#888;">CHECKING</span>
+              </div>
+              <div id="igTokenAlert" style="display:none;" class="token-alert"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Autonomous Scheduler Telemetry & Schedule -->
+        <div class="card">
+          <div class="card-title">
+            <span>Autonomous Scheduler (Asia/Kolkata)</span>
+            <span id="schedDaemonBadge" class="badge" style="background:#222; color:#888;">STOPPED</span>
+          </div>
+          
+          <div style="background:#0b0d14; border:1px solid var(--card-border); border-radius:10px; padding:12px; margin-bottom:14px; font-size:12px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+              <span style="color:var(--text-muted);">Windows Startup:</span>
+              <span id="winTaskStatus" style="font-family:'JetBrains Mono', monospace; font-weight:700; color:var(--success);">CHECKING...</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+              <span style="color:var(--text-muted);">Today's Production:</span>
+              <span id="todayOverallStatus" style="font-family:'JetBrains Mono', monospace; font-weight:700; color:#cbd5e1;">PENDING</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+              <span style="color:var(--text-muted);">Next Publication:</span>
+              <span id="schedNextExec" style="font-family:'JetBrains Mono', monospace; font-weight:700; color:var(--accent);">Computing...</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+              <span style="color:var(--text-muted);">Last Production:</span>
+              <span id="schedLastExec" style="font-family:'JetBrains Mono', monospace; color:#cbd5e1;">None recorded</span>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+              <span style="color:var(--text-muted);">Last Upload:</span>
+              <span id="schedLastUpload" style="font-family:'JetBrains Mono', monospace; color:#cbd5e1;">None recorded</span>
+            </div>
+          </div>
+
+          <div class="schedule-item">
+            <div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span class="schedule-time">First Login IST</span>
+                <span id="schedSlotGenBadge" class="badge" style="background:#202538; color:#cbd5e1; font-size:9px;">PENDING</span>
+              </div>
+              <div class="schedule-desc">Generate Missing Slots, QC &amp; Private Upload</div>
+            </div>
+            <button class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="triggerAction('generate')">Run</button>
+          </div>
+          <div class="schedule-item">
+            <div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span class="schedule-time">12:30 IST</span>
+                <span id="schedSlotP1Badge" class="badge" style="background:#202538; color:#cbd5e1; font-size:9px;">PENDING</span>
+              </div>
+              <div class="schedule-desc">Slot 1: Scheduled YouTube Publication</div>
+            </div>
+            <button class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="retrySlot(1)">Retry Slot 1</button>
+          </div>
+          <div class="schedule-item">
+            <div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span class="schedule-time">20:30 IST</span>
+                <span id="schedSlotP2Badge" class="badge" style="background:#202538; color:#cbd5e1; font-size:9px;">PENDING</span>
+              </div>
+              <div class="schedule-desc">Slot 2: Scheduled YouTube Publication</div>
+            </div>
+            <button class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="retrySlot(2)">Retry Slot 2</button>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:12px;">
+            <button class="btn btn-outline" style="flex:1; font-size:11px;" onclick="startScheduler()">▶ Start Daemon</button>
+            <button class="btn btn-outline" style="flex:1; font-size:11px; border-color:#ef444460; color:#f87171;" onclick="stopScheduler()">⏹ Stop Daemon</button>
+          </div>
+        </div>
+
+        <!-- Read-only Diagnostics Panel (Validate / Dry-Run Output) -->
+        <div class="card" id="diagCard" style="display:none;">
+          <div class="card-title">
+            <span id="diagTitle">Read-Only Diagnostics</span>
+            <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;" onclick="document.getElementById('diagCard').style.display='none'">✕</button>
+          </div>
+          <pre id="diagOutput" class="log-box" style="max-height:280px; white-space:pre-wrap; word-break:break-word;"></pre>
+        </div>
+
+        <!-- Logs -->
+        <div class="card">
+          <div class="card-title">System & Execution Logs</div>
+          <div class="log-box" id="logBox">
+            <div class="log-line log-info">[SYSTEM] Initializing Curiosity Engine dashboard...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Description Editor Modal -->
+  <div id="descModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:999; align-items:center; justify-content:center; padding:20px;">
+    <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; max-width:680px; width:100%; padding:24px; max-height:90vh; overflow-y:auto; display:flex; flex-direction:column; gap:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 id="descModalTitle" style="font-size:16px; font-weight:700;">Edit YouTube Description</h3>
+        <button onclick="closeDescriptionEditor()" class="btn btn-outline" style="padding:4px 8px; font-size:12px;">✕</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted);">
+        Tailor the hook, context, or engagement question before publishing. All changes are stored in the publishing record. Max 5,000 characters.
+      </p>
+      <textarea id="descModalTextarea" style="width:100%; height:260px; background:#0b0d14; border:1px solid var(--card-border); border-radius:8px; color:var(--text); padding:12px; font-family:'JetBrains Mono', monospace; font-size:12px; line-height:1.5; resize:vertical;"></textarea>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span id="descCharCount" style="font-size:12px; color:var(--text-muted); font-family:'JetBrains Mono', monospace;">0 / 5,000 chars</span>
+        <div style="display:flex; gap:10px;">
+          <button onclick="closeDescriptionEditor()" class="btn btn-outline">Cancel</button>
+          <button id="saveDescBtn" onclick="saveDescription()" class="btn btn-primary">Save Description</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Injected auth secret fallback
+    const AUTH_HEADER = (typeof STUDIO_AUTH_KEY !== 'undefined') ? STUDIO_AUTH_KEY : '';
+    let currentEditingVideoId = null;
+
+    async function openDescriptionEditor(videoId) {
+      currentEditingVideoId = videoId;
+      const modal = document.getElementById('descModal');
+      const textarea = document.getElementById('descModalTextarea');
+      const titleEl = document.getElementById('descModalTitle');
+      const countEl = document.getElementById('descCharCount');
+
+      titleEl.innerText = `Edit YouTube Description • ${videoId}`;
+      textarea.value = 'Loading description...';
+      modal.style.display = 'flex';
+
+      try {
+        const res = await fetch(`/api/video/${videoId}/description`);
+        const data = await res.json();
+        textarea.value = data.description || '';
+        countEl.innerText = `${textarea.value.length} / 5,000 chars`;
+      } catch (e) {
+        textarea.value = `Error loading description: ${e}`;
+      }
+    }
+
+    function closeDescriptionEditor() {
+      const modal = document.getElementById('descModal');
+      modal.style.display = 'none';
+      currentEditingVideoId = null;
+    }
+
+    async function saveDescription() {
+      if (!currentEditingVideoId) return;
+      const textarea = document.getElementById('descModalTextarea');
+      const saveBtn = document.getElementById('saveDescBtn');
+      const newText = textarea.value;
+
+      saveBtn.innerText = 'Saving...';
+      try {
+        const res = await fetch(`/api/video/${currentEditingVideoId}/description`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Studio-Auth': AUTH_HEADER
+          },
+          body: JSON.stringify({ description: newText })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Error saving description: ${err.detail || 'Request failed'}`);
+        } else {
+          alert('Description successfully saved to publishing record!');
+          closeDescriptionEditor();
+          loadData();
+        }
+      } catch (e) {
+        alert(`Failed to save: ${e}`);
+      } finally {
+        saveBtn.innerText = 'Save Description';
+      }
+    }
+
+    document.getElementById('descModalTextarea').addEventListener('input', function() {
+      document.getElementById('descCharCount').innerText = `${this.value.length} / 5,000 chars`;
+    });
+
+    function renderStatusBadge(status) {
+      if (status === 'SCHEDULED') {
+        return `<span class="badge" style="background:#8b5cf625; color:#a78bfa; border:1px solid #8b5cf640;">SCHEDULED</span>`;
+      } else if (status === 'FAILED') {
+        return `<span class="badge" style="background:#ef444425; color:#f87171; border:1px solid #ef444440;">FAILED</span>`;
+      } else if (status === 'UPLOADED_PRIVATE') {
+        return `<span class="badge" style="background:#10b98125; color:#34d399; border:1px solid #10b98140;">UPLOADED (PRIVATE)</span>`;
+      } else if (status === 'PUBLISHED_PUBLIC') {
+        return `<span class="badge" style="background:#06b6d425; color:#22d3ee; border:1px solid #06b6d440;">PUBLISHED (PUBLIC)</span>`;
+      } else if (status === 'SIMULATED') {
+        return `<span class="badge" style="background:#6366f125; color:#818cf8; border:1px solid #6366f140;">SIMULATED</span>`;
+      } else if (status === 'GENERATED') {
+        return `<span class="badge" style="background:#f59e0b25; color:#fbbf24; border:1px solid #f59e0b40;">GENERATED</span>`;
+      } else {
+        return `<span class="badge" style="background:#202538; color:#cbd5e1;">${status || 'PENDING'}</span>`;
+      }
+    }
+
+    async function loadData() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+
+        document.getElementById('dateBadge').innerText = data.today_date;
+        
+        // Platform Mode Badges
+        const ytMode = (data.youtube_publishing_mode || data.publishing_mode || 'simulation').toUpperCase();
+        const ytPriv = (data.youtube_privacy_status || 'private').toUpperCase();
+        const ytEl = document.getElementById('ytBadge');
+        ytEl.innerText = `YT: ${ytMode} (${ytPriv})`;
+        ytEl.style.borderColor = ytMode === 'LIVE' ? 'var(--success)' : '#ff000040';
+
+        const igMode = (data.instagram_publishing_mode || 'disabled').toUpperCase();
+        const igEl = document.getElementById('igBadge');
+        igEl.innerText = `IG: ${igMode}`;
+        igEl.style.borderColor = igMode === 'LIVE' ? 'var(--success)' : '#e1306c40';
+
+        document.getElementById('toggleBtn').innerText = data.automation_enabled ? 'Automation: ACTIVE' : 'Automation: PAUSED';
+        document.getElementById('toggleBtn').style.borderColor = data.automation_enabled ? 'var(--success)' : 'var(--danger)';
+
+        // Scheduler Telemetry
+        const sched = data.scheduler || {};
+        const schedBadge = document.getElementById('schedBadge');
+        const schedDaemonBadge = document.getElementById('schedDaemonBadge');
+        if (sched.is_running) {
+          schedBadge.innerText = `SCHEDULER: RUNNING (PID ${sched.pid})`;
+          schedBadge.style.color = '#34d399';
+          schedBadge.style.background = '#10b98120';
+          schedDaemonBadge.innerText = `RUNNING (PID ${sched.pid || 'ACTIVE'})`;
+          schedDaemonBadge.style.color = '#34d399';
+          schedDaemonBadge.style.background = '#10b98120';
+        } else {
+          schedBadge.innerText = 'SCHEDULER: STOPPED';
+          schedBadge.style.color = '#f87171';
+          schedBadge.style.background = '#ef444420';
+          schedDaemonBadge.innerText = 'STOPPED';
+          schedDaemonBadge.style.color = '#f87171';
+          schedDaemonBadge.style.background = '#ef444420';
+        }
+
+        if (sched.next_execution) {
+          document.getElementById('schedNextExec').innerText = `${sched.next_execution.scheduled_ist.slice(0,16).replace('T',' ')} IST (${sched.next_execution.human_eta})`;
+        }
+        if (sched.last_successful_production) {
+          const lp = sched.last_successful_production;
+          document.getElementById('schedLastExec').innerText = `${lp.video_id} (${(lp.timestamp || '').slice(0,16).replace('T',' ')})`;
+        } else {
+          document.getElementById('schedLastExec').innerText = 'None recorded';
+        }
+        if (sched.last_successful_upload) {
+          const lu = sched.last_successful_upload;
+          document.getElementById('schedLastUpload').innerText = `${lu.youtube_id} (${lu.simulated ? 'SIMULATED' : 'LIVE'})`;
+        } else {
+          document.getElementById('schedLastUpload').innerText = 'None recorded';
+        }
+
+        if (sched.today_automation) {
+          const ta = sched.today_automation;
+          const overallEl = document.getElementById('todayOverallStatus');
+          overallEl.innerText = ta.overall_status || 'PENDING';
+          overallEl.style.color = ta.overall_status === 'COMPLETED' ? '#34d399' : (ta.overall_status === 'FAILED' ? '#f87171' : '#fbbf24');
+
+          const setBadge = (elId, txt) => {
+            const b = document.getElementById(elId);
+            if (!b) return;
+            b.innerText = txt || 'PENDING';
+            b.style.background = txt === 'COMPLETED' || txt === 'SCHEDULED' ? '#10b98125' : (txt === 'FAILED' ? '#ef444425' : '#202538');
+            b.style.color = txt === 'COMPLETED' || txt === 'SCHEDULED' ? '#34d399' : (txt === 'FAILED' ? '#f87171' : '#cbd5e1');
+          };
+          setBadge('schedSlotGenBadge', ta.generation?.status);
+          const deriveSlotBadge = (s) => {
+            if (!s) return 'PENDING';
+            if (s.scheduled_status === 'SCHEDULED') return 'SCHEDULED';
+            if (s.scheduled_status === 'FAILED' || s.upload_status === 'FAILED' || s.generation_status === 'FAILED') return 'FAILED';
+            if (s.upload_status === 'UPLOADED_PRIVATE') return 'UPLOADED';
+            return s.generation_status || 'PENDING';
+          };
+          setBadge('schedSlotP1Badge', deriveSlotBadge(ta.slot1));
+          setBadge('schedSlotP2Badge', deriveSlotBadge(ta.slot2));
+        }
+
+        if (sched.windows_task) {
+          const wt = sched.windows_task;
+          const wtEl = document.getElementById('winTaskStatus');
+          if (wt.startup_vbs_registered) {
+            wtEl.innerText = 'STARTUP VBS ACTIVE (NON-ADMIN)';
+            wtEl.style.color = '#34d399';
+          } else if (wt.schtasks_status === 'Ready' || wt.schtasks_status === 'Running') {
+            wtEl.innerText = `TASK SCHEDULER (${wt.schtasks_status})`;
+            wtEl.style.color = '#34d399';
+          } else {
+            wtEl.innerText = 'NOT REGISTERED';
+            wtEl.style.color = '#f87171';
+          }
+        }
+
+        // Quotas
+        const ytUsed = data.quotas.youtube.daily_uploads_used;
+        const ytLimit = data.quotas.youtube.daily_limit;
+        document.getElementById('ytQuota').innerText = `${ytUsed} / ${ytLimit} uploads`;
+        document.getElementById('ytBar').style.width = `${Math.min(100, Math.max(2, (ytUsed / ytLimit) * 100))}%`;
+
+        const igUsed = data.quotas.instagram.hourly_calls_used;
+        document.getElementById('igQuota').innerText = `${igUsed} / 200 /hr`;
+
+        const geminiUsed = data.quotas.gemini.daily_requests_used;
+        document.getElementById('geminiQuota').innerText = `${geminiUsed} / 1,500`;
+
+        // Token Health
+        if (data.token_health) {
+          const ytHealth = data.token_health.youtube || {};
+          const ytBadge = document.getElementById('ytTokenBadge');
+          const ytAlert = document.getElementById('ytTokenAlert');
+          const ytScopesEl = document.getElementById('ytTokenScopes');
+          const shortScopes = (ytHealth.scopes || []).map(s => s.split('/').pop()).join(', ');
+          if (ytScopesEl) {
+            ytScopesEl.innerText = shortScopes ? `Granted scopes: ${shortScopes}` : '';
+          }
+          if (ytHealth.healthy) {
+            ytBadge.innerText = 'HEALTHY';
+            ytBadge.style.background = '#10b98125';
+            ytBadge.style.color = '#34d399';
+            if (ytHealth.scope_warning) {
+              ytAlert.innerText = ytHealth.scope_warning;
+              ytAlert.style.display = 'block';
+              ytAlert.style.background = '#f59e0b18';
+              ytAlert.style.borderColor = '#f59e0b44';
+              ytAlert.style.color = '#fbbf24';
+            } else {
+              ytAlert.style.display = 'none';
+            }
+          } else if (ytHealth.status === 'UNCONFIGURED') {
+            ytBadge.innerText = 'SIMULATION';
+            ytBadge.style.background = '#6366f125';
+            ytBadge.style.color = '#818cf8';
+            ytAlert.style.display = 'none';
+          } else {
+            ytBadge.innerText = ytHealth.status;
+            ytBadge.style.background = '#ef444425';
+            ytBadge.style.color = '#f87171';
+            ytAlert.innerText = ytHealth.alert || 'Reauthorization required.';
+            ytAlert.style.display = 'block';
+          }
+
+          const igHealth = data.token_health.instagram || {};
+          const igBadge = document.getElementById('igTokenBadge');
+          const igAlert = document.getElementById('igTokenAlert');
+          if (igHealth.healthy) {
+            igBadge.innerText = `${igHealth.days_remaining || 60}d VALID`;
+            igBadge.style.background = '#10b98125';
+            igBadge.style.color = '#34d399';
+            igAlert.style.display = 'none';
+          } else if (igHealth.status === 'UNCONFIGURED') {
+            igBadge.innerText = 'SIMULATION';
+            igBadge.style.background = '#6366f125';
+            igBadge.style.color = '#818cf8';
+            igAlert.style.display = 'none';
+          } else {
+            igBadge.innerText = igHealth.status;
+            igBadge.style.background = '#ef444425';
+            igBadge.style.color = '#f87171';
+            igAlert.innerText = igHealth.alert || 'Reauthorization required.';
+            igAlert.style.display = 'block';
+          }
+        }
+
+        // Render Today's Videos
+        const container = document.getElementById('videosContainer');
+        if (data.todays_videos && data.todays_videos.length > 0) {
+          container.innerHTML = data.todays_videos.map(v => {
+            const isRealYt = Boolean(v.youtube_upload_id && !String(v.youtube_upload_id).startsWith('yt_sim_') && !v.youtube_simulated);
+            const schedDisplay = v.scheduled_publish_at_ist
+              ? `${v.scheduled_publish_at_ist.slice(0, 16).replace('T', ' ')} IST (${v.scheduled_publish_at || ''})`
+              : (v.scheduled_publish_at || '');
+            const cardErr = v.youtube_error || v.error;
+            return `
+            <div class="video-card">
+              <div class="video-preview-wrapper">
+                <video src="/api/video/${v.video_id}/stream" controls playsinline preload="metadata"></video>
+              </div>
+              <div class="video-info">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                  <span class="badge ${v.slot_index === 1 ? 'badge-slot1' : 'badge-slot2'}">Slot ${v.slot_index}: ${v.slot_index === 1 ? '12:30 PM IST' : '8:30 PM IST'}</span>
+                  <span class="badge ${v.qc_passed ? 'badge-qc-pass' : 'badge-qc-fail'}">${v.qc_passed ? 'QC PASSED' : 'QC PENDING'}</span>
+                  ${renderStatusBadge(v.ui_status)}
+                </div>
+                <h3 style="font-size: 15px; font-weight: 700; margin-top: 4px;">${v.script?.title || v.topic}</h3>
+                <p style="font-size: 12px; color: var(--text-muted);">${v.category} • ${v.production_status}${isRealYt ? ` • YT ID: <code style="color:#cbd5e1;">${v.youtube_upload_id}</code>` : (v.youtube_upload_id ? ` • Sim ID: <code style="color:#94a3b8;">${v.youtube_upload_id}</code>` : '')}</p>
+                ${(isRealYt && v.schedule_confirmed && v.scheduled_publish_at) ? `<div style="font-size: 11px; color: #a78bfa; margin-top: 4px; font-family: 'JetBrains Mono', monospace;">📅 API-Confirmed Schedule: ${schedDisplay}</div>` : (v.intended_publish_at_ist ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 4px; font-family: 'JetBrains Mono', monospace;">🧪 Simulation Preview Window: ${v.intended_publish_at_ist}</div>` : '')}
+                ${cardErr ? `<div class="token-alert" style="margin-top:6px; font-size:11px; word-break:break-word;">⚠️ ${String(cardErr).slice(0, 260)}</div>` : ''}
+                <div class="video-links">
+                  ${(isRealYt && v.youtube_url) ? `<a href="${v.youtube_url}" target="_blank" class="link-pill link-yt">YouTube Short</a>` : `<span class="link-pill" style="background:#222; color:#666;">YouTube (${v.ui_status === 'SIMULATED' ? 'Simulated' : 'Pending'})</span>`}
+                  ${v.instagram_url ? `<a href="${v.instagram_url}" target="_blank" class="link-pill link-ig">Instagram Reel</a>` : `<span class="link-pill" style="background:#222; color:#666;">Instagram (${igMode})</span>`}
+                </div>
+                <button class="btn btn-outline" style="width: 100%; margin-top: 10px; font-size: 11px; padding: 6px;" onclick="openDescriptionEditor('${v.video_id}')">📝 View / Edit Description</button>
+                ${(!v.qc_passed || v.ui_status === 'FAILED') ? `<button class="btn btn-outline" style="width: 100%; margin-top: 6px; font-size: 11px; padding: 6px; border-color: #ef444460; color: #f87171;" onclick="retrySlot(${v.slot_index})">🔄 Retry Slot ${v.slot_index}</button>` : ''}
+              </div>
+            </div>
+          `;
+          }).join('');
+        } else {
+          container.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--text-muted); grid-column: span 2;">
+            No videos generated yet for today. Click "Generate Today's Videos" to run Job 1.
+          </div>`;
+        }
+
+        // Logs
+        const logBox = document.getElementById('logBox');
+        if (data.error_logs && data.error_logs.length > 0) {
+          logBox.innerHTML = data.error_logs.map(l => `
+            <div class="log-line log-err">[${l.timestamp.slice(11,19)}] [${l.component}] ${l.message}</div>
+          `).join('');
+        } else {
+          logBox.innerHTML = '<div class="log-line log-info">[INFO] All studio systems operational. Zero critical errors.</div>';
+        }
+
+        // History Table
+        const historyTable = document.getElementById('historyTable');
+        if (data.recent_videos && data.recent_videos.length > 0) {
+          historyTable.innerHTML = `
+            <table style="width: 100%; border-collapse: collapse; text-align: left;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--card-border); color: var(--text-muted); font-size: 12px;">
+                  <th style="padding: 8px 0;">Date</th>
+                  <th>Topic</th>
+                  <th>Category</th>
+                  <th>QC</th>
+                  <th>Publication Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${data.recent_videos.map(rv => `
+                  <tr style="border-bottom: 1px solid #1a1e2d;">
+                    <td style="padding: 10px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px;">${rv.target_date || 'N/A'}</td>
+                    <td style="font-weight: 600;">${rv.script?.title || rv.topic}</td>
+                    <td>${rv.category}</td>
+                    <td><span class="badge ${rv.qc_passed ? 'badge-qc-pass' : 'badge-qc-fail'}" style="font-size: 9px;">${rv.qc_passed ? 'PASS' : 'FAIL'}</span></td>
+                    <td>${renderStatusBadge(rv.ui_status)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `;
+        } else {
+          historyTable.innerHTML = '<p style="color: var(--text-muted);">No historical records found.</p>';
+        }
+
+      } catch (e) {
+        console.error('Failed to load dashboard data:', e);
+      }
+    }
+
+    async function triggerAction(action) {
+      if (!confirm(`Are you sure you want to trigger ${action}?`)) return;
+      try {
+        const res = await fetch(`/api/trigger/${action}`, {
+          method: 'POST',
+          headers: { 'X-Studio-Auth': AUTH_HEADER }
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Error: ${err.detail || 'Request failed'}`);
+          return;
+        }
+        alert(`Action '${action}' triggered. Check execution logs shortly.`);
+        setTimeout(loadData, 2000);
+      } catch (e) {
+        alert(`Request failed: ${e}`);
+      }
+    }
+
+    async function toggleAutomation() {
+      try {
+        const res = await fetch('/api/toggle_automation', {
+          method: 'POST',
+          headers: { 'X-Studio-Auth': AUTH_HEADER }
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(`Error: ${err.detail || 'Request failed'}`);
+          return;
+        }
+        loadData();
+      } catch (e) {
+        alert(`Request failed: ${e}`);
+      }
+    }
+
+    async function triggerEmergency() {
+      if (!confirm("EMERGENCY STOP: Halt all scheduled production and publication immediately?")) return;
+      try {
+        const res = await fetch('/api/toggle_automation', {
+          method: 'POST',
+          headers: { 'X-Studio-Auth': AUTH_HEADER }
+        });
+        alert("EMERGENCY STOP ENGAGED: Automated jobs paused.");
+        loadData();
+      } catch (e) {
+        alert(`Emergency stop failed: ${e}`);
+      }
+    }
+
+    async function retrySlot(slotIndex) {
+      if (!confirm(`Retry production and publishing for Slot ${slotIndex}?`)) return;
+      try {
+        const res = await fetch(`/api/trigger/retry/slot${slotIndex}`, {
+          method: 'POST',
+          headers: { 'X-Studio-Auth': AUTH_HEADER }
+        });
+        const d = await res.json();
+        alert(d.message || 'Retry initiated.');
+        setTimeout(loadData, 2000);
+      } catch (e) {
+        alert(`Retry failed: ${e}`);
+      }
+    }
+
+    async function startScheduler() {
+      try {
+        const res = await fetch('/api/scheduler/start', {
+          method: 'POST',
+          headers: { 'X-Studio-Auth': AUTH_HEADER }
+        });
+        const d = await res.json();
+        alert(d.message || 'Scheduler started.');
+        setTimeout(loadData, 1500);
+      } catch (e) {
+        alert(`Failed to start scheduler: ${e}`);
+      }
+    }
+
+    async function stopScheduler() {
+      if (!confirm("Are you sure you want to stop the background scheduler daemon?")) return;
+      try {
+        const res = await fetch('/api/scheduler/stop', {
+          method: 'POST',
+          headers: { 'X-Studio-Auth': AUTH_HEADER }
+        });
+        const d = await res.json();
+        alert(d.message || 'Scheduler stopped.');
+        setTimeout(loadData, 1500);
+      } catch (e) {
+        alert(`Failed to stop scheduler: ${e}`);
+      }
+    }
+
+    async function runValidateConfig() {
+      const card = document.getElementById('diagCard');
+      const title = document.getElementById('diagTitle');
+      const out = document.getElementById('diagOutput');
+      card.style.display = 'block';
+      title.innerText = 'Configuration & Dependency Validation (Read-Only)';
+      out.innerText = 'Validating local environment and OAuth health...';
+      try {
+        const res = await fetch('/api/scheduler/validate?network=true');
+        const data = await res.json();
+        out.innerText = JSON.stringify(data, null, 2);
+      } catch (e) {
+        out.innerText = `Validation request failed: ${e}`;
+      }
+    }
+
+    async function runDryRunPreview() {
+      const card = document.getElementById('diagCard');
+      const title = document.getElementById('diagTitle');
+      const out = document.getElementById('diagOutput');
+      card.style.display = 'block';
+      title.innerText = 'Scheduler Dry-Run Preview (Zero Side Effects)';
+      out.innerText = 'Evaluating planned actions...';
+      try {
+        const res = await fetch('/api/scheduler/dry-run');
+        const data = await res.json();
+        out.innerText = JSON.stringify(data, null, 2);
+      } catch (e) {
+        out.innerText = `Dry-run request failed: ${e}`;
+      }
+    }
+
+    loadData();
+    setInterval(loadData, 15000);
+  </script>
+</body>
+</html>
