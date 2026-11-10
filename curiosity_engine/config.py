@@ -5,8 +5,10 @@ Strict ₹0 / $0 Free-Tier Local Target.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from dotenv import dotenv_values, load_dotenv
 
 # Base Paths
@@ -250,6 +252,19 @@ DEFAULT_CHROME_PATHS = [
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
 ]
+
+
+def get_hidden_subprocess_kwargs() -> Dict[str, Any]:
+    """Return Windows subprocess kwargs that suppress transient console windows under pythonw/background execution."""
+    if sys.platform != "win32":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0x00000001)
+    startupinfo.wShowWindow = 0  # SW_HIDE
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        "startupinfo": startupinfo,
+    }
 
 
 def get_chrome_executable() -> str:

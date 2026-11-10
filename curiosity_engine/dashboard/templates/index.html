@@ -793,12 +793,18 @@
           </div>`;
         }
 
-        // Logs
+        // Logs (preserve historical errors while clearly marking RESOLVED vs UNRESOLVED)
         const logBox = document.getElementById('logBox');
         if (data.error_logs && data.error_logs.length > 0) {
-          logBox.innerHTML = data.error_logs.map(l => `
-            <div class="log-line log-err">[${l.timestamp.slice(11,19)}] [${l.component}] ${l.message}</div>
-          `).join('');
+          logBox.innerHTML = data.error_logs.map(l => {
+            const ts = (l.timestamp || '').slice(11, 19);
+            const firstLineMsg = String(l.message || '').split('\n')[0];
+            if (l.resolved) {
+              const note = l.resolution_note ? ` — <span style="color:#34d399;">${l.resolution_note}</span>` : '';
+              return `<div class="log-line" style="color:#94a3b8;">[${ts}] <span class="badge" style="background:#10b98122; color:#34d399; font-size:9px; padding:1px 6px;">RESOLVED</span> [${l.component}] ${firstLineMsg}${note}</div>`;
+            }
+            return `<div class="log-line log-err">[${ts}] <span class="badge" style="background:#ef444425; color:#f87171; font-size:9px; padding:1px 6px;">UNRESOLVED</span> [${l.component}] ${firstLineMsg}</div>`;
+          }).join('');
         } else {
           logBox.innerHTML = '<div class="log-line log-info">[INFO] All studio systems operational. Zero critical errors.</div>';
         }
@@ -858,11 +864,15 @@
             : 'None queued';
           const tg = ops.telegram_health || {};
           document.getElementById('opsProdTelegram').innerText = `${ops.todays_production_count ?? 0} / ${ops.daily_limit ?? 2} videos • TG: ${tg.status || 'UNKNOWN'}${tg.pending_count ? ` (${tg.pending_count} pending)` : ''}`;
+          const prodObj = ops.latest_successful_production;
+          const prodText = prodObj ? `Prod OK: ${prodObj.youtube_id || prodObj.video_id} (${prodObj.ui_status})` : 'No production yet';
           const lastPubText = ops.last_successful_publication
             ? `Public: ${ops.last_successful_publication.youtube_id}`
-            : 'No public publish yet';
-          const lastFailText = ops.last_failure ? `Fail: ${String(ops.last_failure).slice(0, 60)}` : 'No recent failure';
-          document.getElementById('opsLastEvents').innerText = `${lastPubText} • ${lastFailText}`;
+            : 'Public: None confirmed yet';
+          const lastFailText = ops.last_failure
+            ? `Unresolved: ${String(ops.last_failure).slice(0, 60)}`
+            : (ops.resolved_failures_count ? `Failures: 0 unresolved (${ops.resolved_failures_count} resolved)` : 'Failures: None');
+          document.getElementById('opsLastEvents').innerText = `${prodText} • ${lastPubText} • ${lastFailText}`;
         }
 
       } catch (e) {

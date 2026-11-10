@@ -33,7 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from curiosity_engine.config import DASHBOARD_HOST, DASHBOARD_PORT, DATA_DIR
+from curiosity_engine.config import DASHBOARD_HOST, DASHBOARD_PORT, DATA_DIR, get_hidden_subprocess_kwargs
 from curiosity_engine.runner.local_scheduler import SCHEDULER_LOCK_FILE, LocalScheduler
 
 TASK_NAME = "CurioLoopScheduler"
@@ -174,9 +174,9 @@ def register_task() -> Dict[str, Any]:
     # Ensure no competing Task Scheduler entry is left active
     schtasks_removed_duplicate = False
     try:
-        q = subprocess.run(["schtasks", "/query", "/tn", TASK_NAME], capture_output=True, text=True)
+        q = subprocess.run(["schtasks", "/query", "/tn", TASK_NAME], capture_output=True, text=True, **get_hidden_subprocess_kwargs())
         if q.returncode == 0:
-            subprocess.run(["schtasks", "/delete", "/tn", TASK_NAME, "/f"], capture_output=True, text=True)
+            subprocess.run(["schtasks", "/delete", "/tn", TASK_NAME, "/f"], capture_output=True, text=True, **get_hidden_subprocess_kwargs())
             schtasks_removed_duplicate = True
     except Exception:
         pass
@@ -209,7 +209,7 @@ def unregister_task() -> Dict[str, Any]:
 
     schtasks_removed = False
     try:
-        res = subprocess.run(["schtasks", "/delete", "/tn", TASK_NAME, "/f"], capture_output=True, text=True)
+        res = subprocess.run(["schtasks", "/delete", "/tn", TASK_NAME, "/f"], capture_output=True, text=True, **get_hidden_subprocess_kwargs())
         if res.returncode == 0:
             schtasks_removed = True
     except Exception:
@@ -260,7 +260,7 @@ def get_task_status() -> Dict[str, Any]:
 
     schtasks_status = "NOT_REGISTERED"
     try:
-        res = subprocess.run(["schtasks", "/query", "/tn", TASK_NAME, "/fo", "LIST"], capture_output=True, text=True)
+        res = subprocess.run(["schtasks", "/query", "/tn", TASK_NAME, "/fo", "LIST"], capture_output=True, text=True, **get_hidden_subprocess_kwargs())
         if res.returncode == 0:
             for line in res.stdout.splitlines():
                 if line.startswith("Status:"):
@@ -332,19 +332,26 @@ def start_daemon_background() -> Dict[str, Any]:
     # Launch detached process with --daemon explicitly and redirected output (safe under pythonw.exe)
     DETACHED_PROCESS = 0x00000008
     CREATE_NO_WINDOW = 0x08000000
-    creationflags = DETACHED_PROCESS | CREATE_NO_WINDOW
+    hidden_kw = get_hidden_subprocess_kwargs()
+    creationflags = DETACHED_PROCESS | hidden_kw.get("creationflags", CREATE_NO_WINDOW)
+    startupinfo = hidden_kw.get("startupinfo")
 
     SCHEDULER_CONSOLE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     log_fh = open(SCHEDULER_CONSOLE_LOG_FILE, "a", encoding="utf-8")
     try:
+        popen_kwargs: Dict[str, Any] = {
+            "cwd": str(PROJECT_ROOT),
+            "stdin": subprocess.DEVNULL,
+            "stdout": log_fh,
+            "stderr": log_fh,
+            "creationflags": creationflags,
+            "close_fds": True,
+        }
+        if startupinfo is not None:
+            popen_kwargs["startupinfo"] = startupinfo
         proc = subprocess.Popen(
             [str(pythonw), str(run_script), "--daemon", "--interval", "15"],
-            cwd=str(PROJECT_ROOT),
-            stdin=subprocess.DEVNULL,
-            stdout=log_fh,
-            stderr=log_fh,
-            creationflags=creationflags,
-            close_fds=True,
+            **popen_kwargs,
         )
     finally:
         log_fh.close()
@@ -381,11 +388,23 @@ def start_dashboard_background() -> Dict[str, Any]:
     pythonw = get_pythonw_path()
     DETACHED_PROCESS = 0x00000008
     CREATE_NO_WINDOW = 0x08000000
-    creationflags = DETACHED_PROCESS | CREATE_NO_WINDOW
+    hidden_kw = get_hidden_subprocess_kwargs()
+    creationflags = DETACHED_PROCESS | hidden_kw.get("creationflags", CREATE_NO_WINDOW)
+    startupinfo = hidden_kw.get("startupinfo")
 
     DASHBOARD_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     log_fh = open(DASHBOARD_LOG_FILE, "a", encoding="utf-8")
     try:
+        popen_kwargs: Dict[str, Any] = {
+            "cwd": str(PROJECT_ROOT),
+            "stdin": subprocess.DEVNULL,
+            "stdout": log_fh,
+            "stderr": log_fh,
+            "creationflags": creationflags,
+            "close_fds": True,
+        }
+        if startupinfo is not None:
+            popen_kwargs["startupinfo"] = startupinfo
         proc = subprocess.Popen(
             [
                 str(pythonw),
@@ -400,12 +419,7 @@ def start_dashboard_background() -> Dict[str, Any]:
                 "info",
                 "--no-use-colors",
             ],
-            cwd=str(PROJECT_ROOT),
-            stdin=subprocess.DEVNULL,
-            stdout=log_fh,
-            stderr=log_fh,
-            creationflags=creationflags,
-            close_fds=True,
+            **popen_kwargs,
         )
     finally:
         log_fh.close()
@@ -454,7 +468,7 @@ def stop_dashboard() -> Dict[str, Any]:
 
     sched = LocalScheduler()
     try:
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, **get_hidden_subprocess_kwargs())
     except Exception:
         try:
             import signal
@@ -529,7 +543,7 @@ def stop_daemon() -> Dict[str, Any]:
             os.kill(pid, signal.SIGTERM)
         except Exception:
             try:
-                subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+                subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, **get_hidden_subprocess_kwargs())
             except Exception:
                 pass
         time.sleep(0.5)

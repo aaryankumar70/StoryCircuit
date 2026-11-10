@@ -37,6 +37,7 @@ from curiosity_engine.config import (
     YOUTUBE_PRIVACY_STATUS,
     YOUTUBE_PUBLISHING_MODE,
     YOUTUBE_UPLOAD_DAILY_LIMIT,
+    get_hidden_subprocess_kwargs,
 )
 from curiosity_engine.distribution.token_manager import token_manager
 from curiosity_engine.distribution.youtube_publisher import (
@@ -163,7 +164,7 @@ def compute_ui_status(v: Dict[str, Any]) -> str:
 
     is_real_yt = bool(yt_id and not str(yt_id).startswith("yt_sim_") and not yt_sim)
     if is_real_yt:
-        if privacy == "public" or pub_status == "PUBLISHED":
+        if str(privacy or "").lower() == "public":
             return "PUBLISHED_PUBLIC"
         if (
             v.get("schedule_confirmed") is True
@@ -177,6 +178,108 @@ def compute_ui_status(v: Dict[str, Any]) -> str:
     if prod_status == "COMPLETED" and v.get("qc_passed"):
         return "GENERATED"
     return prod_status
+
+
+def _parse_iso_dt(value: Any) -> Optional[datetime]:
+    """Parse an ISO timestamp cleanly into timezone-aware UTC datetime."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def classify_error_log_entry(
+    entry: Dict[str, Any],
+    videos_by_id: Dict[str, Dict[str, Any]],
+    daily_records: Dict[str, Any],
+    scheduler_last_error: Optional[str],
+    yt_token_info: Dict[str, Any],
+    oauth_paused: bool,
+) -> Dict[str, Any]:
+    """Classify a persisted error log entry as RESOLVED vs UNRESOLVED without mutating history."""
+    out = dict(entry) if isinstance(entry, dict) else {"message": str(entry), "component": "UNKNOWN", "timestamp": ""}
+    msg = str(out.get("message") or "")
+    comp = str(out.get("component") or "")
+    ctx = out.get("context") if isinstance(out.get("context"), dict) else {}
+    err_dt = _parse_iso_dt(out.get("timestamp"))
+
+    # Resolve target video_id explicitly from context, message, or timestamp+slot
+    target_vid = ctx.get("video_id")
+    if not target_vid:
+        m = re.search(r"\b(video_\d{8}_slot\d+)\b", msg)
+        if m:
+            target_vid = m.group(1)
+    if not target_vid and ctx.get("slot") in (1, 2) and err_dt is not None:
+        clean_day = err_dt.astimezone(IST).strftime("%Y%m%d")
+        target_vid = f"video_{clean_day}_slot{ctx['slot']}"
+
+    resolved = False
+    resolution_note: Optional[str] = None
+
+    if target_vid and target_vid in videos_by_id:
+        v = videos_by_id[target_vid]
+        prod_ok = v.get("production_status") == "COMPLETED" and v.get("qc_passed") is True
+        has_active_err = bool(
+            v.get("error")
+            or v.get("youtube_error")
+            or v.get("youtube_rejection_reason")
+            or v.get("publishing_status") in ("FAILED", "PUBLISH_FAILED", "REJECTED")
+            or v.get("youtube_status") in ("FAILED", "REJECTED")
+        )
+        v_updated = _parse_iso_dt(v.get("youtube_published_public_at") or v.get("updated_at") or v.get("created_at"))
+        newer_or_equal = (v_updated is None or err_dt is None or v_updated >= err_dt)
+
+        msg_lower = msg.lower()
+        is_prod_err = any(k in msg_lower for k in ("producing", "production", "visual", "audio mix", "qc"))
+        real_yt = is_real_youtube_upload(v)
+        pub_ok = real_yt and (
+            v.get("schedule_confirmed") is True or str(v.get("youtube_privacy_status") or "").lower() == "public"
+        )
+
+        if prod_ok and not has_active_err and newer_or_equal and (is_prod_err or pub_ok):
+            resolved = True
+            state_desc = compute_ui_status(v)
+            yt_ref = f" ({v.get('youtube_upload_id')})" if real_yt and v.get("youtube_upload_id") else ""
+            resolution_note = f"Recovered: {target_vid} passed QC and is {state_desc}{yt_ref}"
+
+    if not resolved and target_vid and re.match(r"^video_(\d{4})(\d{2})(\d{2})_slot(\d+)$", str(target_vid)):
+        dm = re.match(r"^video_(\d{4})(\d{2})(\d{2})_slot(\d+)$", str(target_vid))
+        day_iso = f"{dm.group(1)}-{dm.group(2)}-{dm.group(3)}"
+        slot_key = f"slot{dm.group(4)}"
+        day_rec = daily_records.get(day_iso) if isinstance(daily_records, dict) else None
+        if isinstance(day_rec, dict) and day_rec.get("overall_status") == "COMPLETED":
+            slot_rec = day_rec.get(slot_key, {})
+            if slot_rec.get("scheduled_status") == "SCHEDULED" and not slot_rec.get("error"):
+                resolved = True
+                resolution_note = f"Recovered: {target_vid} completed and confirmed SCHEDULED"
+
+    if not resolved and (
+        "oauth" in comp.lower() or any(tok in msg.lower() for tok in ("invalid_grant", "oauth", "refresh token"))
+    ):
+        if yt_token_info.get("healthy") and not oauth_paused:
+            auth_dt = _parse_iso_dt(yt_token_info.get("authorized_at") or yt_token_info.get("last_checked"))
+            if auth_dt and (err_dt is None or auth_dt >= err_dt):
+                resolved = True
+                resolution_note = "Resolved: YouTube OAuth reauthorized and healthy"
+
+    if not resolved and scheduler_last_error is None:
+        # Check if an error happened on a day that subsequently finished COMPLETED without active failure
+        if err_dt is not None:
+            day_iso = err_dt.astimezone(IST).strftime("%Y-%m-%d")
+            day_rec = daily_records.get(day_iso) if isinstance(daily_records, dict) else None
+            if isinstance(day_rec, dict) and day_rec.get("overall_status") == "COMPLETED" and not day_rec.get("last_failure"):
+                resolved = True
+                resolution_note = f"Recovered: automation cycle for {day_iso} completed cleanly"
+
+    out["resolved"] = resolved
+    out["status"] = "RESOLVED" if resolved else "UNRESOLVED"
+    out["resolution_note"] = resolution_note
+    return out
 
 
 def _read_reauth_status() -> Dict[str, Any]:
@@ -302,17 +405,24 @@ def get_system_status() -> Dict[str, Any]:
 
     future_scheduled: List[tuple] = []
     confirmed_public_list: List[Dict[str, Any]] = []
+    successful_prod_list: List[Dict[str, Any]] = []
+    videos_by_id: Dict[str, Dict[str, Any]] = {}
     for v in all_vids_full:
-        if not isinstance(v, dict) or v.get("is_test"):
+        if not isinstance(v, dict):
+            continue
+        vid_key = str(v.get("video_id") or "")
+        if vid_key:
+            videos_by_id[vid_key] = v
+        if v.get("is_test"):
             continue
         yt_id = str(v.get("youtube_upload_id") or "")
         if yt_id in NON_PRODUCTION_TEST_YOUTUBE_IDS:
             continue
-        if is_real_youtube_upload(v) and (
-            v.get("youtube_privacy_status") == "public" or v.get("publishing_status") == "PUBLISHED"
-        ):
+        if v.get("production_status") == "COMPLETED" and v.get("qc_passed") is True:
+            successful_prod_list.append(v)
+        if is_real_youtube_upload(v) and str(v.get("youtube_privacy_status") or "").lower() == "public":
             confirmed_public_list.append(v)
-        if is_real_youtube_upload(v) and v.get("scheduled_publish_at") and v.get("youtube_privacy_status") != "public":
+        if is_real_youtube_upload(v) and v.get("scheduled_publish_at") and str(v.get("youtube_privacy_status") or "").lower() != "public":
             try:
                 pub_dt = datetime.fromisoformat(str(v["scheduled_publish_at"]).replace("Z", "+00:00"))
                 if pub_dt.tzinfo is None:
@@ -336,6 +446,10 @@ def get_system_status() -> Dict[str, Any]:
             "scheduled_publish_at_ist": nxt_dt.astimezone(IST).strftime("%Y-%m-%d %H:%M IST"),
         }
 
+    confirmed_public_list.sort(
+        key=lambda x: str(x.get("youtube_published_public_at") or x.get("updated_at") or x.get("created_at") or ""),
+        reverse=True,
+    )
     last_public_pub = None
     if confirmed_public_list:
         lp = confirmed_public_list[0]
@@ -346,10 +460,65 @@ def get_system_status() -> Dict[str, Any]:
             "published_at": lp.get("youtube_published_public_at") or lp.get("youtube_published_at"),
         }
 
+    successful_prod_list.sort(
+        key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""),
+        reverse=True,
+    )
+    latest_successful_production = None
+    if successful_prod_list:
+        lsp = successful_prod_list[0]
+        lsp_sched_ist = None
+        if lsp.get("scheduled_publish_at"):
+            lsp_dt = _parse_iso_dt(lsp.get("scheduled_publish_at"))
+            if lsp_dt:
+                lsp_sched_ist = lsp_dt.astimezone(IST).strftime("%Y-%m-%d %H:%M IST")
+        latest_successful_production = {
+            "video_id": lsp.get("video_id"),
+            "youtube_id": lsp.get("youtube_upload_id") if is_real_youtube_upload(lsp) else None,
+            "title": (lsp.get("script") or {}).get("title", lsp.get("topic")),
+            "slot_index": lsp.get("slot_index"),
+            "ui_status": compute_ui_status(lsp),
+            "scheduled_publish_at_ist": lsp_sched_ist,
+            "updated_at": lsp.get("updated_at") or lsp.get("created_at"),
+        }
+
+    # Classify preserved historical error logs as RESOLVED vs UNRESOLVED
+    daily_records = auto_summary.get("daily_records", {}) if isinstance(auto_summary, dict) else {}
+    sched_err = scheduler_telemetry.get("last_error")
+    classified_logs = [
+        classify_error_log_entry(
+            entry=log_entry,
+            videos_by_id=videos_by_id,
+            daily_records=daily_records,
+            scheduler_last_error=sched_err,
+            yt_token_info=yt_tok,
+            oauth_paused=oauth_paused,
+        )
+        for log_entry in error_logs
+    ]
+    resolved_logs = [e for e in classified_logs if e.get("resolved")]
+    unresolved_logs = [e for e in classified_logs if not e.get("resolved")]
+
+    unresolved_failures: List[str] = []
+    if sched_err:
+        unresolved_failures.append(str(sched_err))
+    if oauth_paused and oauth_pause_reason:
+        unresolved_failures.append(f"OAuth paused: {oauth_pause_reason}")
+    elif yt_tok.get("reauth_required") and yt_tok.get("alert"):
+        unresolved_failures.append(str(yt_tok.get("alert")))
+    for v in todays_videos:
+        if not isinstance(v, dict) or v.get("is_test"):
+            continue
+        if compute_ui_status(v) == "FAILED":
+            v_err = v.get("youtube_error") or v.get("error") or f"{v.get('video_id')} failed"
+            unresolved_failures.append(str(v_err))
+    for ul in unresolved_logs:
+        msg_txt = str(ul.get("message") or "")
+        if msg_txt and msg_txt not in unresolved_failures:
+            unresolved_failures.append(msg_txt)
+
     todays_prod_count = len([v for v in todays_videos if not v.get("is_test") and v.get("production_status") == "COMPLETED"])
-    last_failure_str = scheduler_telemetry.get("last_error")
-    if not last_failure_str and error_logs:
-        last_failure_str = error_logs[0].get("message") if isinstance(error_logs[0], dict) else str(error_logs[0])
+    last_failure_str = unresolved_failures[0] if unresolved_failures else None
 
     reauth_info = _read_reauth_status()
 
@@ -378,6 +547,7 @@ def get_system_status() -> Dict[str, Any]:
         "next_scheduled_video": next_sched_video,
         "todays_production_count": todays_prod_count,
         "daily_limit": MAX_DAILY_VIDEOS,
+        "latest_successful_production": latest_successful_production,
         "telegram_health": {
             "status": notif_health.get("status"),
             "configured": notif_health.get("configured"),
@@ -387,6 +557,10 @@ def get_system_status() -> Dict[str, Any]:
         },
         "last_successful_publication": last_public_pub,
         "last_failure": last_failure_str,
+        "unresolved_failures": unresolved_failures,
+        "unresolved_failures_count": len(unresolved_failures),
+        "resolved_failures_count": len(resolved_logs),
+        "last_resolved_failure": resolved_logs[0] if resolved_logs else None,
     }
 
     for v in todays_videos:
@@ -412,7 +586,7 @@ def get_system_status() -> Dict[str, Any]:
         "notifications": notif_health,
         "reauth": reauth_info,
         "operational_status": operational_status,
-        "error_logs": error_logs,
+        "error_logs": classified_logs,
         "schedule": [
             {"time_ist": "First Login (IST)", "action": "Generate Missing Videos, QC & Private Upload"},
             {"time_ist": "12:30 IST (07:00 UTC)", "action": "Slot 1 YouTube Scheduled Publication"},
@@ -724,6 +898,7 @@ def trigger_youtube_reauthorize(auth: str = Depends(verify_auth_header)):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            **get_hidden_subprocess_kwargs(),
         )
         REAUTH_LOCK_FILE.write_text(str(proc.pid), encoding="utf-8")
         started_at = datetime.now(IST).isoformat()

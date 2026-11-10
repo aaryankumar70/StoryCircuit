@@ -12,7 +12,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from curiosity_engine.config import WHISPER_DIR
+from curiosity_engine.config import WHISPER_DIR, get_hidden_subprocess_kwargs
 
 logger = logging.getLogger("curiosity_engine.aligner")
 
@@ -145,6 +145,7 @@ def align_narration_words(project_dir: Path) -> List[Dict[str, Any]]:
             ["ffmpeg", "-v", "error", "-i", str(wav_path), "-ac", "1", "-ar", "16000", "-f", "f32le", "-"],
             capture_output=True,
             check=True,
+            **get_hidden_subprocess_kwargs(),
         ).stdout
         segs, _ = model.transcribe(np.frombuffer(raw, dtype=np.float32), word_timestamps=True, vad_filter=False)
         heard = [(w.word.strip(), w.start + 0.04, w.end) for s in segs for w in s.words]
@@ -155,6 +156,7 @@ def align_narration_words(project_dir: Path) -> List[Dict[str, Any]]:
             capture_output=True,
             text=True,
             check=True,
+            **get_hidden_subprocess_kwargs(),
         )
         dur_audio = float(dur_cmd.stdout.strip())
 

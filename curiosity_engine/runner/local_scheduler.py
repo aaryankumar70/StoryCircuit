@@ -1494,7 +1494,10 @@ class LocalScheduler:
 
         today_vids = [v for v in all_vids if isinstance(v, dict) and v.get("target_date") == today_str and not v.get("is_test")]
         prod_count = sum(1 for v in today_vids if v.get("production_status") == "COMPLETED")
-        pub_count = sum(1 for v in today_vids if v.get("youtube_privacy_status") == "public" or v.get("publishing_status") == "PUBLISHED")
+        pub_count = sum(
+            1 for v in today_vids
+            if is_real_youtube_upload(v) and str(v.get("youtube_privacy_status") or "").lower() == "public"
+        )
 
         now_utc = datetime.now(timezone.utc)
         upcoming: List[Tuple[datetime, str]] = []

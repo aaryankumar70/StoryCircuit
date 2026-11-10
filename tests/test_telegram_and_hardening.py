@@ -448,3 +448,108 @@ class TestWindowsDualStartupManager:
         assert kwargs["stdout"] is not None
         assert kwargs["stderr"] is not None
         assert (tmp_path / ".dashboard.lock").read_text(encoding="utf-8").strip() == "9988"
+
+
+class TestConsoleSuppressionAndStatusCleanup:
+    def test_hidden_subprocess_kwargs_and_status_query_silent(self, monkeypatch):
+        from curiosity_engine.quality import qc_gatekeeper
+
+        kwargs = config.get_hidden_subprocess_kwargs()
+        if sys.platform == "win32":
+            assert kwargs["creationflags"] == 0x08000000
+            assert kwargs["startupinfo"].wShowWindow == 0
+
+        captured = []
+
+        def fake_run(cmd, **kw):
+            captured.append((cmd, kw))
+            return SimpleNamespace(returncode=0, stdout='{"streams": []}', stderr="")
+
+        monkeypatch.setattr(win_mgr.subprocess, "run", fake_run)
+        monkeypatch.setattr(qc_gatekeeper.subprocess, "run", fake_run)
+
+        win_mgr.get_task_status()
+        qc_gatekeeper.check_ffprobe_streams(Path("dummy.mp4"))
+
+        assert len(captured) >= 2
+        if sys.platform == "win32":
+            for _, kw in captured:
+                assert kw.get("creationflags") == 0x08000000
+                assert kw.get("startupinfo") is not None
+
+    def test_resolved_vs_unresolved_failures_and_public_publication_gate(self, monkeypatch):
+        # 1. Historical visual failure followed by newer recovery -> RESOLVED
+        hist_err = {
+            "timestamp": "2026-11-10T06:00:20+00:00",
+            "component": "PRODUCTION_PIPELINE",
+            "message": "Failed producing video_20261110_slot2: Visual check failed",
+            "context": {"slot": 2},
+        }
+        videos_by_id = {
+            "video_20261110_slot2": {
+                "video_id": "video_20261110_slot2",
+                "target_date": "2026-11-10",
+                "production_status": "COMPLETED",
+                "qc_passed": True,
+                "publishing_status": "SCHEDULED",
+                "youtube_status": "SCHEDULED",
+                "youtube_upload_id": "nf_uztFNO8w",
+                "youtube_simulated": False,
+                "youtube_privacy_status": "private",
+                "schedule_confirmed": True,
+                "updated_at": "2026-11-10T08:59:10+00:00",
+            }
+        }
+        classified = dashboard_app.classify_error_log_entry(
+            entry=hist_err,
+            videos_by_id=videos_by_id,
+            daily_records={"2026-11-10": {"overall_status": "COMPLETED", "slot2": {"scheduled_status": "SCHEDULED"}}},
+            scheduler_last_error=None,
+            yt_token_info={"healthy": True},
+            oauth_paused=False,
+        )
+        assert classified["resolved"] is True
+        assert classified["status"] == "RESOLVED"
+        assert "SCHEDULED" in (classified["resolution_note"] or "")
+
+        # 2. Active failure on a non-recovered video -> UNRESOLVED
+        active_err = {
+            "timestamp": "2026-11-10T10:00:00+00:00",
+            "component": "YOUTUBE_PUBLISHER",
+            "message": "Failed publishing video_20261111_slot1: quotaExceeded",
+            "context": {"video_id": "video_20261111_slot1"},
+        }
+        videos_by_id["video_20261111_slot1"] = {
+            "video_id": "video_20261111_slot1",
+            "production_status": "COMPLETED",
+            "qc_passed": True,
+            "publishing_status": "PUBLISH_FAILED",
+            "youtube_status": "FAILED",
+            "error": "quotaExceeded",
+            "updated_at": "2026-11-10T10:00:05+00:00",
+        }
+        unresolved = dashboard_app.classify_error_log_entry(
+            entry=active_err,
+            videos_by_id=videos_by_id,
+            daily_records={},
+            scheduler_last_error="quotaExceeded",
+            yt_token_info={"healthy": True},
+            oauth_paused=False,
+        )
+        assert unresolved["resolved"] is False
+        assert unresolved["status"] == "UNRESOLVED"
+
+        # 3. Private upload/schedule NEVER counts as PUBLISHED_PUBLIC even with legacy publishing_status=PUBLISHED
+        legacy_priv = {
+            "video_id": "video_20261109_slot1",
+            "production_status": "COMPLETED",
+            "qc_passed": True,
+            "publishing_status": "PUBLISHED",
+            "youtube_upload_id": "nf_uztFNO8w",
+            "youtube_simulated": False,
+            "youtube_privacy_status": "private",
+        }
+        assert dashboard_app.compute_ui_status(legacy_priv) == "UPLOADED_PRIVATE"
+
+        real_pub = {**legacy_priv, "youtube_privacy_status": "public"}
+        assert dashboard_app.compute_ui_status(real_pub) == "PUBLISHED_PUBLIC"

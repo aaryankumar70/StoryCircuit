@@ -23,6 +23,7 @@ from curiosity_engine.config import (
     MAX_TRUE_PEAK_DB,
     MIN_DURATION_SEC,
     TARGET_FPS,
+    get_hidden_subprocess_kwargs,
     TARGET_INTEGRATED_LUFS_MAX,
     TARGET_INTEGRATED_LUFS_MIN,
     VIDEO_HEIGHT,
@@ -58,7 +59,7 @@ def check_ffprobe_streams(video_path: Path) -> Dict[str, Any]:
         "-of", "json",
         str(video_path),
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, check=True, **get_hidden_subprocess_kwargs())
     return json.loads(res.stdout)
 
 
@@ -71,7 +72,7 @@ def measure_audio_loudness(video_path: Path) -> Dict[str, float]:
         "-f", "null",
         "-",
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, **get_hidden_subprocess_kwargs())
     out = res.stderr
     metrics = {"integrated_lufs": -70.0, "true_peak_db": -70.0, "lra": 0.0}
 
@@ -100,7 +101,7 @@ def check_black_frames(video_path: Path) -> bool:
         "-f", "null",
         "-",
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, **get_hidden_subprocess_kwargs())
     # If blackdetect flags black periods lasting > 2.0s, consider suspect
     has_persistent_black = "black_start:" in res.stderr and "black_duration: [2-9]" in res.stderr
     return not has_persistent_black
