@@ -5,16 +5,19 @@ and clear reauthorization alerts.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
 
 import requests
 
+from curiosity_engine import config
 from curiosity_engine.config import (
     DATA_DIR,
     INSTAGRAM_ACCESS_TOKEN,
@@ -28,6 +31,37 @@ from curiosity_engine.config import (
 
 logger = logging.getLogger("curiosity_engine.distribution.token_manager")
 TOKEN_STATE_FILE = DATA_DIR / "token_state.json"
+IST = ZoneInfo("Asia/Kolkata")
+YOUTUBE_TESTING_LIFETIME_DAYS = 7
+
+
+def _token_fingerprint(token: str) -> str:
+    """Return a non-reversible short digest for detecting refresh token rotation."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+
+
+def _build_expiry_fields(
+    authorized_at_iso: str,
+    now_utc: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Calculate expected 7-day Testing-mode expiry metadata and 24h warning flags."""
+    now = now_utc or datetime.now(timezone.utc)
+    auth_dt = datetime.fromisoformat(authorized_at_iso)
+    if auth_dt.tzinfo is None:
+        auth_dt = auth_dt.replace(tzinfo=timezone.utc)
+    exp_dt = auth_dt + timedelta(days=YOUTUBE_TESTING_LIFETIME_DAYS)
+    seconds_left = max(0.0, (exp_dt - now).total_seconds())
+    hours_left = round(seconds_left / 3600.0, 1)
+    days_left = round(seconds_left / 86400.0, 2)
+    return {
+        "authorized_at": auth_dt.astimezone(timezone.utc).isoformat(),
+        "expected_expires_at": exp_dt.astimezone(timezone.utc).isoformat(),
+        "hours_until_expiry": hours_left,
+        "days_until_expiry": days_left,
+        "estimated_reauth_date_ist": exp_dt.astimezone(IST).strftime("%Y-%m-%d %H:%M IST"),
+        "warning_24h_due": seconds_left <= 86400.0,
+        "expiry_policy": "TESTING_7_DAYS",
+    }
 
 
 class TokenManager:
@@ -70,6 +104,23 @@ class TokenManager:
     # -------------------------------------------------------------------------
     # YouTube Token Health
     # -------------------------------------------------------------------------
+    def record_youtube_authorization(
+        self,
+        refresh_token: str,
+        authorized_at_utc: Optional[datetime] = None,
+    ) -> None:
+        """Record the timestamp when a new YouTube OAuth refresh token was issued."""
+        if not refresh_token:
+            return
+        auth_dt = authorized_at_utc or datetime.now(timezone.utc)
+        if auth_dt.tzinfo is None:
+            auth_dt = auth_dt.replace(tzinfo=timezone.utc)
+        yt = dict(self._state.get("youtube") or {})
+        yt["token_fingerprint"] = _token_fingerprint(refresh_token)
+        yt.update(_build_expiry_fields(auth_dt.isoformat(), now_utc=datetime.now(timezone.utc)))
+        self._state["youtube"] = yt
+        self._save_state()
+
     def check_youtube_health(
         self,
         client_id: Optional[str] = None,
@@ -77,11 +128,15 @@ class TokenManager:
         refresh_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Validate YouTube OAuth refresh token by requesting a temporary access token."""
-        cid = client_id if client_id is not None else (YOUTUBE_CLIENT_ID or os.environ.get("YOUTUBE_CLIENT_ID", ""))
-        sec = client_secret if client_secret is not None else (YOUTUBE_CLIENT_SECRET or os.environ.get("YOUTUBE_CLIENT_SECRET", ""))
-        ref = refresh_token if refresh_token is not None else (YOUTUBE_REFRESH_TOKEN or os.environ.get("YOUTUBE_REFRESH_TOKEN", ""))
+        if client_id is None and client_secret is None and refresh_token is None:
+            config.sync_env_if_updated()
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        cid = client_id if client_id is not None else (os.environ.get("YOUTUBE_CLIENT_ID") or config.YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_ID)
+        sec = client_secret if client_secret is not None else (os.environ.get("YOUTUBE_CLIENT_SECRET") or config.YOUTUBE_CLIENT_SECRET or YOUTUBE_CLIENT_SECRET)
+        ref = refresh_token if refresh_token is not None else (os.environ.get("YOUTUBE_REFRESH_TOKEN") or config.YOUTUBE_REFRESH_TOKEN or YOUTUBE_REFRESH_TOKEN)
+
+        now_dt = datetime.now(timezone.utc)
+        now_iso = now_dt.isoformat()
 
         if not (cid and sec and ref):
             res = {
@@ -94,6 +149,16 @@ class TokenManager:
             self._state["youtube"] = res
             self._save_state()
             return res
+
+        existing = dict(self._state.get("youtube") or {})
+        fp = _token_fingerprint(ref)
+        prev_fp = existing.get("token_fingerprint")
+        if prev_fp == fp and existing.get("authorized_at"):
+            authorized_at_iso = existing["authorized_at"]
+        elif not prev_fp and existing.get("authorized_at"):
+            authorized_at_iso = existing["authorized_at"]
+        else:
+            authorized_at_iso = now_iso
 
         # Validate refresh token against Google OAuth endpoint
         token_endpoint = "https://oauth2.googleapis.com/token"
@@ -153,7 +218,9 @@ class TokenManager:
                     "reauth_required": False,
                     "last_checked": now_iso,
                     "alert": None,
+                    "token_fingerprint": fp,
                 }
+                res.update(_build_expiry_fields(authorized_at_iso, now_utc=now_dt))
                 if granted_scopes:
                     res["scopes"] = granted_scopes
                     res["can_upload"] = can_upload
@@ -168,9 +235,9 @@ class TokenManager:
                 if error_code == "invalid_grant":
                     alert_msg = (
                         "CRITICAL: YouTube OAuth refresh token expired or revoked ('invalid_grant'). "
-                        "If the consent screen was left in 'Testing' mode, tokens expire after 7 days. "
-                        "Action: Run 'python scripts/auth_youtube.py' to generate a permanent refresh token "
-                        "under an 'In production' consent screen."
+                        "Google consent in Testing mode expires after 7 days. "
+                        "Action: Click 'Reconnect YouTube Account' in the local Dashboard, "
+                        "run 'reauthorize_youtube.bat', or run 'python scripts/auth_youtube.py --force --scope-mode full'."
                     )
                     res = {
                         "status": "REVOKED_OR_EXPIRED",
@@ -179,6 +246,8 @@ class TokenManager:
                         "last_checked": now_iso,
                         "alert": alert_msg,
                         "details": error_desc,
+                        "token_fingerprint": fp,
+                        "authorized_at": authorized_at_iso,
                     }
                 else:
                     res = {
@@ -187,6 +256,8 @@ class TokenManager:
                         "reauth_required": False,
                         "last_checked": now_iso,
                         "alert": f"YouTube token check returned error: {error_code} - {error_desc}",
+                        "token_fingerprint": fp,
+                        "authorized_at": authorized_at_iso,
                     }
         except Exception as e:
             res = {
@@ -195,6 +266,8 @@ class TokenManager:
                 "reauth_required": False,
                 "last_checked": now_iso,
                 "alert": f"Network error contacting Google OAuth: {e}",
+                "token_fingerprint": fp,
+                "authorized_at": authorized_at_iso,
             }
 
         self._state["youtube"] = res
@@ -357,9 +430,17 @@ class TokenManager:
 
     def get_summary(self) -> Dict[str, Any]:
         """Return combined token health summary for dashboard and monitoring."""
+        # Reload latest persisted state if modified by another process (e.g., auth script / daemon)
+        self._state = self._load_state()
+        yt = dict(self._state.get("youtube", {}))
+        if yt.get("authorized_at") and yt.get("healthy"):
+            try:
+                yt.update(_build_expiry_fields(yt["authorized_at"]))
+            except Exception:
+                pass
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "youtube": self._state.get("youtube", {}),
+            "youtube": yt,
             "instagram": self._state.get("instagram", {}),
         }
 
@@ -368,17 +449,16 @@ class TokenManager:
         Avoids redundant external network requests on periodic polling endpoints.
         """
         logger.info("Performing startup token health audit...")
-        from curiosity_engine.config import (
-            INSTAGRAM_ACCESS_TOKEN,
-            INSTAGRAM_ACCOUNT_ID,
-            YOUTUBE_CLIENT_ID,
-            YOUTUBE_CLIENT_SECRET,
-            YOUTUBE_REFRESH_TOKEN,
-        )
+        config.sync_env_if_updated()
+        cid = os.environ.get("YOUTUBE_CLIENT_ID") or config.YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_ID
+        sec = os.environ.get("YOUTUBE_CLIENT_SECRET") or config.YOUTUBE_CLIENT_SECRET or YOUTUBE_CLIENT_SECRET
+        ref = os.environ.get("YOUTUBE_REFRESH_TOKEN") or config.YOUTUBE_REFRESH_TOKEN or YOUTUBE_REFRESH_TOKEN
+        ig_tok = os.environ.get("INSTAGRAM_ACCESS_TOKEN") or config.INSTAGRAM_ACCESS_TOKEN or INSTAGRAM_ACCESS_TOKEN
+        ig_acct = os.environ.get("INSTAGRAM_ACCOUNT_ID") or config.INSTAGRAM_ACCOUNT_ID or INSTAGRAM_ACCOUNT_ID
 
         # Audit YouTube credentials if configured
-        if YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET and YOUTUBE_REFRESH_TOKEN:
-            self.check_youtube_health(YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN)
+        if cid and sec and ref:
+            self.check_youtube_health(cid, sec, ref)
         else:
             self._state["youtube"] = {
                 "status": "UNCONFIGURED",
@@ -390,8 +470,8 @@ class TokenManager:
             self._save_state()
 
         # Audit Instagram credentials if configured
-        if INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_ACCOUNT_ID:
-            self.check_instagram_health(INSTAGRAM_ACCESS_TOKEN, INSTAGRAM_ACCOUNT_ID)
+        if ig_tok and ig_acct:
+            self.check_instagram_health(ig_tok, ig_acct)
         else:
             self._state["instagram"] = {
                 "status": "UNCONFIGURED",

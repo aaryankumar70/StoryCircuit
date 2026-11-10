@@ -6,13 +6,19 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
+from typing import Optional, Tuple
+from dotenv import dotenv_values, load_dotenv
 
 # Base Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = PROJECT_ROOT / ".env"
+_LAST_ENV_STATE: Optional[Tuple[str, float]] = None
 if ENV_FILE.exists():
     load_dotenv(dotenv_path=ENV_FILE, override=False)
+    try:
+        _LAST_ENV_STATE = (str(ENV_FILE), ENV_FILE.stat().st_mtime)
+    except OSError:
+        _LAST_ENV_STATE = None
 MODELS_DIR = PROJECT_ROOT / "models"
 KOKORO_DIR = MODELS_DIR / "kokoro"
 WHISPER_DIR = MODELS_DIR / "whisper-small"
@@ -97,6 +103,70 @@ YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID", "")
 YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
 YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
 YOUTUBE_UPLOAD_DAILY_LIMIT = 100  # Dedicated YouTube Data API v3 upload bucket
+
+# Telegram Operational Notifications (Bot API - free tier)
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+TELEGRAM_DAILY_SUMMARY_HOUR_IST = int(os.environ.get("TELEGRAM_DAILY_SUMMARY_HOUR_IST", "21"))
+
+
+_SYNCABLE_ENV_KEYS = (
+    "GEMINI_API_KEY",
+    "INSTAGRAM_ACCESS_TOKEN",
+    "INSTAGRAM_ACCOUNT_ID",
+    "INSTAGRAM_API_VERSION",
+    "YOUTUBE_CLIENT_ID",
+    "YOUTUBE_CLIENT_SECRET",
+    "YOUTUBE_REFRESH_TOKEN",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "TELEGRAM_DAILY_SUMMARY_HOUR_IST",
+)
+
+
+def sync_env_if_updated(force: bool = False) -> bool:
+    """Hot-reload `.env` values into process globals when `.env` changes on disk.
+
+    Tracks `(path, mtime)` so normal in-memory `monkeypatch.setenv` tests are
+    never overwritten unless the `.env` file was actually modified or `force=True`.
+    """
+    global _LAST_ENV_STATE
+    global GEMINI_API_KEY, INSTAGRAM_ACCESS_TOKEN, INSTAGRAM_ACCOUNT_ID, INSTAGRAM_API_VERSION
+    global YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN
+    global TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_DAILY_SUMMARY_HOUR_IST
+
+    if not ENV_FILE.exists():
+        return False
+
+    try:
+        current_state = (str(ENV_FILE), ENV_FILE.stat().st_mtime)
+    except OSError:
+        return False
+
+    if not force and _LAST_ENV_STATE == current_state:
+        return False
+
+    parsed = dotenv_values(ENV_FILE)
+    for key in _SYNCABLE_ENV_KEYS:
+        if key in parsed and parsed[key] is not None:
+            os.environ[key] = str(parsed[key])
+
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+    INSTAGRAM_ACCESS_TOKEN = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
+    INSTAGRAM_ACCOUNT_ID = os.environ.get("INSTAGRAM_ACCOUNT_ID", "")
+    INSTAGRAM_API_VERSION = os.environ.get("INSTAGRAM_API_VERSION", "v22.0")
+    YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID", "")
+    YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
+    YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
+    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    try:
+        TELEGRAM_DAILY_SUMMARY_HOUR_IST = int(os.environ.get("TELEGRAM_DAILY_SUMMARY_HOUR_IST", "21"))
+    except ValueError:
+        TELEGRAM_DAILY_SUMMARY_HOUR_IST = 21
+
+    _LAST_ENV_STATE = current_state
+    return True
 
 # Publishing Mode & Provider Controls
 # Global fallback mode

@@ -190,7 +190,23 @@ def run_youtube_oauth_flow(scope_mode: str = "narrow", force: bool = False, yes:
                 new_lines.append(f"{k}={v}")
 
         ENV_FILE.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        token_manager.check_youtube_health(client_id, client_secret, refresh_token)
+        try:
+            from curiosity_engine import config
+            from curiosity_engine.runner.automation_state import AutomationStateManager
+            from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
+
+            config.sync_env_if_updated(force=True)
+            token_manager.record_youtube_authorization(refresh_token)
+            yt_health = token_manager.check_youtube_health(client_id, client_secret, refresh_token)
+            if yt_health.get("healthy") and yt_health.get("can_upload") and yt_health.get("can_update_schedule", True):
+                resumed = AutomationStateManager().resume_after_oauth()
+                get_telegram_notifier().notify_reauth_success(
+                    scopes=yt_health.get("scopes", granted),
+                    estimated_reauth_ist=yt_health.get("estimated_reauth_date_ist", "7 days"),
+                    resumed_automation=resumed,
+                )
+        except Exception as hook_exc:
+            print(f"[WARNING] Post-authorization validation hook warning: {hook_exc}")
         print(f"[OK] Saved credentials safely to {ENV_FILE} and updated token_state.json.")
 
     print("\nNext step: Verify token status in the Studio Dashboard.")

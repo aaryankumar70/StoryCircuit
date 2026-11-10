@@ -36,12 +36,14 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
+from curiosity_engine import config
 from curiosity_engine.config import (
     DATA_DIR,
     ENV_FILE,
     GEMINI_API_KEY,
     INSTAGRAM_PUBLISHING_MODE,
     KOKORO_DIR,
+    MAX_DAILY_VIDEOS,
     OUTPUT_DIR,
     PROJECT_ROOT,
     SCHEDULER_GENERATE_TIME,
@@ -55,12 +57,20 @@ from curiosity_engine.config import (
 )
 from curiosity_engine.content.topic_discovery import select_daily_topics
 from curiosity_engine.distribution.token_manager import token_manager
-from curiosity_engine.distribution.youtube_publisher import youtube_publisher
+from curiosity_engine.distribution.youtube_publisher import (
+    NON_PRODUCTION_TEST_YOUTUBE_IDS,
+    YouTubeAuthError,
+    youtube_publisher,
+)
+from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
 from curiosity_engine.production.aligner import resolve_whisper_model_path
 from curiosity_engine.production.renderer import validate_rendered_mp4
 from curiosity_engine.runner.automation_state import automation_state
 from curiosity_engine.runner.pipeline import (
     _has_valid_project_assets,
+    assert_daily_publication_capacity,
+    assert_no_duplicate_mp4_upload,
+    get_occupied_publication_windows,
     is_real_youtube_upload,
     is_slot_generation_complete,
     produce_single_video,
@@ -114,6 +124,48 @@ def calculate_publication_times(
     t1 = t1_today if local_now < (t1_today - lead) else t1_tomorrow
     t2 = t2_today if local_now < (t2_today - lead) else t2_tomorrow
     return t1, t2
+
+
+def allocate_slot_publication_time(
+    slot_index: int,
+    now_dt: datetime,
+    occupied_by_date: Optional[Dict[str, set[str]]] = None,
+    slot1_time_str: str = SCHEDULER_PUBLISH_SLOT1_TIME,
+    slot2_time_str: str = SCHEDULER_PUBLISH_SLOT2_TIME,
+    tz: Optional[ZoneInfo] = None,
+    min_lead_minutes: int = 15,
+    max_per_day: int = MAX_DAILY_VIDEOS,
+) -> datetime:
+    """Find the earliest future IST slot datetime respecting the max daily publication limit
+    and preserving each slot's canonical publication hour (12:30 IST for Slot 1, 20:30 IST for Slot 2).
+    """
+    if tz is None:
+        tz = IST
+
+    target_str = slot1_time_str if slot_index == 1 else slot2_time_str
+    s_h, s_m = [int(p) for p in target_str.split(":")]
+    slot_hhmm = f"{s_h:02d}:{s_m:02d}"
+    lead = timedelta(minutes=min_lead_minutes)
+    local_now = now_dt.astimezone(tz)
+    base_date = local_now.date()
+    occupied = occupied_by_date or {}
+
+    for day_offset in range(0, 30):
+        day = base_date + timedelta(days=day_offset)
+        candidate = datetime(day.year, day.month, day.day, s_h, s_m, 0, tzinfo=tz)
+        if candidate < (local_now + lead):
+            continue
+        date_key = day.strftime("%Y-%m-%d")
+        day_slots = occupied.get(date_key, set())
+        if len(day_slots) >= max_per_day:
+            continue
+        if slot_hhmm in day_slots:
+            continue
+        return candidate
+
+    # Fallback (should never trigger within 30 days)
+    t1, t2 = calculate_publication_times(now_dt, slot1_time_str, slot2_time_str, tz, min_lead_minutes)
+    return t1 if slot_index == 1 else t2
 
 
 class SchedulerLockError(Exception):
@@ -398,7 +450,10 @@ class LocalScheduler:
 
         raw_state = automation_state._load_raw()
         enabled = bool(raw_state.get("enabled", True))
-        pub_s1, pub_s2 = calculate_publication_times(now, tz=self.tz)
+        working_occupied = {k: set(v) for k, v in get_occupied_publication_windows().items()}
+        pub_s1 = allocate_slot_publication_time(1, now, occupied_by_date=working_occupied, tz=self.tz)
+        working_occupied.setdefault(pub_s1.strftime("%Y-%m-%d"), set()).add(pub_s1.strftime("%H:%M"))
+        pub_s2 = allocate_slot_publication_time(2, now, occupied_by_date=working_occupied, tz=self.tz)
         pub_times = {1: pub_s1, 2: pub_s2}
 
         gemini_configured = bool(GEMINI_API_KEY and len(GEMINI_API_KEY.strip()) > 10)
@@ -593,6 +648,258 @@ class LocalScheduler:
     # -------------------------------------------------------------------------
     # Phase 3 & 4: Availability-Driven Batch Production & Scheduled Publishing
     # -------------------------------------------------------------------------
+    def _execute_slot_upload_and_schedule(
+        self,
+        date_str: str,
+        slot_idx: int,
+        vid_id: str,
+        v_rec: Dict[str, Any],
+        target_pub_dt: datetime,
+        oauth_ok: bool,
+        oauth_err_msg: Optional[str],
+    ) -> Dict[str, Any]:
+        """Upload (if needed) and confirm API-scheduled publication for a single QC-passed production slot."""
+        slot_key = f"slot{slot_idx}"
+        rec = automation_state.get_daily_record(date_str)
+        current_slot_state = rec.get(slot_key, {})
+        target_pub_utc = target_pub_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+        yt_id = v_rec.get("youtube_upload_id") or current_slot_state.get("youtube_video_id")
+        has_real_yt = is_real_youtube_upload(v_rec)
+        needs_upload = (
+            not has_real_yt
+            if YOUTUBE_PUBLISHING_MODE == "live"
+            else not bool(yt_id)
+        )
+
+        # 2a. Upload (never re-uploading if a real YouTube ID is already linked)
+        if needs_upload:
+            if YOUTUBE_PUBLISHING_MODE == "live" and not oauth_ok:
+                logger.error(f"[{vid_id}] Skipping live upload: {oauth_err_msg}")
+                return automation_state.update_daily_record(date_str, {
+                    slot_key: {"upload_status": "FAILED", "error": oauth_err_msg}
+                })
+
+            mp4_path = Path(v_rec.get("local_video_path") or (OUTPUT_DIR / f"{vid_id}.mp4"))
+            if not mp4_path.exists():
+                logger.error(f"Local MP4 not found for {vid_id} at {mp4_path}")
+                return automation_state.update_daily_record(date_str, {
+                    slot_key: {"upload_status": "FAILED", "error": f"MP4 file not found: {mp4_path}"}
+                })
+
+            script = v_rec.get("script", {})
+            title = script.get("title", v_rec.get("topic", "Curiosity Explainer"))
+            desc = v_rec.get("youtube_description") or script.get("description", title)
+            tags = script.get("tags", [v_rec.get("category", "Education"), "CurioLoop", "Shorts"])
+
+            logger.info(
+                f"[{vid_id}] Uploading Slot {slot_idx} to YouTube "
+                f"(Mode: {YOUTUBE_PUBLISHING_MODE}, Privacy: private, Target: {target_pub_dt.strftime('%Y-%m-%d %H:%M IST')})..."
+            )
+            try:
+                mp4_sha256: Optional[str] = None
+                if YOUTUBE_PUBLISHING_MODE == "live":
+                    mp4_sha256 = assert_no_duplicate_mp4_upload(mp4_path, vid_id)
+                    assert_daily_publication_capacity(
+                        target_pub_dt,
+                        candidate_video_id=vid_id,
+                        candidate_yt_id=yt_id,
+                    )
+
+                all_vids = db.get_all_videos(limit=100)
+                if not isinstance(all_vids, list):
+                    all_vids = []
+                other_real_yt_ids = set(NON_PRODUCTION_TEST_YOUTUBE_IDS) | {
+                    str(r.get("youtube_upload_id"))
+                    for r in all_vids
+                    if isinstance(r, dict) and r.get("video_id") != vid_id and is_real_youtube_upload(r)
+                }
+
+                upload_res = youtube_publisher.upload_short(
+                    video_path=mp4_path,
+                    title=title,
+                    description=desc,
+                    tags=tags,
+                    privacy_status="private",
+                    publish_at=target_pub_dt,
+                    exclude_youtube_ids=other_real_yt_ids,
+                )
+                yt_id = upload_res.get("video_id")
+                yt_sim = bool(upload_res.get("simulated", False))
+                sched_confirmed = bool(upload_res.get("schedule_confirmed") and not yt_sim)
+
+                v_rec["youtube_upload_id"] = yt_id
+                v_rec["youtube_url"] = upload_res.get("url")
+                v_rec["youtube_simulated"] = yt_sim
+                v_rec["youtube_privacy_status"] = "private" if not yt_sim else upload_res.get("privacy_status", "simulation_private")
+                v_rec["youtube_published_at"] = upload_res.get("published_at")
+                v_rec["schedule_confirmed"] = sched_confirmed
+
+                if yt_sim:
+                    v_rec["youtube_status"] = "SIMULATED"
+                    v_rec["publishing_status"] = "SIMULATED"
+                    v_rec["intended_publish_at"] = target_pub_utc
+                    v_rec["intended_publish_at_ist"] = target_pub_dt.isoformat()
+                    db.save_video_record(vid_id, v_rec)
+
+                    rec = automation_state.update_daily_record(date_str, {
+                        slot_key: {
+                            "upload_status": "SIMULATED",
+                            "youtube_video_id": yt_id,
+                            "youtube_simulated": True,
+                            "scheduled_status": "SIMULATED",
+                            "scheduled_publish_at": None,
+                            "scheduled_publish_at_ist": None,
+                            "intended_publish_at": target_pub_utc,
+                            "intended_publish_at_ist": target_pub_dt.isoformat(),
+                            "error": None,
+                        }
+                    })
+                else:
+                    if mp4_sha256:
+                        v_rec["mp4_sha256"] = mp4_sha256
+                    v_rec["youtube_status"] = "SCHEDULED" if sched_confirmed else "UPLOADED_PRIVATE"
+                    v_rec["publishing_status"] = "SCHEDULED" if sched_confirmed else "UPLOADED_PRIVATE"
+                    if sched_confirmed:
+                        v_rec["scheduled_publish_at"] = upload_res.get("publish_at", target_pub_utc)
+                        v_rec["scheduled_publish_at_ist"] = target_pub_dt.isoformat()
+                    db.save_video_record(vid_id, v_rec)
+
+                    rec = automation_state.update_daily_record(date_str, {
+                        slot_key: {
+                            "upload_status": "UPLOADED_PRIVATE",
+                            "youtube_video_id": yt_id,
+                            "youtube_simulated": False,
+                            "scheduled_status": "SCHEDULED" if sched_confirmed else "NOT_SCHEDULED",
+                            "scheduled_publish_at": v_rec.get("scheduled_publish_at"),
+                            "scheduled_publish_at_ist": v_rec.get("scheduled_publish_at_ist"),
+                            "error": None,
+                        }
+                    })
+                logger.info(f"[{vid_id}] Upload completed (ID={yt_id}, simulated={yt_sim}, schedule_confirmed={sched_confirmed}).")
+            except Exception as e:
+                logger.error(f"[{vid_id}] YouTube upload failed: {e}")
+                v_rec["youtube_status"] = "FAILED"
+                v_rec["publishing_status"] = "PUBLISH_FAILED"
+                v_rec["error"] = str(e)
+                db.save_video_record(vid_id, v_rec)
+                err_lower = str(e).lower()
+                if isinstance(e, YouTubeAuthError) or "invalid_grant" in err_lower or "revoked" in err_lower:
+                    self._handle_oauth_failure(str(e), "REVOKED_OR_EXPIRED")
+                else:
+                    fail_type = "YOUTUBE_REJECTION" if "rejected" in err_lower else "UPLOAD_FAILURE"
+                    try:
+                        get_telegram_notifier().notify_failure(
+                            failure_type=fail_type,
+                            title=f"Upload failed for {vid_id}",
+                            detail=str(e),
+                            video_id=vid_id,
+                        )
+                    except Exception:
+                        pass
+                return automation_state.update_daily_record(date_str, {
+                    slot_key: {"upload_status": "FAILED", "error": str(e)}
+                })
+        else:
+            logger.info(f"[{vid_id}] Existing upload verified ({yt_id}, real={has_real_yt}). Skipping re-upload.")
+
+        # Refresh v_rec state after upload step
+        v_rec = db.get_video_record(vid_id) or v_rec
+        yt_id = v_rec.get("youtube_upload_id") or yt_id
+        has_real_yt = is_real_youtube_upload(v_rec)
+        already_confirmed = bool(v_rec.get("schedule_confirmed") and has_real_yt)
+
+        # 3. API-Confirmed Scheduling step for real private uploads lacking confirmation
+        if has_real_yt and not already_confirmed:
+            logger.info(
+                f"[{vid_id}] Confirming/setting scheduled publication for real ID {yt_id} at "
+                f"{target_pub_dt.strftime('%Y-%m-%d %H:%M')} IST ({target_pub_utc})..."
+            )
+            try:
+                assert_daily_publication_capacity(
+                    target_pub_dt,
+                    candidate_video_id=vid_id,
+                    candidate_yt_id=yt_id,
+                )
+
+                existing_api_st = None
+                if YOUTUBE_PUBLISHING_MODE == "live":
+                    existing_api_st = youtube_publisher.get_video_status(yt_id)
+
+                if existing_api_st and existing_api_st.get("publish_at") and existing_api_st.get("privacy_status") == "private":
+                    v_rec["scheduled_publish_at"] = existing_api_st["publish_at"]
+                    v_rec["scheduled_publish_at_ist"] = target_pub_dt.isoformat()
+                    v_rec["youtube_status"] = "SCHEDULED"
+                    v_rec["publishing_status"] = "SCHEDULED"
+                    v_rec["schedule_confirmed"] = True
+                    db.save_video_record(vid_id, v_rec)
+                    rec = automation_state.update_daily_record(date_str, {
+                        slot_key: {
+                            "upload_status": "UPLOADED_PRIVATE",
+                            "youtube_video_id": yt_id,
+                            "youtube_simulated": False,
+                            "scheduled_status": "SCHEDULED",
+                            "scheduled_publish_at": existing_api_st["publish_at"],
+                            "scheduled_publish_at_ist": target_pub_dt.isoformat(),
+                            "error": None,
+                        }
+                    })
+                    logger.info(f"[{vid_id}] Verified existing API schedule: {existing_api_st['publish_at']}")
+                else:
+                    sched_res = youtube_publisher.schedule_publication(
+                        video_id=yt_id,
+                        publish_at=target_pub_dt,
+                        force_mode="live",
+                    )
+                    if sched_res.get("schedule_confirmed") and not sched_res.get("simulated", False):
+                        v_rec["scheduled_publish_at"] = sched_res.get("publish_at", target_pub_utc)
+                        v_rec["scheduled_publish_at_ist"] = target_pub_dt.isoformat()
+                        v_rec["youtube_status"] = "SCHEDULED"
+                        v_rec["publishing_status"] = "SCHEDULED"
+                        v_rec["schedule_confirmed"] = True
+                        db.save_video_record(vid_id, v_rec)
+                        rec = automation_state.update_daily_record(date_str, {
+                            slot_key: {
+                                "upload_status": "UPLOADED_PRIVATE",
+                                "youtube_video_id": yt_id,
+                                "youtube_simulated": False,
+                                "scheduled_status": "SCHEDULED",
+                                "scheduled_publish_at": v_rec["scheduled_publish_at"],
+                                "scheduled_publish_at_ist": v_rec["scheduled_publish_at_ist"],
+                                "error": None,
+                            }
+                        })
+                        logger.info(f"[{vid_id}] YouTube API confirmed schedule at {v_rec['scheduled_publish_at']}")
+                    else:
+                        raise RuntimeError(f"YouTube API did not confirm schedule: {sched_res}")
+            except Exception as e:
+                logger.error(f"[{vid_id}] Failed to schedule publication: {e}")
+                v_rec["youtube_status"] = "UPLOADED_PRIVATE"
+                v_rec["publishing_status"] = "UPLOADED_PRIVATE"
+                v_rec["schedule_confirmed"] = False
+                v_rec["error"] = str(e)
+                db.save_video_record(vid_id, v_rec)
+                err_lower = str(e).lower()
+                if isinstance(e, YouTubeAuthError) or "invalid_grant" in err_lower or "revoked" in err_lower:
+                    self._handle_oauth_failure(str(e), "REVOKED_OR_EXPIRED")
+                else:
+                    fail_type = "YOUTUBE_REJECTION" if "rejected" in err_lower else "SCHEDULE_FAILURE"
+                    try:
+                        get_telegram_notifier().notify_failure(
+                            failure_type=fail_type,
+                            title=f"Scheduling failed for {vid_id}",
+                            detail=str(e),
+                            video_id=vid_id,
+                            youtube_id=str(yt_id or ""),
+                        )
+                    except Exception:
+                        pass
+                rec = automation_state.update_daily_record(date_str, {
+                    slot_key: {"scheduled_status": "FAILED", "error": str(e)}
+                })
+
+        return rec
+
     def process_daily_automation(
         self,
         target_date: Optional[str] = None,
@@ -690,6 +997,15 @@ class LocalScheduler:
                         "qc_passed": False,
                         "error": str(err_msg),
                     }
+                    try:
+                        get_telegram_notifier().notify_failure(
+                            failure_type="VIDEO_PROCESSING_FAILURE",
+                            title=f"Generation/QC failed for {v_id}",
+                            detail=str(err_msg),
+                            video_id=v_id,
+                        )
+                    except Exception:
+                        pass
 
             gen_status = "COMPLETED" if (v1_ready and v2_ready) else ("PARTIAL" if (v1_ready or v2_ready) else "FAILED")
             updates["generation"] = {
@@ -713,231 +1029,118 @@ class LocalScheduler:
             })
 
         # ---------------------------------------------------------------------
-        # Stage 2 & 3: YouTube Private Upload + API-Confirmed Publish Scheduling
+        # Stage 2 & 3: Overdue Chronological Catch-Up + Today's Publishing
         # ---------------------------------------------------------------------
-        pub_slot1_dt, pub_slot2_dt = calculate_publication_times(self.now_ist(), tz=self.tz)
-        slots_to_process = [
-            (1, v1_id, v1_db, v1_ready, pub_slot1_dt, "slot1"),
-            (2, v2_id, v2_db, v2_ready, pub_slot2_dt, "slot2"),
-        ]
+        working_occupied = {k: set(v) for k, v in get_occupied_publication_windows().items()}
+
+        def _resolve_target_dt(slot_idx: int, v_rec: Optional[Dict[str, Any]], cur_slot: Dict[str, Any]) -> datetime:
+            existing_pub_utc = (v_rec or {}).get("scheduled_publish_at") or cur_slot.get("scheduled_publish_at")
+            if existing_pub_utc and (v_rec or {}).get("schedule_confirmed"):
+                try:
+                    parsed_dt = datetime.fromisoformat(str(existing_pub_utc).replace("Z", "+00:00"))
+                    if parsed_dt > datetime.now(timezone.utc):
+                        chosen = parsed_dt.astimezone(self.tz)
+                        working_occupied.setdefault(chosen.strftime("%Y-%m-%d"), set()).add(chosen.strftime("%H:%M"))
+                        return chosen
+                except Exception:
+                    pass
+            chosen = allocate_slot_publication_time(
+                slot_idx,
+                self.now_ist(),
+                occupied_by_date=working_occupied,
+                tz=self.tz,
+            )
+            working_occupied.setdefault(chosen.strftime("%Y-%m-%d"), set()).add(chosen.strftime("%H:%M"))
+            return chosen
 
         # Pre-flight OAuth refresh in live mode so expired credentials fail fast cleanly
+        config.sync_env_if_updated()
+        youtube_publisher.refresh_credentials_if_changed()
         oauth_ok = True
         oauth_err_msg = None
-        if YOUTUBE_PUBLISHING_MODE == "live" and (v1_ready or v2_ready):
+        if YOUTUBE_PUBLISHING_MODE == "live":
             try:
                 health = token_manager.check_youtube_health()
                 if not health.get("healthy"):
                     oauth_ok = False
                     oauth_err_msg = health.get("alert") or f"OAuth unhealthy: {health.get('status')}"
+                    if health.get("status") == "REVOKED_OR_EXPIRED" or health.get("reauth_required"):
+                        self._handle_oauth_failure(oauth_err_msg, str(health.get("status")))
+                elif health.get("warning_24h_due"):
+                    try:
+                        get_telegram_notifier().notify_oauth_expiry_warning(
+                            hours_remaining=float(health.get("hours_until_expiry", 0.0)),
+                            estimated_reauth_ist=str(health.get("estimated_reauth_date_ist", "")),
+                            date_str=today_str,
+                        )
+                    except Exception:
+                        pass
             except Exception as e:
                 oauth_ok = False
                 oauth_err_msg = str(e)
 
-        for slot_idx, vid_id, v_rec, ready, pub_dt, slot_key in slots_to_process:
+        # Process any overdue completed production work (since 2026-11-10) in strict chronological order first
+        if YOUTUBE_PUBLISHING_MODE == "live" and oauth_ok:
+            all_vids_overdue = db.get_all_videos(limit=200)
+            if isinstance(all_vids_overdue, list):
+                overdue_recs = [
+                    r for r in all_vids_overdue
+                    if isinstance(r, dict)
+                    and "2026-11-10" <= str(r.get("target_date") or "") < today_str
+                    and r.get("production_status") == "COMPLETED"
+                    and r.get("qc_passed") is True
+                    and not (r.get("schedule_confirmed") and r.get("scheduled_publish_at"))
+                    and r.get("publishing_status") != "PUBLISHED"
+                    and not r.get("is_test")
+                ]
+                overdue_recs.sort(key=lambda r: (str(r.get("target_date", "")), int(r.get("slot_index", 1))))
+                for od_rec in overdue_recs:
+                    od_slot_idx = int(od_rec.get("slot_index", 1))
+                    od_vid_id = str(od_rec.get("video_id"))
+                    od_date = str(od_rec.get("target_date"))
+                    od_dt = allocate_slot_publication_time(
+                        od_slot_idx,
+                        self.now_ist(),
+                        occupied_by_date=working_occupied,
+                        tz=self.tz,
+                    )
+                    working_occupied.setdefault(od_dt.strftime("%Y-%m-%d"), set()).add(od_dt.strftime("%H:%M"))
+                    logger.info(
+                        f"Processing overdue production work chronologically first: {od_vid_id} -> "
+                        f"{od_dt.strftime('%Y-%m-%d %H:%M IST')}"
+                    )
+                    self._execute_slot_upload_and_schedule(
+                        date_str=od_date,
+                        slot_idx=od_slot_idx,
+                        vid_id=od_vid_id,
+                        v_rec=od_rec,
+                        target_pub_dt=od_dt,
+                        oauth_ok=oauth_ok,
+                        oauth_err_msg=oauth_err_msg,
+                    )
+
+        pub_slot1_dt = _resolve_target_dt(1, v1_db, rec.get("slot1", {}))
+        pub_slot2_dt = _resolve_target_dt(2, v2_db, rec.get("slot2", {}))
+        slots_to_process = [
+            (1, v1_id, v1_db, v1_ready, pub_slot1_dt),
+            (2, v2_id, v2_db, v2_ready, pub_slot2_dt),
+        ]
+        # Process earliest scheduled publication slot first chronologically
+        slots_to_process.sort(key=lambda item: (item[4], item[0]))
+
+        for slot_idx, vid_id, v_rec, ready, target_pub_dt in slots_to_process:
             if not ready or not v_rec:
                 logger.warning(f"Skipping upload/schedule for Slot {slot_idx} (video not ready or failed QC).")
                 continue
-
-            current_slot_state = rec.get(slot_key, {})
-
-            # Preserve existing future schedule if already persisted & confirmed
-            existing_pub_utc = v_rec.get("scheduled_publish_at") or current_slot_state.get("scheduled_publish_at")
-            target_pub_dt = pub_dt
-            if existing_pub_utc and v_rec.get("schedule_confirmed"):
-                try:
-                    parsed_dt = datetime.fromisoformat(existing_pub_utc.replace("Z", "+00:00"))
-                    if parsed_dt > datetime.now(timezone.utc):
-                        target_pub_dt = parsed_dt.astimezone(self.tz)
-                except Exception:
-                    pass
-
-            target_pub_utc = target_pub_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
-            yt_id = v_rec.get("youtube_upload_id") or current_slot_state.get("youtube_video_id")
-            has_real_yt = is_real_youtube_upload(v_rec)
-            needs_upload = (
-                not has_real_yt
-                if YOUTUBE_PUBLISHING_MODE == "live"
-                else not bool(yt_id)
+            rec = self._execute_slot_upload_and_schedule(
+                date_str=today_str,
+                slot_idx=slot_idx,
+                vid_id=vid_id,
+                v_rec=v_rec,
+                target_pub_dt=target_pub_dt,
+                oauth_ok=oauth_ok,
+                oauth_err_msg=oauth_err_msg,
             )
-
-            # 2a. Upload (or reuse existing real upload)
-            if needs_upload:
-                if YOUTUBE_PUBLISHING_MODE == "live" and not oauth_ok:
-                    logger.error(f"[{vid_id}] Skipping live upload: {oauth_err_msg}")
-                    rec = automation_state.update_daily_record(today_str, {
-                        slot_key: {"upload_status": "FAILED", "error": oauth_err_msg}
-                    })
-                    continue
-
-                mp4_path = Path(v_rec.get("local_video_path") or (OUTPUT_DIR / f"{vid_id}.mp4"))
-                if not mp4_path.exists():
-                    logger.error(f"Local MP4 not found for {vid_id} at {mp4_path}")
-                    rec = automation_state.update_daily_record(today_str, {
-                        slot_key: {"upload_status": "FAILED", "error": f"MP4 file not found: {mp4_path}"}
-                    })
-                    continue
-
-                script = v_rec.get("script", {})
-                title = script.get("title", v_rec.get("topic", "Curiosity Explainer"))
-                desc = v_rec.get("youtube_description") or script.get("description", title)
-                tags = script.get("tags", [v_rec.get("category", "Education"), "CurioLoop", "Shorts"])
-
-                logger.info(
-                    f"[{vid_id}] Uploading Slot {slot_idx} to YouTube "
-                    f"(Mode: {YOUTUBE_PUBLISHING_MODE}, Privacy: private, Target: {target_pub_dt.strftime('%Y-%m-%d %H:%M IST')})..."
-                )
-                try:
-                    # Collect real YouTube IDs owned by OTHER video records to avoid title-collision hijacking
-                    other_real_yt_ids = {
-                        str(r.get("youtube_upload_id"))
-                        for r in db.get_all_videos(limit=100)
-                        if r.get("video_id") != vid_id and is_real_youtube_upload(r)
-                    }
-                    # Pass publish_at directly so videos.insert schedules atomically under youtube.upload scope
-                    upload_res = youtube_publisher.upload_short(
-                        video_path=mp4_path,
-                        title=title,
-                        description=desc,
-                        tags=tags,
-                        privacy_status="private",
-                        publish_at=target_pub_dt,
-                        exclude_youtube_ids=other_real_yt_ids,
-                    )
-                    yt_id = upload_res.get("video_id")
-                    yt_sim = bool(upload_res.get("simulated", False))
-                    sched_confirmed = bool(upload_res.get("schedule_confirmed") and not yt_sim)
-
-                    v_rec["youtube_upload_id"] = yt_id
-                    v_rec["youtube_url"] = upload_res.get("url")
-                    v_rec["youtube_simulated"] = yt_sim
-                    v_rec["youtube_privacy_status"] = "private" if not yt_sim else upload_res.get("privacy_status", "simulation_private")
-                    v_rec["youtube_published_at"] = upload_res.get("published_at")
-                    v_rec["schedule_confirmed"] = sched_confirmed
-
-                    if yt_sim:
-                        v_rec["youtube_status"] = "SIMULATED"
-                        v_rec["publishing_status"] = "SIMULATED"
-                        v_rec["intended_publish_at"] = target_pub_utc
-                        v_rec["intended_publish_at_ist"] = target_pub_dt.isoformat()
-                        db.save_video_record(vid_id, v_rec)
-
-                        rec = automation_state.update_daily_record(today_str, {
-                            slot_key: {
-                                "upload_status": "SIMULATED",
-                                "youtube_video_id": yt_id,
-                                "youtube_simulated": True,
-                                "scheduled_status": "SIMULATED",
-                                "scheduled_publish_at": None,
-                                "scheduled_publish_at_ist": None,
-                                "intended_publish_at": target_pub_utc,
-                                "intended_publish_at_ist": target_pub_dt.isoformat(),
-                                "error": None,
-                            }
-                        })
-                    else:
-                        v_rec["youtube_status"] = "SCHEDULED" if sched_confirmed else "UPLOADED_PRIVATE"
-                        v_rec["publishing_status"] = "SCHEDULED" if sched_confirmed else "UPLOADED_PRIVATE"
-                        if sched_confirmed:
-                            v_rec["scheduled_publish_at"] = upload_res.get("publish_at", target_pub_utc)
-                            v_rec["scheduled_publish_at_ist"] = target_pub_dt.isoformat()
-                        db.save_video_record(vid_id, v_rec)
-
-                        rec = automation_state.update_daily_record(today_str, {
-                            slot_key: {
-                                "upload_status": "UPLOADED_PRIVATE",
-                                "youtube_video_id": yt_id,
-                                "youtube_simulated": False,
-                                "scheduled_status": "SCHEDULED" if sched_confirmed else "NOT_SCHEDULED",
-                                "scheduled_publish_at": v_rec.get("scheduled_publish_at"),
-                                "scheduled_publish_at_ist": v_rec.get("scheduled_publish_at_ist"),
-                                "error": None,
-                            }
-                        })
-                    logger.info(f"[{vid_id}] Upload completed (ID={yt_id}, simulated={yt_sim}, schedule_confirmed={sched_confirmed}).")
-
-                except Exception as e:
-                    logger.error(f"[{vid_id}] YouTube upload failed: {e}")
-                    v_rec["youtube_status"] = "FAILED"
-                    v_rec["publishing_status"] = "PUBLISH_FAILED"
-                    v_rec["error"] = str(e)
-                    db.save_video_record(vid_id, v_rec)
-                    rec = automation_state.update_daily_record(today_str, {
-                        slot_key: {"upload_status": "FAILED", "error": str(e)}
-                    })
-                    continue
-            else:
-                logger.info(f"[{vid_id}] Existing upload verified ({yt_id}, real={has_real_yt}). Skipping re-upload.")
-
-            # Refresh v_rec state after upload step
-            v_rec = db.get_video_record(vid_id) or v_rec
-            yt_id = v_rec.get("youtube_upload_id") or yt_id
-            has_real_yt = is_real_youtube_upload(v_rec)
-            already_confirmed = bool(v_rec.get("schedule_confirmed") and has_real_yt)
-
-            # 3. API-Confirmed Scheduling step for real private uploads lacking confirmation
-            if has_real_yt and not already_confirmed:
-                logger.info(
-                    f"[{vid_id}] Confirming/setting scheduled publication for real ID {yt_id} at "
-                    f"{target_pub_dt.strftime('%Y-%m-%d %H:%M')} IST ({target_pub_utc})..."
-                )
-                try:
-                    # First inspect whether YouTube already has publishAt saved for this video
-                    existing_api_st = None
-                    if YOUTUBE_PUBLISHING_MODE == "live":
-                        existing_api_st = youtube_publisher.get_video_status(yt_id)
-
-                    if existing_api_st and existing_api_st.get("publish_at") and existing_api_st.get("privacy_status") == "private":
-                        v_rec["scheduled_publish_at"] = existing_api_st["publish_at"]
-                        v_rec["scheduled_publish_at_ist"] = target_pub_dt.isoformat()
-                        v_rec["youtube_status"] = "SCHEDULED"
-                        v_rec["publishing_status"] = "SCHEDULED"
-                        v_rec["schedule_confirmed"] = True
-                        db.save_video_record(vid_id, v_rec)
-                        rec = automation_state.update_daily_record(today_str, {
-                            slot_key: {
-                                "scheduled_status": "SCHEDULED",
-                                "scheduled_publish_at": existing_api_st["publish_at"],
-                                "scheduled_publish_at_ist": target_pub_dt.isoformat(),
-                                "error": None,
-                            }
-                        })
-                        logger.info(f"[{vid_id}] Verified existing API schedule: {existing_api_st['publish_at']}")
-                    else:
-                        sched_res = youtube_publisher.schedule_publication(
-                            video_id=yt_id,
-                            publish_at=target_pub_dt,
-                            force_mode="live",
-                        )
-                        if sched_res.get("schedule_confirmed") and not sched_res.get("simulated", False):
-                            v_rec["scheduled_publish_at"] = sched_res.get("publish_at", target_pub_utc)
-                            v_rec["scheduled_publish_at_ist"] = target_pub_dt.isoformat()
-                            v_rec["youtube_status"] = "SCHEDULED"
-                            v_rec["publishing_status"] = "SCHEDULED"
-                            v_rec["schedule_confirmed"] = True
-                            db.save_video_record(vid_id, v_rec)
-                            rec = automation_state.update_daily_record(today_str, {
-                                slot_key: {
-                                    "scheduled_status": "SCHEDULED",
-                                    "scheduled_publish_at": v_rec["scheduled_publish_at"],
-                                    "scheduled_publish_at_ist": v_rec["scheduled_publish_at_ist"],
-                                    "error": None,
-                                }
-                            })
-                            logger.info(f"[{vid_id}] YouTube API confirmed schedule at {v_rec['scheduled_publish_at']}")
-                        else:
-                            raise RuntimeError(f"YouTube API did not confirm schedule: {sched_res}")
-                except Exception as e:
-                    logger.error(f"[{vid_id}] Failed to schedule publication: {e}")
-                    v_rec["youtube_status"] = "UPLOADED_PRIVATE"
-                    v_rec["publishing_status"] = "UPLOADED_PRIVATE"
-                    v_rec["schedule_confirmed"] = False
-                    v_rec["error"] = str(e)
-                    db.save_video_record(vid_id, v_rec)
-                    rec = automation_state.update_daily_record(today_str, {
-                        slot_key: {"scheduled_status": "FAILED", "error": str(e)}
-                    })
 
         # Finalize Overall Status truthfully
         s1_state = rec.get("slot1", {})
@@ -1081,6 +1284,8 @@ class LocalScheduler:
             "is_running": is_alive,
             "pid": pid,
             "automation_enabled": self.is_automation_enabled(),
+            "oauth_paused": bool(raw_state.get("oauth_paused", False)),
+            "oauth_pause_reason": raw_state.get("oauth_pause_reason"),
             "timezone": SCHEDULER_TIMEZONE,
             "current_time_ist": now.strftime("%Y-%m-%d %H:%M:%S IST"),
             "production_date": today_str,
@@ -1106,6 +1311,234 @@ class LocalScheduler:
             "last_heartbeat": self._state.get("last_heartbeat"),
             "last_error": self._state.get("last_error"),
         }
+
+    # -------------------------------------------------------------------------
+    # Operational Hardening: OAuth Lifecycle, Public Verification, Daily Summary
+    # -------------------------------------------------------------------------
+    def _handle_oauth_failure(self, reason: str, status_code: str = "REVOKED_OR_EXPIRED") -> None:
+        """Safely pause new automation on OAuth rejection/expiry while preserving schedules."""
+        reason_lower = str(reason or "").lower()
+        is_terminal_auth = status_code in ("REVOKED_OR_EXPIRED", "AUTH_FAILED") or any(
+            m in reason_lower for m in ("invalid_grant", "revoked", "expired", "unauthorized")
+        )
+        if is_terminal_auth:
+            automation_state.pause_for_oauth(reason)
+            self._state["last_error"] = reason
+            self._save_state()
+            try:
+                get_telegram_notifier().notify_oauth_rejected(reason)
+            except Exception as exc:
+                logger.warning("Telegram notify_oauth_rejected isolated error: %s", exc)
+
+    def check_oauth_lifecycle_and_notify(self) -> Dict[str, Any]:
+        """Validate OAuth health, fire 24h expiry warning, or auto-pause on revocation."""
+        config.sync_env_if_updated()
+        youtube_publisher.refresh_credentials_if_changed()
+        if YOUTUBE_PUBLISHING_MODE != "live":
+            return token_manager.get_summary().get("youtube", {})
+
+        health = token_manager.check_youtube_health()
+        self._state["last_oauth_health_check"] = self.now_ist().isoformat()
+        self._save_state()
+
+        if health.get("healthy"):
+            if health.get("warning_24h_due"):
+                try:
+                    get_telegram_notifier().notify_oauth_expiry_warning(
+                        hours_remaining=float(health.get("hours_until_expiry", 0.0)),
+                        estimated_reauth_ist=str(health.get("estimated_reauth_date_ist", "")),
+                        date_str=self.now_ist().strftime("%Y-%m-%d"),
+                    )
+                except Exception as exc:
+                    logger.warning("Telegram 24h OAuth warning isolated error: %s", exc)
+        elif health.get("status") == "REVOKED_OR_EXPIRED" or health.get("reauth_required"):
+            self._handle_oauth_failure(
+                str(health.get("alert") or "YouTube OAuth refresh token revoked or expired."),
+                str(health.get("status") or "REVOKED_OR_EXPIRED"),
+            )
+        return health
+
+    def verify_scheduled_publications(self) -> Dict[str, int]:
+        """Inspect scheduled live videos whose publishAt passed and notify ONLY when truly public."""
+        counts = {"checked": 0, "confirmed_public": 0, "rejected": 0, "missed": 0}
+        if YOUTUBE_PUBLISHING_MODE != "live" and youtube_publisher.service is None:
+            return counts
+
+        config.sync_env_if_updated()
+        youtube_publisher.refresh_credentials_if_changed()
+
+        now_utc = datetime.now(timezone.utc)
+        now_ist = now_utc.astimezone(self.tz)
+        today_str = now_ist.strftime("%Y-%m-%d")
+        notifier = get_telegram_notifier()
+
+        all_vids = db.get_all_videos(limit=100)
+        if not isinstance(all_vids, list):
+            return counts
+
+        for v_rec in all_vids:
+            if not isinstance(v_rec, dict):
+                continue
+            if not is_real_youtube_upload(v_rec):
+                continue
+            yt_id = str(v_rec.get("youtube_upload_id") or "")
+            vid_id = str(v_rec.get("video_id") or "")
+            if not yt_id or not vid_id or yt_id in NON_PRODUCTION_TEST_YOUTUBE_IDS or v_rec.get("is_test"):
+                continue
+            if v_rec.get("youtube_published_public_confirmed") is True or v_rec.get("publishing_status") == "PUBLISHED":
+                continue
+
+            sched_utc_str = v_rec.get("scheduled_publish_at")
+            if not sched_utc_str:
+                continue
+            try:
+                sched_dt = datetime.fromisoformat(str(sched_utc_str).replace("Z", "+00:00"))
+                if sched_dt.tzinfo is None:
+                    sched_dt = sched_dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+
+            # Wait until scheduled publishAt timestamp has been reached
+            if sched_dt > now_utc:
+                continue
+
+            counts["checked"] += 1
+            try:
+                api_status = youtube_publisher.get_video_status(yt_id)
+            except YouTubeAuthError as auth_err:
+                self._handle_oauth_failure(str(auth_err), "REVOKED_OR_EXPIRED")
+                break
+            except Exception as exc:
+                logger.warning("Failed checking publication status for %s (%s): %s", vid_id, yt_id, exc)
+                continue
+
+            if not api_status:
+                continue
+
+            privacy = str(api_status.get("privacy_status") or "").lower()
+            upload_st = str(api_status.get("upload_status") or "").lower()
+            rejection = api_status.get("rejection_reason")
+            title = str(api_status.get("title") or (v_rec.get("script") or {}).get("title") or v_rec.get("topic") or vid_id)
+
+            if rejection or upload_st in ("rejected", "failed"):
+                counts["rejected"] += 1
+                v_rec["youtube_status"] = "REJECTED"
+                v_rec["publishing_status"] = "REJECTED"
+                v_rec["youtube_rejection_reason"] = rejection or upload_st
+                db.save_video_record(vid_id, v_rec)
+                notifier.notify_failure(
+                    failure_type="YOUTUBE_REJECTION",
+                    title=f"YouTube rejected video: {title}",
+                    detail=f"uploadStatus={upload_st}, rejectionReason={rejection}",
+                    video_id=vid_id,
+                    youtube_id=yt_id,
+                    dedup_key=f"yt_rejected:{yt_id}",
+                )
+            elif privacy == "public":
+                counts["confirmed_public"] += 1
+                pub_ist_str = now_ist.strftime("%Y-%m-%d %H:%M IST")
+                v_rec["youtube_privacy_status"] = "public"
+                v_rec["youtube_status"] = "PUBLISHED"
+                v_rec["publishing_status"] = "PUBLISHED"
+                v_rec["youtube_published_public_confirmed"] = True
+                v_rec["youtube_published_public_at"] = now_utc.isoformat()
+                db.save_video_record(vid_id, v_rec)
+
+                t_date = str(v_rec.get("target_date") or "")
+                s_idx = int(v_rec.get("slot_index") or 0)
+                if t_date and s_idx in (1, 2):
+                    try:
+                        automation_state.update_daily_record(
+                            t_date,
+                            {
+                                f"slot{s_idx}": {
+                                    "privacy_status": "public",
+                                    "published_public_confirmed": True,
+                                    "published_public_at": v_rec["youtube_published_public_at"],
+                                }
+                            },
+                        )
+                    except Exception:
+                        pass
+
+                notifier.notify_publication_success(
+                    video_id=vid_id,
+                    title=title,
+                    youtube_id=yt_id,
+                    published_at_ist=pub_ist_str,
+                    privacy_status="public",
+                )
+            elif (now_utc - sched_dt).total_seconds() >= 1800:
+                counts["missed"] += 1
+                notifier.notify_failure(
+                    failure_type="MISSED_PUBLICATION",
+                    title=f"Scheduled publication delayed/missed for {title}",
+                    detail=f"privacyStatus is still '{privacy}' 30+ min past publishAt={sched_utc_str}",
+                    video_id=vid_id,
+                    youtube_id=yt_id,
+                    dedup_key=f"missed_pub:{yt_id}:{today_str}",
+                )
+
+        return counts
+
+    def maybe_send_daily_summary(self, force_hour_check: bool = True) -> Optional[Dict[str, Any]]:
+        """Send one Telegram daily operational summary per IST day after configured summary hour."""
+        now_ist = self.now_ist()
+        if force_hour_check and now_ist.hour < config.TELEGRAM_DAILY_SUMMARY_HOUR_IST:
+            return None
+
+        today_str = now_ist.strftime("%Y-%m-%d")
+        all_vids = db.get_all_videos(limit=100)
+        if not isinstance(all_vids, list):
+            all_vids = []
+
+        today_vids = [v for v in all_vids if isinstance(v, dict) and v.get("target_date") == today_str and not v.get("is_test")]
+        prod_count = sum(1 for v in today_vids if v.get("production_status") == "COMPLETED")
+        pub_count = sum(1 for v in today_vids if v.get("youtube_privacy_status") == "public" or v.get("publishing_status") == "PUBLISHED")
+
+        now_utc = datetime.now(timezone.utc)
+        upcoming: List[Tuple[datetime, str]] = []
+        sched_pending = 0
+        for v in all_vids:
+            if not isinstance(v, dict) or not is_real_youtube_upload(v):
+                continue
+            if str(v.get("youtube_upload_id") or "") in NON_PRODUCTION_TEST_YOUTUBE_IDS or v.get("is_test"):
+                continue
+            pub_str = v.get("scheduled_publish_at")
+            if pub_str and v.get("youtube_privacy_status") != "public":
+                try:
+                    dt = datetime.fromisoformat(str(pub_str).replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt > now_utc:
+                        sched_pending += 1
+                        upcoming.append((dt.astimezone(self.tz), str(v.get("video_id"))))
+                except Exception:
+                    pass
+
+        upcoming.sort(key=lambda item: item[0])
+        next_sched_str = (
+            f"{upcoming[0][0].strftime('%Y-%m-%d %H:%M IST')} ({upcoming[0][1]})"
+            if upcoming
+            else "None queued"
+        )
+
+        yt_health = token_manager.get_summary().get("youtube", {})
+        oauth_status = str(yt_health.get("status") or "UNKNOWN")
+        reauth_ist = str(yt_health.get("estimated_reauth_date_ist") or "Unknown")
+        last_err = str(self._state.get("last_error") or "")
+
+        return get_telegram_notifier().notify_daily_summary(
+            date_str=today_str,
+            production_count=prod_count,
+            daily_limit=MAX_DAILY_VIDEOS,
+            published_public_count=pub_count,
+            scheduled_pending_count=sched_pending,
+            next_scheduled_ist=next_sched_str,
+            oauth_status=oauth_status,
+            oauth_reauth_ist=reauth_ist,
+            last_failure=last_err,
+        )
 
     def _needs_retryable_work(self, date_str: str) -> bool:
         """Return True if date_str has unfinished work that is safe to retry automatically."""
@@ -1155,8 +1588,17 @@ class LocalScheduler:
         )
 
         last_attempt_ts = time.monotonic()
+        last_oauth_check_ts = time.monotonic()
+        last_pub_verify_ts = 0.0
+        last_summary_check_ts = 0.0
         retry_attempts_today = 0
         was_enabled = self.is_automation_enabled()
+
+        # Recover any queued Telegram alerts persisted before shutdown/outage
+        try:
+            get_telegram_notifier().flush_pending_events()
+        except Exception:
+            pass
 
         # Availability-driven startup execution for current date
         try:
@@ -1167,6 +1609,7 @@ class LocalScheduler:
                 last_attempt_ts = time.monotonic()
             else:
                 logger.info("Automation is PAUSED at startup; scheduler remaining idle.")
+                self.check_oauth_lifecycle_and_notify()
         except Exception as e:
             logger.error(f"Error during startup daily automation: {e}")
             self._state["last_error"] = str(e)
@@ -1180,18 +1623,57 @@ class LocalScheduler:
                     logger.info("Graceful shutdown signal detected (.scheduler.stop). Exiting daemon...")
                     break
 
+                config.sync_env_if_updated()
+                youtube_publisher.refresh_credentials_if_changed()
+
                 now = self.now_ist()
+                mono_now = time.monotonic()
                 current_date = now.strftime("%Y-%m-%d")
                 is_enabled = self.is_automation_enabled()
 
                 self._state["last_heartbeat"] = now.isoformat()
                 self._save_state()
 
-                # Date rollover: When date changes in IST, trigger new daily batch
+                # Flush any queued offline Telegram alerts on recovery
+                try:
+                    get_telegram_notifier().flush_pending_events()
+                except Exception:
+                    pass
+
+                # Periodic public-status verification for scheduled videos (every 120s)
+                if (mono_now - last_pub_verify_ts) >= 120:
+                    last_pub_verify_ts = mono_now
+                    try:
+                        self.verify_scheduled_publications()
+                    except Exception as exc:
+                        logger.warning("Scheduled publication verification check error: %s", exc)
+
+                # Daily / periodic OAuth health verification (every 6h)
+                if (mono_now - last_oauth_check_ts) >= 21600:
+                    last_oauth_check_ts = mono_now
+                    try:
+                        self.check_oauth_lifecycle_and_notify()
+                    except Exception as exc:
+                        logger.warning("Periodic OAuth health check error: %s", exc)
+
+                # Daily operational summary after configured IST hour (deduped per day)
+                if (mono_now - last_summary_check_ts) >= 300:
+                    last_summary_check_ts = mono_now
+                    try:
+                        self.maybe_send_daily_summary()
+                    except Exception as exc:
+                        logger.warning("Daily summary dispatch check error: %s", exc)
+
+                # Date rollover: When date changes in IST, trigger new daily batch & OAuth audit
                 if current_date != last_date:
                     logger.info(f"Date rollover detected ({last_date} -> {current_date}). Initiating daily batch...")
                     last_date = current_date
                     retry_attempts_today = 0
+                    last_oauth_check_ts = mono_now
+                    try:
+                        self.check_oauth_lifecycle_and_notify()
+                    except Exception:
+                        pass
                     if is_enabled:
                         try:
                             self.process_daily_automation(target_date=current_date)

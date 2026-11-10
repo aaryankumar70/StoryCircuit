@@ -78,9 +78,54 @@ class AutomationStateManager:
         """Toggle daily autonomous scheduling."""
         raw = self._load_raw()
         raw["enabled"] = bool(enabled)
+        if enabled:
+            raw["oauth_paused"] = False
+            raw["oauth_pause_reason"] = None
         raw["last_updated"] = datetime.now(timezone.utc).isoformat()
         self._write_atomic(raw)
         logger.info(f"Automation enabled status updated to: {enabled}")
+
+    def pause_for_oauth(self, reason: str) -> Dict[str, Any]:
+        """Safely pause new automation due to OAuth expiration/rejection while preserving schedules."""
+        raw = self._load_raw()
+        prior_enabled = bool(raw.get("oauth_prior_enabled", raw.get("enabled", True))) if raw.get("oauth_paused") else bool(raw.get("enabled", True))
+        raw["enabled"] = False
+        raw["oauth_paused"] = True
+        raw["oauth_pause_reason"] = str(reason)[:300]
+        raw["oauth_paused_at"] = datetime.now(timezone.utc).isoformat()
+        raw["oauth_prior_enabled"] = prior_enabled
+        raw["last_updated"] = datetime.now(timezone.utc).isoformat()
+        self._write_atomic(raw)
+        logger.warning("Paused new automation due to OAuth error (prior_enabled=%s).", prior_enabled)
+        return self.get_oauth_pause()
+
+    def get_oauth_pause(self) -> Dict[str, Any]:
+        """Return whether automation is currently paused specifically for OAuth recovery."""
+        raw = self._load_raw()
+        return {
+            "paused": bool(raw.get("oauth_paused", False)),
+            "reason": raw.get("oauth_pause_reason"),
+            "paused_at": raw.get("oauth_paused_at"),
+            "prior_enabled": bool(raw.get("oauth_prior_enabled", False)),
+        }
+
+    def resume_after_oauth(self) -> bool:
+        """Resume automation after healthy OAuth reauthorization if it was paused for OAuth."""
+        raw = self._load_raw()
+        was_oauth_paused = bool(raw.get("oauth_paused", False))
+        prior_enabled = bool(raw.get("oauth_prior_enabled", True))
+        raw["oauth_paused"] = False
+        raw["oauth_pause_reason"] = None
+        raw["oauth_resumed_at"] = datetime.now(timezone.utc).isoformat()
+        resumed = False
+        if was_oauth_paused and prior_enabled:
+            raw["enabled"] = True
+            resumed = True
+        raw["last_updated"] = datetime.now(timezone.utc).isoformat()
+        self._write_atomic(raw)
+        if resumed:
+            logger.info("Resumed automation automatically after verified YouTube OAuth reauthorization.")
+        return resumed
 
     def get_daily_record(self, date_str: str) -> Dict[str, Any]:
         """Retrieve automation record for a calendar date, initializing default schema if absent."""
@@ -156,6 +201,9 @@ class AutomationStateManager:
         raw = self._load_raw()
         return {
             "enabled": raw.get("enabled", True),
+            "oauth_paused": bool(raw.get("oauth_paused", False)),
+            "oauth_pause_reason": raw.get("oauth_pause_reason"),
+            "oauth_paused_at": raw.get("oauth_paused_at"),
             "timezone": raw.get("timezone", SCHEDULER_TIMEZONE),
             "last_run": raw.get("last_run"),
             "daily_records_count": len(raw.get("daily_records", {})),

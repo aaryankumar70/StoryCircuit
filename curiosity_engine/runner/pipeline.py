@@ -3,28 +3,38 @@ Coordinates content, production, QC, cloud storage, and social distribution.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+from zoneinfo import ZoneInfo
 
 from curiosity_engine.config import (
     INSTAGRAM_PUBLISHING_MODE,
+    MAX_DAILY_VIDEOS,
     OUTPUT_DIR,
+    SCHEDULER_TIMEZONE,
     YOUTUBE_PRIVACY_STATUS,
     YOUTUBE_PUBLISHING_MODE,
 )
 from curiosity_engine.content.scriptwriter import write_video_script
 from curiosity_engine.content.topic_discovery import select_daily_topics
 from curiosity_engine.distribution.instagram_publisher import instagram_publisher
-from curiosity_engine.distribution.youtube_publisher import youtube_publisher
+from curiosity_engine.distribution.youtube_publisher import (
+    NON_PRODUCTION_TEST_YOUTUBE_IDS,
+    DailyPublishingLimitError,
+    YouTubePublisherError,
+    youtube_publisher,
+)
 from curiosity_engine.production.director import prepare_project
 from curiosity_engine.production.renderer import render_project_video, validate_rendered_mp4
 from curiosity_engine.quality.qc_gatekeeper import verify_video
 from curiosity_engine.state.db import db
 
 logger = logging.getLogger("curiosity_engine.pipeline")
+IST = ZoneInfo(SCHEDULER_TIMEZONE)
 
 
 def _has_valid_project_assets(project_dir: Path) -> bool:
@@ -310,6 +320,135 @@ def is_real_youtube_upload(record: Optional[Dict[str, Any]]) -> bool:
     return True
 
 
+def compute_file_sha256(file_path: Path) -> str:
+    """Compute SHA-256 hex digest of a video file."""
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def is_production_publication_record(record: Optional[Dict[str, Any]]) -> bool:
+    """Return True only if record represents an active scheduled or public production publication.
+    Never counts simulated uploads, private unscheduled staging/historical records,
+    or disposable private test videos.
+    """
+    if not is_real_youtube_upload(record):
+        return False
+    if record.get("is_test") or record.get("video_type") == "test":
+        return False
+    yt_id = str(record.get("youtube_upload_id") or "")
+    if yt_id in NON_PRODUCTION_TEST_YOUTUBE_IDS:
+        return False
+    if bool(record.get("schedule_confirmed") and record.get("scheduled_publish_at")):
+        return True
+    if record.get("youtube_privacy_status") == "public" and record.get("publishing_status") in ("PUBLISHED", "SCHEDULED"):
+        return True
+    return False
+
+
+def get_production_publications_by_ist_date() -> Dict[str, List[Dict[str, Any]]]:
+    """Group deduplicated production YouTube publications by their IST publication calendar date."""
+    all_vids = db.get_all_videos(limit=500)
+    if not isinstance(all_vids, list):
+        all_vids = []
+
+    by_date: Dict[str, List[Dict[str, Any]]] = {}
+    seen_yt_ids: Set[str] = set()
+
+    for rec in all_vids:
+        if not isinstance(rec, dict) or not is_production_publication_record(rec):
+            continue
+        yt_id = str(rec.get("youtube_upload_id"))
+        if yt_id in seen_yt_ids:
+            continue
+
+        ts_str = rec.get("scheduled_publish_at") or rec.get("youtube_published_at") or rec.get("published_at")
+        if not ts_str:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            ist_dt = dt.astimezone(IST)
+        except Exception:
+            continue
+
+        seen_yt_ids.add(yt_id)
+        ist_date = ist_dt.strftime("%Y-%m-%d")
+        by_date.setdefault(ist_date, []).append({
+            "video_id": rec.get("video_id"),
+            "youtube_upload_id": yt_id,
+            "ist_datetime": ist_dt,
+            "slot_time": ist_dt.strftime("%H:%M"),
+        })
+
+    return by_date
+
+
+def get_occupied_publication_windows() -> Dict[str, Set[str]]:
+    """Return mapping of IST calendar date -> occupied HH:MM publication slots."""
+    by_date = get_production_publications_by_ist_date()
+    return {
+        date_str: {entry["slot_time"] for entry in entries}
+        for date_str, entries in by_date.items()
+    }
+
+
+def assert_daily_publication_capacity(
+    publish_at_dt: datetime,
+    candidate_video_id: str,
+    candidate_yt_id: Optional[str] = None,
+) -> None:
+    """Enforce maximum two production publications per IST calendar day and no slot double-booking."""
+    if candidate_yt_id and str(candidate_yt_id) in NON_PRODUCTION_TEST_YOUTUBE_IDS:
+        raise YouTubePublisherError(
+            f"Refusing to publish/schedule protected disposable test video ID {candidate_yt_id}."
+        )
+
+    ist_dt = publish_at_dt.astimezone(IST)
+    ist_date = ist_dt.strftime("%Y-%m-%d")
+    slot_time = ist_dt.strftime("%H:%M")
+
+    existing = [
+        entry for entry in get_production_publications_by_ist_date().get(ist_date, [])
+        if entry.get("video_id") != candidate_video_id
+        and (not candidate_yt_id or entry.get("youtube_upload_id") != candidate_yt_id)
+    ]
+
+    if len(existing) >= MAX_DAILY_VIDEOS:
+        raise DailyPublishingLimitError(
+            f"Daily publishing limit reached for {ist_date} IST: "
+            f"{len(existing)}/{MAX_DAILY_VIDEOS} production publications already scheduled "
+            f"({[e.get('youtube_upload_id') for e in existing]})."
+        )
+
+    if any(entry.get("slot_time") == slot_time for entry in existing):
+        raise DailyPublishingLimitError(
+            f"Publication window {ist_date} {slot_time} IST is already occupied by another production video."
+        )
+
+
+def assert_no_duplicate_mp4_upload(video_path: Path, candidate_video_id: str) -> str:
+    """Ensure the exact MP4 file bytes are never uploaded twice to YouTube across production records."""
+    sha256 = compute_file_sha256(video_path)
+    all_vids = db.get_all_videos(limit=500)
+    if not isinstance(all_vids, list):
+        all_vids = []
+
+    for rec in all_vids:
+        if not isinstance(rec, dict) or rec.get("video_id") == candidate_video_id:
+            continue
+        if is_real_youtube_upload(rec) and rec.get("mp4_sha256") == sha256:
+            raise YouTubePublisherError(
+                f"Duplicate MP4 upload blocked for {candidate_video_id}: "
+                f"file matches already-uploaded {rec.get('video_id')} "
+                f"(YouTube ID: {rec.get('youtube_upload_id')})."
+            )
+    return sha256
+
+
 def run_slot_publishing(
     slot_index: int,
     target_date: Optional[str] = None,
@@ -401,6 +540,19 @@ def run_slot_publishing(
     if not has_real_yt and (force_publish or not (record.get("youtube_upload_id") and effective_yt_mode == "simulation")):
         try:
             logger.info(f"Publishing {video_id} to YouTube Shorts (Mode: {effective_yt_mode})...")
+            mp4_sha256: Optional[str] = None
+            if effective_yt_mode == "live":
+                mp4_sha256 = assert_no_duplicate_mp4_upload(local_path, video_id)
+                target_cap_dt = datetime.now(IST)
+                if record.get("scheduled_publish_at"):
+                    try:
+                        target_cap_dt = datetime.fromisoformat(
+                            str(record["scheduled_publish_at"]).replace("Z", "+00:00")
+                        ).astimezone(IST)
+                    except Exception:
+                        target_cap_dt = datetime.now(IST)
+                assert_daily_publication_capacity(target_cap_dt, candidate_video_id=video_id)
+
             yt_description = record.get("youtube_description")
             if not yt_description:
                 from curiosity_engine.content.description_generator import description_generator
@@ -414,10 +566,13 @@ def run_slot_publishing(
                 yt_description = desc_data["full_description"]
                 record["youtube_description"] = yt_description
 
-            other_real_yt_ids = {
+            all_vids_for_excl = db.get_all_videos(limit=100)
+            if not isinstance(all_vids_for_excl, list):
+                all_vids_for_excl = []
+            other_real_yt_ids = set(NON_PRODUCTION_TEST_YOUTUBE_IDS) | {
                 str(r.get("youtube_upload_id"))
-                for r in db.get_all_videos(limit=100)
-                if r.get("video_id") != video_id and is_real_youtube_upload(r)
+                for r in all_vids_for_excl
+                if isinstance(r, dict) and r.get("video_id") != video_id and is_real_youtube_upload(r)
             }
             yt_res = youtube_publisher.upload_short(
                 video_path=local_path,
@@ -435,6 +590,8 @@ def run_slot_publishing(
             record["youtube_privacy_status"] = yt_res.get("privacy_status", YOUTUBE_PRIVACY_STATUS)
             record["youtube_published_at"] = yt_res.get("published_at", datetime.now(timezone.utc).isoformat())
             record["schedule_confirmed"] = bool(yt_res.get("schedule_confirmed") and not yt_res.get("simulated"))
+            if mp4_sha256 and not yt_res.get("simulated"):
+                record["mp4_sha256"] = mp4_sha256
             if yt_res.get("publish_at") and record["schedule_confirmed"]:
                 record["scheduled_publish_at"] = yt_res.get("publish_at")
             record["youtube_status"] = (
@@ -449,6 +606,18 @@ def run_slot_publishing(
             db.save_video_record(video_id, record)
             db.log_error("YOUTUBE_PUBLISHER", f"Failed publishing {video_id}: {yt_err}", {"slot": slot_index})
             logger.error(f"YouTube publishing failed for {video_id}: {yt_err}")
+            try:
+                from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
+                err_str = str(yt_err)
+                fail_kind = "AUTH_FAILURE" if ("invalid_grant" in err_str.lower() or "revoked" in err_str.lower()) else "UPLOAD_FAILURE"
+                get_telegram_notifier().notify_failure(
+                    failure_type=fail_kind,
+                    title=f"YouTube publishing failed for {video_id}",
+                    detail=err_str,
+                    video_id=video_id,
+                )
+            except Exception:
+                pass
             raise
 
     # 2. Independent Instagram Reels Upload (Never crashes YouTube success)

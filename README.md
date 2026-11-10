@@ -49,6 +49,7 @@ Once YouTube confirms `status.publishAt`, YouTube handles publication independen
 │   ├── production/                # Director, Kokoro-82M ONNX TTS, Whisper word alignment, Chrome/FFmpeg renderer
 │   ├── quality/                   # Programmatic QC Gatekeeper (duration, geometry, codecs, LUFS, visual checks)
 │   ├── distribution/              # YouTube Data API v3 upload/schedule client & OAuth TokenManager
+│   ├── notifications/             # Persistent, retry-safe Telegram Bot API operational notifier
 │   ├── state/                     # Atomic local JSON store (data/firestore_local.json, excluded from Git)
 │   ├── runner/                    # Slot-independent pipeline, local scheduler daemon, automation state
 │   └── dashboard/                 # Localhost FastAPI management dashboard (127.0.0.1:8000)
@@ -56,10 +57,10 @@ Once YouTube confirms `status.publishAt`, YouTube handles publication independen
 ├── scripts/
 │   ├── auth_youtube.py            # Desktop Google OAuth 2.0 wizard & tokeninfo scope verifier
 │   ├── run_scheduler.py           # Safe CLI runner (--status, --dry-run, --validate, --once --confirm, --daemon)
-│   ├── manage_windows_task.py     # Single Windows Startup VBS registration & background daemon control
+│   ├── manage_windows_task.py     # Dual Windows Startup VBS registration & scheduler/dashboard boot manager
 │   ├── start_scheduler.bat        # Windows batch launcher
-│   ├── start_scheduler.ps1        # Windows PowerShell launcher
-│   └── upload_single_private_test.py
+│   └── start_scheduler.ps1        # Windows PowerShell launcher
+├── reauthorize_youtube.bat        # One-click full-scope OAuth reauthorization & validation helper
 ├── docs/                          # Static GitHub Pages OAuth branding homepage & privacy policy
 ├── tests/                         # Pytest unit and integration test suite
 ├── requirements.txt
@@ -97,20 +98,37 @@ Key safety defaults in `curiosity_engine/config.py`:
 - `INSTAGRAM_PUBLISHING_MODE=disabled` (strict ₹0 default; zero Instagram network calls)
 
 #### 4. Configure Google OAuth & YouTube Data API v3
-1. In Google Cloud Console, enable **YouTube Data API v3** and configure an **OAuth consent screen** (set to **External** and publish to **In production** to avoid 7-day Testing refresh-token expiration).
+1. In Google Cloud Console, enable **YouTube Data API v3** and configure an **OAuth consent screen**.
+   > **Note on Google OAuth Testing Mode:** If the consent screen remains in `Testing` status, Google expires refresh tokens roughly every **7 days**. CurioLoop tracks the authorization timestamp in `data/token_state.json`, alerts Telegram 24 hours before expiry, safely pauses new publishing if revoked, and provides 1-click recovery below.
 2. Create an OAuth 2.0 Client ID of type **Desktop app** and set `YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET` in `.env`.
-3. Authorize locally and save `YOUTUBE_REFRESH_TOKEN`:
+3. Authorize locally with full upload + scheduling scopes (`youtube.upload`, `youtube.readonly`, `youtube.force-ssl`):
    ```bash
-   python scripts/auth_youtube.py --scope-mode narrow   # youtube.upload + youtube.readonly
-   # Or include youtube.force-ssl for videos.update schedule cancellation/retries:
-   python scripts/auth_youtube.py --scope-mode full
+   python scripts/auth_youtube.py --force --scope-mode full --yes
    ```
 4. Verify credentials, binaries, models, and OAuth scopes (read-only):
    ```bash
    python scripts/run_scheduler.py --validate
    ```
 
-#### 5. Safe Scheduler Usage & Startup Automation
+**7-Day OAuth Reauthorization (2 One-Step Options):**
+- **From Dashboard:** Open `http://127.0.0.1:8000` and click **Reconnect YouTube Account**. Complete browser sign-in; the running scheduler and dashboard automatically hot-reload `.env`, verify `can_upload` + `can_update_schedule`, send a Telegram confirmation, and resume automation if it was paused due to OAuth expiration.
+- **Standalone Fallback:** Double-click `reauthorize_youtube.bat` in the project root (`D:\yt`).
+
+#### 5. Telegram Operational Notifications (Optional, Free Bot API)
+Add your Telegram bot credentials to `.env` (**never commit `.env`**):
+```dotenv
+TELEGRAM_BOT_TOKEN=123456789:your-bot-token-here
+TELEGRAM_CHAT_ID=your-chat-id
+TELEGRAM_DAILY_SUMMARY_HOUR_IST=21
+```
+CurioLoop automatically dispatches deduplicated, locally persisted notifications with bounded retries and outage recovery (`data/notifications_state.json`):
+- **Public Publication Confirmed:** Triggered **only** after the YouTube API confirms `privacyStatus == "public"` (never merely on private upload or scheduling).
+- **OAuth Lifecycle:** Proactive warning ~24 hours before the 7-day Testing expiration, plus an urgent alert if a refresh token is revoked/rejected.
+- **Operational Failures:** Alerts on upload, scheduling, processing, YouTube rejection, authentication, or missed-publication delays.
+- **Daily IST Summary:** One summary per day summarizing produced count vs daily limit, next scheduled video, OAuth reauth estimate, and any errors.
+Telegram errors are strictly isolated and logged cleanly without tokens so notification outages never interrupt publishing.
+
+#### 6. Safe Scheduler Usage & Automatic Windows Dual Startup
 Always run read-only diagnostics before live execution:
 ```bash
 python scripts/run_scheduler.py --status      # Read-only telemetry & Windows startup state
@@ -120,21 +138,34 @@ python scripts/run_scheduler.py --validate    # Dependency & OAuth check
 Single-shot execution requires explicit confirmation (`--confirm`), and daily unattended automation is gated by `automation_state` (`enabled`) plus `YOUTUBE_PUBLISHING_MODE`:
 ```bash
 python scripts/run_scheduler.py --once --confirm
-python scripts/run_scheduler.py --daemon --interval 15
-python scripts/manage_windows_task.py register   # Registers non-admin Windows Startup VBS launcher
+python scripts/manage_windows_task.py register   # Registers single non-admin Startup VBS launcher
+python scripts/manage_windows_task.py boot       # Starts BOTH scheduler daemon & dashboard (idempotent)
+python scripts/manage_windows_task.py status     # Checks scheduler PID, dashboard port 8000, & VBS startup
+python scripts/manage_windows_task.py stop-all   # Cleanly stops both daemon and dashboard
 ```
+Upon Windows login, the single non-admin Startup launcher (`CurioLoopScheduler.vbs`) invokes `scripts/manage_windows_task.py boot` via `pythonw.exe` (hidden, detached):
+- **Scheduler Daemon:** `scripts/run_scheduler.py --daemon --interval 15` guarded by `data/.scheduler.lock` -> logs to `data/scheduler.log`.
+- **Dashboard Server:** `uvicorn curiosity_engine.dashboard.app:app --host 127.0.0.1 --port 8000` guarded by `data/.dashboard.lock` and TCP port check -> logs to `data/dashboard.log`.
+- Startup events are logged to `data/startup.log`. Duplicate launches are skipped automatically, and if either service fails to boot, the other still starts cleanly.
 
-#### 6. Launch Local Management Dashboard
-```bash
-uvicorn curiosity_engine.dashboard.app:app --host 127.0.0.1 --port 8000
-```
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to inspect videos, edit descriptions, toggle automation pause/resume, check token health, and view read-only validation/dry-run diagnostics. The dashboard binds strictly to `127.0.0.1`, enforces a locally generated `X-Studio-Auth` header on mutating routes, and redacts tokens/secrets from API payloads.
+#### 7. Local Management Dashboard
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000) (auto-started on Windows login via `boot`, or start manually with `python scripts/manage_windows_task.py start-dashboard`).
+Features:
+- **Operational Status Overview:** Scheduler PID/status, dashboard health, YouTube OAuth health & 7-day estimated reauth date, next scheduled video, today's production count, Telegram status & queue count, last confirmed public publish, and last failure.
+- **Safe Controls:** `Reconnect YouTube Account`, `View Scheduler Status`, `Notifications` history viewer, `Dashboard Logs` sanitized tail viewer, confirmation-gated `Pause / Resume Automation`, `Validate Config`, and `Dry-Run Preview`.
+- **Security:** Bound strictly to `127.0.0.1`, mutating actions protected via `X-Studio-Auth`, all credentials redacted automatically.
 
-#### 7. Run Automated Tests
+#### 8. Run Automated Tests
 ```bash
 python -m pytest tests/ -v
 ```
 The unit/integration tests run fully locally with mocked external APIs and never upload real videos or touch production credentials.
+
+#### 9. Troubleshooting
+- **OAuth Expired / Automation Paused:** New publishing pauses automatically while already-scheduled YouTube videos remain untouched. Click **Reconnect YouTube Account** in the dashboard or run `reauthorize_youtube.bat`.
+- **Dashboard Unavailable on `127.0.0.1:8000`:** Run `python scripts/manage_windows_task.py start-dashboard` and inspect `data/dashboard.log` + `data/startup.log`.
+- **Telegram Alerts Not Arriving:** Ensure both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set in `.env` and send `/start` to your bot first. Queued messages retry automatically on scheduler startup/poll.
+- **Scheduler Duplicate Prevention:** If `.scheduler.lock` or `.dashboard.lock` contains a stale PID after an unexpected reboot, `manage_windows_task.py boot` verifies PID liveness + port `8000` before starting cleanly.
 
 ---
 

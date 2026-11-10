@@ -263,12 +263,51 @@
         <span id="igBadge" class="badge" style="background:#e1306c20; color:#f472b6; border:1px solid #e1306c40;">IG: DISABLED</span>
         <span id="schedBadge" class="badge" style="background:#6366f120; color:#a5b4fc; border:1px solid #6366f140;">SCHEDULER: STOPPED</span>
         <button id="toggleBtn" class="btn btn-outline" onclick="toggleAutomation()">Automation: Active</button>
+        <button class="btn btn-outline" onclick="reconnectYouTube()">Reconnect YouTube Account</button>
+        <button class="btn btn-outline" onclick="viewSchedulerStatus()">Scheduler Status</button>
+        <button class="btn btn-outline" onclick="viewNotificationHistory()">Notifications</button>
+        <button class="btn btn-outline" onclick="viewLogsTail('dashboard')">Dashboard Logs</button>
         <button class="btn btn-outline" onclick="runValidateConfig()">Validate Config</button>
         <button class="btn btn-outline" onclick="runDryRunPreview()">Dry-Run Preview</button>
         <button class="btn btn-primary" onclick="triggerAction('generate')">Generate Missing Slots</button>
         <button class="btn btn-danger" onclick="triggerEmergency()">Emergency Stop</button>
       </div>
     </header>
+
+    <!-- Operational Status Grid -->
+    <div class="card" id="opsStatusCard" style="margin-bottom:20px;">
+      <div class="card-title">
+        <span>Operational Status Overview</span>
+        <span id="opsPauseBanner" class="badge" style="display:none; background:#ef444425; color:#f87171;">OAUTH PAUSED</span>
+      </div>
+      <div class="quota-grid" style="grid-template-columns: repeat(3, 1fr); gap:10px;">
+        <div class="quota-item">
+          <div class="quota-title">Scheduler Daemon</div>
+          <div class="quota-val" id="opsScheduler" style="font-size:13px;">Checking...</div>
+        </div>
+        <div class="quota-item">
+          <div class="quota-title">Dashboard Health</div>
+          <div class="quota-val" id="opsDashboard" style="font-size:13px;">Checking...</div>
+        </div>
+        <div class="quota-item">
+          <div class="quota-title">YouTube OAuth &amp; Reauth Est.</div>
+          <div class="quota-val" id="opsOauth" style="font-size:13px;">Checking...</div>
+        </div>
+        <div class="quota-item">
+          <div class="quota-title">Next Scheduled Video</div>
+          <div class="quota-val" id="opsNextSched" style="font-size:13px;">None queued</div>
+        </div>
+        <div class="quota-item">
+          <div class="quota-title">Today's Production &amp; Telegram</div>
+          <div class="quota-val" id="opsProdTelegram" style="font-size:13px;">0 / 2 • Checking...</div>
+        </div>
+        <div class="quota-item">
+          <div class="quota-title">Last Public Publish / Last Failure</div>
+          <div class="quota-val" id="opsLastEvents" style="font-size:12px;">None recorded</div>
+        </div>
+      </div>
+      <div id="reauthStatusBanner" style="display:none; margin-top:12px; padding:10px 12px; border-radius:8px; background:#6366f118; border:1px solid #6366f144; font-size:12px; color:#c7d2fe;"></div>
+    </div>
 
     <div class="dashboard-grid">
       <!-- Left Column: Video Showcase & History -->
@@ -334,7 +373,9 @@
                 <span id="ytTokenBadge" class="badge" style="background:#222; color:#888;">CHECKING</span>
               </div>
               <div id="ytTokenScopes" style="margin-top:6px; font-size:11px; color:var(--text-muted); font-family:'JetBrains Mono', monospace;"></div>
+              <div id="ytTokenReauth" style="margin-top:4px; font-size:11px; color:#a5b4fc; font-family:'JetBrains Mono', monospace;"></div>
               <div id="ytTokenAlert" style="display:none;" class="token-alert"></div>
+              <button id="reconnectYtBtn" class="btn btn-outline" style="width:100%; margin-top:8px; font-size:11px; padding:6px;" onclick="reconnectYouTube()">🔄 Reconnect YouTube Account</button>
             </div>
             <div class="token-card">
               <div class="token-header">
@@ -654,9 +695,15 @@
           const ytBadge = document.getElementById('ytTokenBadge');
           const ytAlert = document.getElementById('ytTokenAlert');
           const ytScopesEl = document.getElementById('ytTokenScopes');
+          const ytReauthEl = document.getElementById('ytTokenReauth');
           const shortScopes = (ytHealth.scopes || []).map(s => s.split('/').pop()).join(', ');
           if (ytScopesEl) {
             ytScopesEl.innerText = shortScopes ? `Granted scopes: ${shortScopes}` : '';
+          }
+          if (ytReauthEl) {
+            ytReauthEl.innerText = ytHealth.estimated_reauth_date_ist
+              ? `7-Day Testing Mode Est. Reauth: ${ytHealth.estimated_reauth_date_ist} (${ytHealth.hours_until_expiry ?? '?'}h left)`
+              : '';
           }
           if (ytHealth.healthy) {
             ytBadge.innerText = 'HEALTHY';
@@ -787,6 +834,37 @@
           historyTable.innerHTML = '<p style="color: var(--text-muted);">No historical records found.</p>';
         }
 
+        // Operational Status Overview
+        if (data.operational_status) {
+          const ops = data.operational_status;
+          const pauseBanner = document.getElementById('opsPauseBanner');
+          if (pauseBanner) {
+            if (ops.youtube_auth_health?.oauth_paused) {
+              pauseBanner.style.display = 'inline-block';
+              pauseBanner.innerText = 'OAUTH PAUSED — RECONNECT REQUIRED';
+            } else {
+              pauseBanner.style.display = 'none';
+            }
+          }
+          document.getElementById('opsScheduler').innerText = ops.scheduler_running
+            ? `RUNNING (PID ${ops.scheduler_pid || '?'})`
+            : 'STOPPED';
+          document.getElementById('opsDashboard').innerText = `${ops.dashboard_health?.status || 'HEALTHY'} (${ops.dashboard_health?.host}:${ops.dashboard_health?.port})`;
+          const ytAuth = ops.youtube_auth_health || {};
+          document.getElementById('opsOauth').innerText = `${ytAuth.status || 'UNKNOWN'}${ytAuth.estimated_reauth_date_ist ? ' • Reauth ' + ytAuth.estimated_reauth_date_ist : ''}`;
+          const nxt = ops.next_scheduled_video;
+          document.getElementById('opsNextSched').innerText = nxt
+            ? `${nxt.youtube_id || nxt.video_id} @ ${nxt.scheduled_publish_at_ist}`
+            : 'None queued';
+          const tg = ops.telegram_health || {};
+          document.getElementById('opsProdTelegram').innerText = `${ops.todays_production_count ?? 0} / ${ops.daily_limit ?? 2} videos • TG: ${tg.status || 'UNKNOWN'}${tg.pending_count ? ` (${tg.pending_count} pending)` : ''}`;
+          const lastPubText = ops.last_successful_publication
+            ? `Public: ${ops.last_successful_publication.youtube_id}`
+            : 'No public publish yet';
+          const lastFailText = ops.last_failure ? `Fail: ${String(ops.last_failure).slice(0, 60)}` : 'No recent failure';
+          document.getElementById('opsLastEvents').innerText = `${lastPubText} • ${lastFailText}`;
+        }
+
       } catch (e) {
         console.error('Failed to load dashboard data:', e);
       }
@@ -812,6 +890,8 @@
     }
 
     async function toggleAutomation() {
+      const actionText = document.getElementById('toggleBtn')?.innerText?.includes('PAUSED') ? 'RESUME' : 'PAUSE';
+      if (!confirm(`Confirm ${actionText} daily autonomous scheduling and publishing?`)) return;
       try {
         const res = await fetch('/api/toggle_automation', {
           method: 'POST',
@@ -825,6 +905,91 @@
         loadData();
       } catch (e) {
         alert(`Request failed: ${e}`);
+      }
+    }
+
+    let _reauthPollHandle = null;
+    async function reconnectYouTube() {
+      if (!confirm("Open YouTube OAuth browser sign-in to refresh authorization with full upload & scheduling scopes?")) return;
+      const banner = document.getElementById('reauthStatusBanner');
+      if (banner) {
+        banner.style.display = 'block';
+        banner.innerText = 'Starting YouTube OAuth reauthorization flow (http://localhost:8080/)...';
+      }
+      try {
+        const res = await fetch('/api/oauth/reauthorize', {
+          method: 'POST',
+          headers: { 'X-Studio-Auth': AUTH_HEADER }
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (banner) banner.innerText = `Reauthorization blocked: ${data.detail || res.status}`;
+          return;
+        }
+        if (banner) banner.innerText = data.message || 'Complete Google consent sign-in in browser...';
+        if (_reauthPollHandle) clearInterval(_reauthPollHandle);
+        _reauthPollHandle = setInterval(async () => {
+          try {
+            const stRes = await fetch('/api/oauth/reauthorize/status');
+            const st = await stRes.json();
+            if (banner) banner.innerText = `[OAuth ${st.state}] ${st.message || ''}`;
+            if (st.state === 'succeeded' || st.state === 'failed') {
+              clearInterval(_reauthPollHandle);
+              _reauthPollHandle = null;
+              loadData();
+            }
+          } catch (_) {}
+        }, 2500);
+      } catch (e) {
+        if (banner) banner.innerText = `Failed starting reauthorization: ${e}`;
+      }
+    }
+
+    async function viewSchedulerStatus() {
+      const card = document.getElementById('diagCard');
+      const title = document.getElementById('diagTitle');
+      const out = document.getElementById('diagOutput');
+      card.style.display = 'block';
+      title.innerText = 'Scheduler & Windows Startup Status';
+      out.innerText = 'Loading scheduler and dashboard startup telemetry...';
+      try {
+        const res = await fetch('/api/scheduler/task_status');
+        const data = await res.json();
+        out.innerText = JSON.stringify(data, null, 2);
+      } catch (e) {
+        out.innerText = `Failed fetching scheduler status: ${e}`;
+      }
+    }
+
+    async function viewNotificationHistory() {
+      const card = document.getElementById('diagCard');
+      const title = document.getElementById('diagTitle');
+      const out = document.getElementById('diagOutput');
+      card.style.display = 'block';
+      title.innerText = 'Telegram Notification Health & Recent History';
+      out.innerText = 'Loading notification history...';
+      try {
+        const res = await fetch('/api/notifications?limit=30');
+        const data = await res.json();
+        out.innerText = JSON.stringify(data, null, 2);
+      } catch (e) {
+        out.innerText = `Failed loading notification history: ${e}`;
+      }
+    }
+
+    async function viewLogsTail(source = 'dashboard') {
+      const card = document.getElementById('diagCard');
+      const title = document.getElementById('diagTitle');
+      const out = document.getElementById('diagOutput');
+      card.style.display = 'block';
+      title.innerText = `Recent Logs Tail (${source}.log - Sanitized)`;
+      out.innerText = `Loading ${source}.log...`;
+      try {
+        const res = await fetch(`/api/logs/tail?source=${encodeURIComponent(source)}&lines=80`);
+        const data = await res.json();
+        out.innerText = data.exists ? (data.lines || []).join('\n') : `Log file not yet created at ${data.path}`;
+      } catch (e) {
+        out.innerText = `Failed loading ${source} logs: ${e}`;
       }
     }
 

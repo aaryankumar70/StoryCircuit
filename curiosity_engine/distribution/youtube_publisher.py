@@ -19,6 +19,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
+from curiosity_engine import config
 from curiosity_engine.config import (
     PUBLISHING_MODE,
     YOUTUBE_CLIENT_ID,
@@ -37,9 +38,18 @@ SCOPES = [
     "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 
+# Disposable test uploads that must never count toward daily production limits
+# or be modified/rescheduled by automated production jobs.
+NON_PRODUCTION_TEST_YOUTUBE_IDS = frozenset({"N3QUKd0u71U"})
+
 
 class YouTubePublisherError(Exception):
     """Base exception for YouTube publishing errors."""
+    pass
+
+
+class DailyPublishingLimitError(YouTubePublisherError):
+    """Raised when daily production publication limit or slot capacity is reached."""
     pass
 
 
@@ -68,13 +78,31 @@ class YouTubePublisher:
         refresh_token: Optional[str] = None,
         mode: Optional[str] = None,
     ):
-        self.client_id = client_id if client_id is not None else (YOUTUBE_CLIENT_ID or os.environ.get("YOUTUBE_CLIENT_ID"))
-        self.client_secret = client_secret if client_secret is not None else (YOUTUBE_CLIENT_SECRET or os.environ.get("YOUTUBE_CLIENT_SECRET"))
-        self.refresh_token = refresh_token if refresh_token is not None else (YOUTUBE_REFRESH_TOKEN or os.environ.get("YOUTUBE_REFRESH_TOKEN"))
+        if client_id is None and client_secret is None and refresh_token is None:
+            config.sync_env_if_updated()
+        self.client_id = client_id if client_id is not None else (os.environ.get("YOUTUBE_CLIENT_ID") or config.YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_ID)
+        self.client_secret = client_secret if client_secret is not None else (os.environ.get("YOUTUBE_CLIENT_SECRET") or config.YOUTUBE_CLIENT_SECRET or YOUTUBE_CLIENT_SECRET)
+        self.refresh_token = refresh_token if refresh_token is not None else (os.environ.get("YOUTUBE_REFRESH_TOKEN") or config.YOUTUBE_REFRESH_TOKEN or YOUTUBE_REFRESH_TOKEN)
         self.mode = (mode or YOUTUBE_PUBLISHING_MODE or PUBLISHING_MODE or "simulation").strip().lower()
         self.daily_upload_limit = YOUTUBE_UPLOAD_DAILY_LIMIT
         self.service = None
         self._init_service()
+
+    def refresh_credentials_if_changed(self) -> bool:
+        """Hot-reload YouTube credentials from .env if updated by reauthorization."""
+        config.sync_env_if_updated()
+        new_cid = os.environ.get("YOUTUBE_CLIENT_ID") or config.YOUTUBE_CLIENT_ID or ""
+        new_sec = os.environ.get("YOUTUBE_CLIENT_SECRET") or config.YOUTUBE_CLIENT_SECRET or ""
+        new_ref = os.environ.get("YOUTUBE_REFRESH_TOKEN") or config.YOUTUBE_REFRESH_TOKEN or ""
+        if (new_cid, new_sec, new_ref) != (self.client_id or "", self.client_secret or "", self.refresh_token or ""):
+            if new_cid and new_sec and new_ref:
+                self.client_id = new_cid
+                self.client_secret = new_sec
+                self.refresh_token = new_ref
+                self._init_service()
+                logger.info("Reloaded updated YouTube OAuth credentials from .env.")
+                return True
+        return False
 
     def _init_service(self) -> None:
         """Initialize Google API client if credentials are provided."""
@@ -493,8 +521,13 @@ class YouTubePublisher:
         self,
         video_id: str,
         force_mode: Optional[str] = None,
+        verify_timeout_sec: float = 20.0,
+        poll_interval_sec: float = 2.0,
     ) -> Dict[str, Any]:
-        """Cancel scheduled publication on a private YouTube video, keeping it private."""
+        """Cancel scheduled publication on a private YouTube video, keeping it private.
+        Executes videos.update once and uses bounded readback polling to handle
+        YouTube Data API read-after-write propagation delay.
+        """
         effective_mode = (force_mode or self.mode).strip().lower()
         if effective_mode != "live":
             return {
@@ -520,23 +553,46 @@ class YouTubePublisher:
                 body={"id": video_id, "status": merged_status},
             ).execute()
             status_obj = response.get("status", {})
-            verified = self.get_video_status(video_id)
-            final_privacy = (verified or {}).get("privacy_status") or status_obj.get("privacyStatus")
-            final_publish_at = (verified or {}).get("publish_at") if verified is not None else status_obj.get("publishAt")
-            if final_privacy != "private" or final_publish_at:
-                raise YouTubePublisherError(
-                    f"YouTube API did not confirm schedule cancellation for {video_id}: "
-                    f"privacy={final_privacy}, publishAt={final_publish_at}"
-                )
-            logger.info(f"Cancelled scheduled publication for {video_id}; video remains private.")
-            return {
-                "success": True,
-                "video_id": video_id,
-                "privacy_status": final_privacy,
-                "publish_at": final_publish_at,
-                "schedule_cancelled": True,
-                "simulated": False,
-            }
+            last_privacy = status_obj.get("privacyStatus")
+            last_publish_at = status_obj.get("publishAt")
+
+            # Bounded read-after-write polling; videos.update is never repeated.
+            timeout_sec = max(0.0, float(verify_timeout_sec))
+            interval_sec = max(0.0, float(poll_interval_sec))
+            deadline = time.monotonic() + timeout_sec
+            attempt = 0
+
+            while True:
+                attempt += 1
+                verified = self.get_video_status(video_id)
+                if verified is not None:
+                    last_privacy = verified.get("privacy_status")
+                    last_publish_at = verified.get("publish_at")
+                    if last_privacy == "private" and not last_publish_at:
+                        logger.info(
+                            f"Cancelled scheduled publication for {video_id} "
+                            f"(confirmed on readback attempt {attempt}); video remains private."
+                        )
+                        return {
+                            "success": True,
+                            "video_id": video_id,
+                            "privacy_status": last_privacy,
+                            "publish_at": last_publish_at,
+                            "schedule_cancelled": True,
+                            "simulated": False,
+                        }
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                sleep_sec = min(interval_sec, remaining)
+                if sleep_sec > 0:
+                    time.sleep(sleep_sec)
+
+            raise YouTubePublisherError(
+                f"Timed out after {timeout_sec:.1f}s confirming schedule cancellation for {video_id}: "
+                f"last observed privacyStatus={last_privacy!r}, publishAt={last_publish_at!r}"
+            )
         except YouTubePublisherError:
             raise
         except HttpError as e:

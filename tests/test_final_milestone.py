@@ -32,6 +32,7 @@ from curiosity_engine.config import DASHBOARD_SECRET_KEY
 from curiosity_engine.content.topic_discovery import select_daily_topics
 from curiosity_engine.dashboard.app import app, compute_ui_status
 from curiosity_engine.distribution.youtube_publisher import (
+    DailyPublishingLimitError,
     YouTubeAuthError,
     YouTubePublisher,
     YouTubePublisherError,
@@ -45,9 +46,14 @@ from curiosity_engine.runner.automation_state import AutomationStateManager
 from curiosity_engine.runner.local_scheduler import (
     IST,
     LocalScheduler,
+    allocate_slot_publication_time,
     calculate_publication_times,
 )
 from curiosity_engine.runner.pipeline import (
+    assert_daily_publication_capacity,
+    assert_no_duplicate_mp4_upload,
+    compute_file_sha256,
+    get_production_publications_by_ist_date,
     is_slot_generation_complete,
     produce_single_video,
     run_daily_generation,
@@ -113,6 +119,142 @@ class TestPublicationTimeCalculation:
         dt_ist = datetime(2026, 11, 10, 12, 30, 0, tzinfo=IST)
         rfc3339 = dt_ist.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         assert rfc3339 == "2026-11-10T07:00:00.000Z"
+
+    def test_daily_publication_limit_max_two_per_ist_day(self):
+        mock_db = MagicMock()
+        mock_db.get_all_videos.return_value = [
+            {
+                "video_id": "video_20261111_slot1",
+                "youtube_upload_id": "yt_real_1",
+                "youtube_simulated": False,
+                "schedule_confirmed": True,
+                "scheduled_publish_at": "2026-11-11T07:00:00.000Z",  # 12:30 IST
+            },
+            {
+                "video_id": "video_20261111_slot2",
+                "youtube_upload_id": "yt_real_2",
+                "youtube_simulated": False,
+                "schedule_confirmed": True,
+                "scheduled_publish_at": "2026-11-11T15:00:00.000Z",  # 20:30 IST
+            },
+        ]
+        with patch("curiosity_engine.runner.pipeline.db", mock_db):
+            with pytest.raises(DailyPublishingLimitError):
+                assert_daily_publication_capacity(
+                    datetime(2026, 11, 11, 16, 0, tzinfo=IST),
+                    candidate_video_id="video_20261111_extra",
+                )
+            # Same record updating idempotently is permitted
+            assert_daily_publication_capacity(
+                datetime(2026, 11, 11, 12, 30, tzinfo=IST),
+                candidate_video_id="video_20261111_slot1",
+                candidate_yt_id="yt_real_1",
+            )
+
+    def test_private_test_videos_never_counted_toward_daily_limit(self):
+        mock_db = MagicMock()
+        mock_db.get_all_videos.return_value = [
+            {
+                "video_id": "disposable_test_1",
+                "youtube_upload_id": "N3QUKd0u71U",
+                "youtube_simulated": False,
+                "youtube_privacy_status": "private",
+                "schedule_confirmed": False,
+                "is_test": True,
+            },
+            {
+                "video_id": "video_20261109_slot1",
+                "youtube_upload_id": "nf_uztFNO8w",
+                "youtube_simulated": False,
+                "youtube_privacy_status": "private",
+                "publishing_status": "PUBLISHED",
+                "schedule_confirmed": False,
+            },
+            {
+                "video_id": "video_20261109_slot2",
+                "youtube_upload_id": "yt_sim_1794238398",
+                "youtube_simulated": True,
+                "schedule_confirmed": True,
+                "scheduled_publish_at": "2026-11-10T15:00:00.000Z",
+            },
+        ]
+        with patch("curiosity_engine.runner.pipeline.db", mock_db):
+            assert get_production_publications_by_ist_date() == {}
+            assert_daily_publication_capacity(
+                datetime(2026, 11, 10, 20, 30, tzinfo=IST),
+                candidate_video_id="video_20261110_slot2",
+                candidate_yt_id="nf_uztFNO8w",
+            )
+
+    def test_allocate_slot_publication_time_respects_occupied_slots_and_max_two(self):
+        now_morning_nov11 = datetime(2026, 11, 11, 8, 0, 0, tzinfo=IST)
+        occupied = {"2026-11-11": {"12:30"}}
+        s1_dt = allocate_slot_publication_time(1, now_morning_nov11, occupied_by_date=occupied, tz=IST)
+        s2_dt = allocate_slot_publication_time(2, now_morning_nov11, occupied_by_date=occupied, tz=IST)
+
+        # Nov 11 12:30 is occupied -> Slot 1 advances to Nov 12 12:30; Slot 2 fills Nov 11 20:30
+        assert (s1_dt.year, s1_dt.month, s1_dt.day, s1_dt.hour, s1_dt.minute) == (2026, 11, 12, 12, 30)
+        assert (s2_dt.year, s2_dt.month, s2_dt.day, s2_dt.hour, s2_dt.minute) == (2026, 11, 11, 20, 30)
+
+    def test_duplicate_mp4_sha256_blocked_across_records(self, tmp_path):
+        mp4 = tmp_path / "video.mp4"
+        mp4.write_bytes(b"identical-mp4-bytes")
+        sha = compute_file_sha256(mp4)
+        mock_db = MagicMock()
+        mock_db.get_all_videos.return_value = [
+            {
+                "video_id": "video_20261109_slot1",
+                "youtube_upload_id": "nf_uztFNO8w",
+                "youtube_simulated": False,
+                "mp4_sha256": sha,
+            }
+        ]
+        with patch("curiosity_engine.runner.pipeline.db", mock_db):
+            with pytest.raises(YouTubePublisherError) as exc_info:
+                assert_no_duplicate_mp4_upload(mp4, candidate_video_id="video_20261110_slot2")
+            assert "duplicate mp4 upload blocked" in str(exc_info.value).lower()
+
+    def test_process_daily_automation_executes_slots_chronologically(self, tmp_path):
+        sched = LocalScheduler(
+            state_file=tmp_path / "sched.json",
+            lock_file=tmp_path / "sched.lock",
+        )
+        afternoon_nov10 = datetime(2026, 11, 10, 14, 30, 0, tzinfo=IST)
+        call_order = []
+
+        def fake_exec(**kwargs):
+            call_order.append((kwargs["slot_idx"], kwargs["target_pub_dt"].strftime("%Y-%m-%d %H:%M")))
+            return automation_state_mock_rec
+
+        automation_state_mock_rec = {
+            "slot1": {"scheduled_status": "SCHEDULED"},
+            "slot2": {"scheduled_status": "SCHEDULED"},
+        }
+        mock_auto = MagicMock()
+        mock_auto.is_enabled.return_value = True
+        mock_auto.get_daily_record.return_value = {
+            "overall_status": "PARTIAL",
+            "generation": {"status": "COMPLETED"},
+            "slot1": {},
+            "slot2": {},
+        }
+        mock_auto.update_daily_record.return_value = automation_state_mock_rec
+
+        mock_db = MagicMock()
+        mock_db.get_all_videos.return_value = []
+        mock_db.get_video_record.side_effect = lambda vid: {"video_id": vid, "production_status": "COMPLETED", "qc_passed": True}
+
+        with patch.object(sched, "now_ist", return_value=afternoon_nov10), \
+             patch.object(sched, "reconcile_daily_state", return_value=automation_state_mock_rec), \
+             patch.object(sched, "_execute_slot_upload_and_schedule", side_effect=fake_exec), \
+             patch("curiosity_engine.runner.local_scheduler.automation_state", mock_auto), \
+             patch("curiosity_engine.runner.local_scheduler.db", mock_db), \
+             patch("curiosity_engine.runner.local_scheduler.is_slot_generation_complete", return_value=True), \
+             patch("curiosity_engine.runner.local_scheduler.get_occupied_publication_windows", return_value={}):
+            sched.process_daily_automation(target_date="2026-11-10")
+
+        # Today 20:30 (Slot 2) MUST execute chronologically before Tomorrow 12:30 (Slot 1)
+        assert call_order == [(2, "2026-11-10 20:30"), (1, "2026-11-11 12:30")]
 
 
 # =============================================================================
@@ -215,8 +357,67 @@ class TestYouTubeScheduledPublishing:
         assert res["schedule_cancelled"] is True
         assert res["privacy_status"] == "private"
         assert res["publish_at"] is None
+        assert mock_videos.update.call_count == 1
         update_call = mock_videos.update.call_args.kwargs
         assert "publishAt" not in update_call["body"]["status"]
+
+    def test_cancel_schedule_live_delayed_propagation_succeeds(self):
+        publisher = YouTubePublisher(mode="live", client_id="cid", client_secret="sec", refresh_token="ref")
+        mock_service = MagicMock()
+        mock_videos = MagicMock()
+        mock_videos.list.return_value.execute.side_effect = [
+            {"items": [{"status": {"privacyStatus": "private", "publishAt": "2026-11-17T12:00:00Z"}}]},
+            {"items": [{"status": {"privacyStatus": "private", "publishAt": "2026-11-17T12:00:00Z"}, "snippet": {"title": "Test"}}]},
+            {"items": [{"status": {"privacyStatus": "private", "publishAt": "2026-11-17T12:00:00Z"}, "snippet": {"title": "Test"}}]},
+            {"items": [{"status": {"privacyStatus": "private", "uploadStatus": "uploaded"}, "snippet": {"title": "Test"}}]},
+        ]
+        mock_videos.update.return_value.execute.return_value = {
+            "id": "real_video_xyz",
+            "status": {"privacyStatus": "private", "publishAt": "2026-11-17T12:00:00Z"},
+        }
+        mock_service.videos.return_value = mock_videos
+        publisher.service = mock_service
+        publisher.is_configured = MagicMock(return_value=True)
+
+        with patch("curiosity_engine.distribution.youtube_publisher.time.monotonic", side_effect=[0.0, 2.0, 4.0]), \
+             patch("curiosity_engine.distribution.youtube_publisher.time.sleep") as mock_sleep:
+            res = publisher.cancel_schedule("real_video_xyz", force_mode="live")
+
+        assert res["success"] is True
+        assert res["schedule_cancelled"] is True
+        assert res["privacy_status"] == "private"
+        assert res["publish_at"] is None
+        assert mock_videos.update.call_count == 1
+        assert mock_videos.list.return_value.execute.call_count == 4
+        assert mock_sleep.call_count == 2
+
+    def test_cancel_schedule_live_timeout_raises_last_observed_state(self):
+        publisher = YouTubePublisher(mode="live", client_id="cid", client_secret="sec", refresh_token="ref")
+        mock_service = MagicMock()
+        mock_videos = MagicMock()
+        mock_videos.list.return_value.execute.side_effect = [
+            {"items": [{"status": {"privacyStatus": "private", "publishAt": "2026-11-17T12:00:00Z"}}]},
+            {"items": [{"status": {"privacyStatus": "private", "publishAt": "2026-11-17T12:00:00Z"}, "snippet": {"title": "Test"}}]},
+            {"items": [{"status": {"privacyStatus": "private", "publishAt": "2026-11-17T12:00:00Z"}, "snippet": {"title": "Test"}}]},
+        ]
+        mock_videos.update.return_value.execute.return_value = {
+            "id": "real_video_xyz",
+            "status": {"privacyStatus": "private", "publishAt": "2026-11-17T12:00:00Z"},
+        }
+        mock_service.videos.return_value = mock_videos
+        publisher.service = mock_service
+        publisher.is_configured = MagicMock(return_value=True)
+
+        with patch("curiosity_engine.distribution.youtube_publisher.time.monotonic", side_effect=[0.0, 10.0, 21.0]), \
+             patch("curiosity_engine.distribution.youtube_publisher.time.sleep"):
+            with pytest.raises(YouTubePublisherError) as exc_info:
+                publisher.cancel_schedule("real_video_xyz", force_mode="live")
+
+        err_msg = str(exc_info.value)
+        assert mock_videos.update.call_count == 1
+        assert "timed out" in err_msg.lower()
+        assert "privacyStatus='private'" in err_msg
+        assert "publishAt='2026-11-17T12:00:00Z'" in err_msg
 
     def test_reconcile_existing_upload_skips_other_db_claimed_ids(self):
         publisher = YouTubePublisher(mode="live", client_id="cid", client_secret="sec", refresh_token="ref")
@@ -537,7 +738,8 @@ class TestAvailabilityDrivenAndDryRunSafety:
             lock_file=tmp_path / ".scheduler.lock",
         )
 
-        with patch("curiosity_engine.runner.local_scheduler.automation_state", isolated_automation_state), \
+        with patch("curiosity_engine.runner.local_scheduler.YOUTUBE_PUBLISHING_MODE", "simulation"), \
+             patch("curiosity_engine.runner.local_scheduler.automation_state", isolated_automation_state), \
              patch("curiosity_engine.runner.local_scheduler.db", iso_db), \
              patch("curiosity_engine.runner.pipeline.db", iso_db), \
              patch("curiosity_engine.runner.local_scheduler.is_slot_generation_complete", return_value=True), \
@@ -689,8 +891,8 @@ class TestWindowsStartupAutomation:
         assert "Startup" in str(vbs_path)
         if vbs_path.exists():
             content = vbs_path.read_text(encoding="utf-8")
-            assert "--daemon" in content
-            assert "run_scheduler.py" in content
+            assert "manage_windows_task.py" in content
+            assert "boot" in content
 
     def test_pythonw_path_resolution(self):
         pyw = get_pythonw_path()
@@ -703,6 +905,8 @@ class TestWindowsStartupAutomation:
         assert "startup_vbs_registered" in status
         assert "schtasks_status" in status
         assert "is_daemon_running" in status
+        assert "dashboard_running" in status
+        assert "dashboard_url" in status
         assert status["schtasks_status"] == "NOT_REGISTERED"
 
 
