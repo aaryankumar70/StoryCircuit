@@ -258,21 +258,130 @@
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
-      margin: 10px 0;
+      margin: 6px 0 0;
     }
+    .phase-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 7px;
+      padding-top: 7px;
+      border-top: 1px solid #171C24;
+      flex-wrap: wrap;
+    }
+    .phase-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-soft);
+      min-width: 44px;
+    }
+    .phase-row .stage-steps { margin: 0; }
     .stage-pip {
       font-family: 'JetBrains Mono', monospace;
       font-size: 10px;
-      padding: 3px 7px;
-      border-radius: 5px;
+      padding: 2px 6px;
+      border-radius: 4px;
       background: #141922;
       border: 1px solid var(--border);
       color: var(--text-soft);
     }
     .stage-pip.done { color: var(--teal); border-color: rgba(45, 212, 191, 0.35); background: rgba(45, 212, 191, 0.08); }
     .stage-pip.active { color: #090B0E; background: var(--lime); border-color: var(--lime); font-weight: 700; }
-    .stage-pip.warn { color: var(--amber); border-color: rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.14); }
-    .stage-pip.fail { color: var(--danger); border-color: rgba(248, 113, 113, 0.45); background: rgba(248, 113, 113, 0.14); }
+    .stage-pip.recovery { color: var(--amber); border-color: rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.14); font-weight: 700; }
+    .stage-pip.waiting { color: var(--purple); border-color: rgba(167, 139, 250, 0.38); background: rgba(167, 139, 250, 0.10); }
+    .stage-pip.fail { color: var(--danger); border-color: rgba(248, 113, 113, 0.45); background: rgba(248, 113, 113, 0.14); font-weight: 700; }
+
+    .slot-prog-wrap {
+      margin-top: 8px;
+      padding: 10px 12px;
+      background: #090B0E;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .slot-prog-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+    .slot-prog-stage {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #FFFFFF;
+      text-transform: uppercase;
+    }
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--lime);
+      animation: slotPulse 1.4s ease-in-out infinite;
+    }
+    @keyframes slotPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.78); }
+    }
+    .slot-bar-track {
+      position: relative;
+      height: 7px;
+      background: #1B212C;
+      border-radius: 999px;
+      margin: 7px 0;
+      overflow: hidden;
+    }
+    .slot-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--lime);
+      transition: width 0.35s ease;
+    }
+    .slot-bar-fill.teal { background: var(--teal); }
+    .slot-bar-fill.amber { background: var(--amber); }
+    .slot-bar-fill.red { background: var(--danger); }
+    .slot-bar-indeterminate {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 28%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent, rgba(180, 240, 59, 0.72), transparent);
+      animation: slotShimmer 1.6s linear infinite;
+    }
+    @keyframes slotShimmer {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(420%); }
+    }
+    .slot-time-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .slot-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      padding-top: 7px;
+      border-top: 1px solid #171C24;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--text-soft);
+    }
 
     /* Main Workspace Columns */
     .main-grid {
@@ -818,39 +927,103 @@
       return `<span class="badge ${cls}">${escHtml(label)}</span>`;
     }
 
-    function renderSlotTimelineCard(s) {
-      const activeStage = s.stage || 'Not started';
-      const activeIdx = LIFECYCLE_STAGES.indexOf(activeStage);
-      const pips = LIFECYCLE_STAGES.map((st, idx) => {
-        let cls = 'stage-pip';
-        if (st === activeStage) {
-          cls += activeStage === 'Failed after retries' ? ' fail' : (activeStage === 'QC failed — regenerating' ? ' warn' : ' active');
-        } else if (activeIdx > idx && st !== 'QC failed — regenerating' && st !== 'Failed after retries') {
-          cls += ' done';
-        }
-        return `<span class="${cls}">${escHtml(st)}</span>`;
-      }).join('');
+    function renderStagePip(st) {
+      const status = st.status || 'pending';
+      let cls = 'stage-pip';
+      let icon = '';
+      if (status === 'completed') { cls += ' done'; icon = '✓ '; }
+      else if (status === 'active') { cls += ' active'; icon = '● '; }
+      else if (status === 'recovery') { cls += ' recovery'; icon = '↻ '; }
+      else if (status === 'waiting') { cls += ' waiting'; icon = '◷ '; }
+      else if (status === 'failed') { cls += ' fail'; icon = '✕ '; }
+      return `<span class="${cls}">${icon}${escHtml(st.label)}</span>`;
+    }
 
-      const stageBadgeCls = activeStage === 'Published' ? 'badge-lime' : (activeStage === 'Scheduled' ? 'badge-teal' : (activeStage === 'Failed after retries' ? 'badge-red' : 'badge-amber'));
+    function renderSlotTimelineCard(s) {
+      const stageLabel = s.stage_label || s.stage || 'Not started';
+      const phase = s.phase || 'idle';
+      const isActive = Boolean(s.is_active);
+      const pct = Number.isFinite(Number(s.overall_percent)) ? Number(s.overall_percent) : 0;
+
+      let stageBadgeCls = '';
+      let phaseTag = 'IDLE';
+      let barCls = '';
+      if (phase === 'completed') { stageBadgeCls = 'badge-lime'; phaseTag = 'COMPLETE'; }
+      else if (phase === 'waiting_schedule') { stageBadgeCls = 'badge-teal'; phaseTag = 'SCHEDULED'; barCls = 'teal'; }
+      else if (phase === 'waiting_distribution') { stageBadgeCls = 'badge-teal'; phaseTag = 'READY TO UPLOAD'; barCls = 'teal'; }
+      else if (phase === 'recovery') { stageBadgeCls = 'badge-amber'; phaseTag = 'RECOVERY'; barCls = 'amber'; }
+      else if (phase === 'failed') { stageBadgeCls = 'badge-red'; phaseTag = 'FAILED'; barCls = 'red'; }
+      else if (phase === 'production' || phase === 'distribution') { stageBadgeCls = 'badge-lime'; phaseTag = phase.toUpperCase(); }
+      else if (phase === 'paused') { stageBadgeCls = 'badge-amber'; phaseTag = 'PAUSED'; barCls = 'amber'; }
+
+      const rightPctText = phase === 'waiting_schedule'
+        ? 'PROD 100% · QUEUED'
+        : (phase === 'waiting_distribution'
+          ? 'PROD 100% · READY'
+          : (phase === 'completed' ? '100%' : `${pct}%${s.measurable_detail ? ` (${s.measurable_detail})` : ''}`));
+
+      const indetSlice = (isActive && s.progress_mode === 'indeterminate')
+        ? `<div class="slot-bar-indeterminate" style="left:${Math.min(92, pct)}%;"></div>`
+        : '';
+
+      const etaLine = isActive
+        ? (s.eta_available ? `Estimated remaining: ${s.eta_text}` : (s.eta_text || 'Estimating remaining time...'))
+        : (s.eta_text || s.waiting_state || stageLabel);
+
+      const prodPips = (s.production_stages || []).map(renderStagePip).join('');
+      const distPips = (s.distribution_stages || []).map(renderStagePip).join('');
+
+      const recBanner = s.recovery_detail ? `
+        <div class="alert-box alert-amber" style="margin-top:8px;">
+          <strong>QC Recovery Attempt ${escHtml(s.recovery_detail.attempt)}/${escHtml(s.recovery_detail.max_attempts)}</strong>
+          (${escHtml(String(s.recovery_detail.substage || '').replace(/_/g, ' '))})<br>
+          <span>Reason: ${escHtml(String(s.recovery_detail.reason || '').slice(0, 140))}</span><br>
+          <span>Next action: ${escHtml(String(s.recovery_detail.next_action || '').slice(0, 140))}</span>
+        </div>
+      ` : '';
+
       const durTxt = s.duration_sec != null ? `${Number(s.duration_sec).toFixed(1)}s` : '--';
-      const recTxt = `Recovery ${s.recovery_attempts || 0}/${s.max_recovery_attempts || 2}`;
+      const ytTxt = s.youtube_id ? `YT ${s.youtube_id}` : 'YT --';
+      const schedTxt = s.scheduled_publish_at_ist ? `Release ${s.scheduled_publish_at_ist}` : '';
 
       return `
         <div class="slot-box">
-          <div class="slot-head">
-            <div>
-              <strong style="font-family:'Space Grotesk', sans-serif;">${escHtml(s.slot_label)} • ${escHtml(s.target_time_ist)}</strong>
-              <div class="subtle-note" style="margin-top:2px;">${s.title || s.topic ? escHtml(s.title || s.topic) : 'No topic selected yet'}</div>
+          <div class="slot-head" style="margin-bottom:6px; flex-wrap:nowrap;">
+            <div style="flex:1; min-width:0;">
+              <strong style="font-family:'Space Grotesk', sans-serif; font-size:13px;">${escHtml(s.slot_label)} • ${escHtml(s.target_time_ist)}</strong>
+              <div class="subtle-note" style="margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;">${s.title || s.topic ? escHtml(s.title || s.topic) : 'No topic selected yet'}</div>
             </div>
-            <span class="badge ${stageBadgeCls}">${escHtml(activeStage)}</span>
+            <span class="badge ${stageBadgeCls}">${escHtml(phaseTag)}</span>
           </div>
-          <div class="stage-steps">${pips}</div>
-          <div class="kv-list" style="margin-top:8px;">
-            <div class="kv-row"><span class="kv-k">Duration / Template</span><span class="kv-v">${escHtml(durTxt)} • ${escHtml(s.style || '--')}</span></div>
-            <div class="kv-row"><span class="kv-k">QC Recovery</span><span class="kv-v">${escHtml(recTxt)}</span></div>
-            <div class="kv-row"><span class="kv-k">YouTube Publish</span><span class="kv-v">${escHtml(s.youtube_id || '--')} ${s.scheduled_publish_at_ist ? `(${escHtml(s.scheduled_publish_at_ist)})` : ''}</span></div>
+
+          <div class="slot-prog-wrap">
+            <div class="slot-prog-top">
+              <span class="slot-prog-stage">
+                ${isActive ? '<span class="pulse-dot"></span>' : ''}
+                <span>${escHtml(stageLabel)}</span>
+              </span>
+              <span style="color:${phase === 'failed' ? 'var(--danger)' : (phase === 'waiting_schedule' ? 'var(--teal)' : 'var(--lime)')};">${escHtml(rightPctText)}</span>
+            </div>
+            <div class="slot-bar-track">
+              <div class="slot-bar-fill ${barCls}" style="width:${Math.max(0, Math.min(100, pct))}%;"></div>
+              ${indetSlice}
+            </div>
+            <div class="slot-time-row">
+              <span>Elapsed: <strong style="color:var(--text);">${escHtml(s.elapsed_formatted || '--:--')}</strong></span>
+              <span>${escHtml(etaLine)}</span>
+            </div>
           </div>
-          ${s.error ? `<div class="alert-box">${escHtml(String(s.error).slice(0, 240))}</div>` : ''}
+
+          ${recBanner}
+
+          ${prodPips ? `<div class="phase-row"><span class="phase-label">Prod</span><div class="stage-steps">${prodPips}</div></div>` : ''}
+          ${distPips ? `<div class="phase-row"><span class="phase-label">Dist</span><div class="stage-steps">${distPips}</div></div>` : ''}
+
+          <div class="slot-foot">
+            <span>${escHtml(durTxt)} • ${escHtml(s.style || '--')} • Recovery ${escHtml(s.recovery_attempts || 0)}/${escHtml(s.max_recovery_attempts || 2)}</span>
+            <span>${escHtml(ytTxt)}${schedTxt ? ` · ${escHtml(schedTxt)}` : ''}</span>
+          </div>
+          ${(s.error && !s.recovery_detail) ? `<div class="alert-box" style="margin-top:8px;">${escHtml(String(s.error).slice(0, 220))}</div>` : ''}
         </div>
       `;
     }
@@ -859,6 +1032,7 @@
       try {
         const res = await fetch('/api/status');
         const data = await res.json();
+        window._lastStatusData = data;
 
         document.getElementById('dateBadge').innerText = `DATE: ${data.today_date || '--'}`;
         const ytMode = (data.youtube_publishing_mode || data.publishing_mode || 'simulation').toUpperCase();
@@ -1135,7 +1309,9 @@
         }
       } catch (e) {
         console.error('Failed to load dashboard telemetry:', e);
+        return false;
       }
+      return Boolean((window._lastStatusData?.slot_timeline || []).some(s => s.is_active));
     }
 
     async function refreshPerformanceMetrics() {
@@ -1259,8 +1435,13 @@
       document.getElementById('diagOutput').innerText = JSON.stringify(await (await fetch('/api/scheduler/dry-run')).json(), null, 2);
     }
 
-    loadData();
-    setInterval(loadData, 15000);
+    let _pollTimer = null;
+    async function pollLoop() {
+      const anyActive = await loadData();
+      if (_pollTimer) clearTimeout(_pollTimer);
+      _pollTimer = setTimeout(pollLoop, anyActive ? 3000 : 15000);
+    }
+    pollLoop();
   </script>
 </body>
 </html>

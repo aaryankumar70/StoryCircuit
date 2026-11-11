@@ -43,6 +43,13 @@ from curiosity_engine.distribution.youtube_publisher import (
 from curiosity_engine.production.director import prepare_project
 from curiosity_engine.production.renderer import render_project_video, validate_rendered_mp4
 from curiosity_engine.quality.qc_gatekeeper import verify_video
+from curiosity_engine.runner.progress_tracker import (
+    complete_qc_recovery,
+    record_stage_checkpoint,
+    record_stage_complete,
+    record_stage_failed,
+    record_stage_start,
+)
 from curiosity_engine.state.db import db
 
 logger = logging.getLogger("curiosity_engine.pipeline")
@@ -139,11 +146,27 @@ def _execute_recovery_attempt(
         )
         updated_script = revised_script
         action_desc = rev_note
+        record_stage_checkpoint(
+            video_id,
+            "qc_recovery",
+            0.25,
+            rev_note,
+            extra_detail={"substage": "revising_script", "next_action": rev_note},
+            db_client=db,
+        )
         prep_dir = prepare_project(video_id, updated_script)
         render_project_video(prep_dir, output_mp4, resume=False, force_rebuild=True)
         return updated_script, prep_dir, strategy, action_desc
 
     if strategy == "audio_normalization" and output_mp4.exists():
+        record_stage_checkpoint(
+            video_id,
+            "qc_recovery",
+            0.65,
+            "Applying EBU R128 loudness normalization",
+            extra_detail={"substage": "audio_normalization"},
+            db_client=db,
+        )
         staged = output_mp4.with_name(f".{attempt_id}_norm.mp4")
         if _run_ffmpeg_loudnorm_fix(output_mp4, staged):
             staged.replace(output_mp4)
@@ -249,6 +272,9 @@ def produce_single_video(
     if force_rebuild:
         record["failed_mp4_sha256"] = None
     db.save_video_record(video_id, record)
+    if record.get("topic"):
+        record_stage_start(video_id, "selecting_topic", db_client=db)
+        record_stage_complete(video_id, "selecting_topic", db_client=db)
 
     # Notify Telegram immediately when production begins (never blocks execution)
     try:
@@ -283,6 +309,7 @@ def produce_single_video(
 
         # 2. Scriptwriting & Source Verification (reuse valid saved script when resuming)
         script_data = None
+        record_stage_start(video_id, "writing_script", db_client=db)
         if not force_rebuild and isinstance(record.get("script"), dict) and record["script"].get("lines"):
             script_data = record["script"]
             assign_line_scenes(script_data)
@@ -326,6 +353,7 @@ def produce_single_video(
             )
             record["description_data"] = desc_data
         db.save_video_record(video_id, record)
+        record_stage_complete(video_id, "writing_script", db_client=db)
 
         # 3. Check if valid rendered MP4 already exists on disk (NEVER reuse an unchanged previously failed MP4!)
         rendered_valid = False
@@ -348,21 +376,28 @@ def produce_single_video(
             # 3b. Preparation: TTS and Alignment (resume from valid project assets if intact)
             if not force_rebuild and _has_valid_project_assets(project_dir):
                 logger.info(f"[{video_id}] Resuming from valid existing ASSETS_READY project at {project_dir}.")
+                record_stage_complete(video_id, "generating_narration", db_client=db)
                 record["production_status"] = "ASSETS_READY"
                 db.save_video_record(video_id, record)
             else:
                 logger.info(f"[{video_id}] Preparing project assets, voice, and timing...")
                 project_dir = prepare_project(video_id, script_data)
+                record = db.get_video_record(video_id) or record
                 record["production_status"] = "ASSETS_READY"
                 db.save_video_record(video_id, record)
 
             # 4. Headless Chrome Frame Rendering & FFmpeg Assembly
             logger.info(f"[{video_id}] Rendering frames to {output_mp4}...")
             render_project_video(project_dir, output_mp4, resume=not force_rebuild, force_rebuild=force_rebuild)
+            record = db.get_video_record(video_id) or record
             record["local_video_path"] = str(output_mp4)
             record["production_status"] = "RENDERED"
             db.save_video_record(video_id, record)
         elif rendered_valid:
+            record_stage_complete(video_id, "generating_narration", db_client=db)
+            record_stage_complete(video_id, "preparing_visuals", db_client=db)
+            record_stage_complete(video_id, "rendering_video", db_client=db)
+            record = db.get_video_record(video_id) or record
             record["local_video_path"] = str(output_mp4)
             record["production_status"] = "RENDERED"
             db.save_video_record(video_id, record)
@@ -370,6 +405,7 @@ def produce_single_video(
         # 5. Programmatic Quality Control Gatekeeper (+ Bounded Automatic Recovery up to 2 attempts)
         record["production_status"] = "QC_RUNNING"
         db.save_video_record(video_id, record)
+        record_stage_start(video_id, "running_qc", db_client=db)
 
         if is_same_failed_file and record.get("qc_results"):
             # Reconstruct last failed QC report without running redundant QC on identical unchanged file
@@ -391,13 +427,16 @@ def produce_single_video(
         if qc_report.checks.get("duration_sec"):
             record["duration_sec"] = qc_report.checks["duration_sec"]
 
+        if qc_report.passed:
+            record_stage_complete(video_id, "running_qc", db_client=db)
+
         if not qc_report.passed:
             original_issues = list(qc_report.issues)
             record["original_qc_issues"] = record.get("original_qc_issues") or original_issues
             record["failed_mp4_sha256"] = current_hash
             record["production_status"] = "REJECTED_QC"
             record["error"] = f"QC Failed: {'; '.join(original_issues)}"
-            db.save_video_record(video_id, record)
+            db.save_video_record(video_id, {k: v for k, v in record.items() if k not in ("stage_progress", "lifecycle_stage")})
             db.log_error("QC_GATEKEEPER", f"Video {video_id} failed QC", {"issues": original_issues})
 
             attempts_done = int(record.get("recovery_attempts") or 0)
@@ -406,7 +445,20 @@ def produce_single_video(
                 strategy, next_action_desc = _choose_recovery_strategy(qc_report)
                 record["production_status"] = "RECOVERING"
                 record["recovery_attempts"] = next_attempt
-                db.save_video_record(video_id, record)
+                db.save_video_record(video_id, {k: v for k, v in record.items() if k not in ("stage_progress", "lifecycle_stage")})
+                record_stage_start(
+                    video_id,
+                    "qc_recovery",
+                    detail={
+                        "attempt": next_attempt,
+                        "max_attempts": MAX_QC_RECOVERY_ATTEMPTS,
+                        "reason": "; ".join(qc_report.issues)[:240],
+                        "next_action": next_action_desc,
+                        "strategy": strategy,
+                        "substage": "starting_recovery",
+                    },
+                    db_client=db,
+                )
 
                 try:
                     from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
@@ -454,6 +506,14 @@ def produce_single_video(
                         [f"Recovery attempt {next_attempt} did not produce a new/changed output MP4."],
                     )
                 else:
+                    record_stage_checkpoint(
+                        video_id,
+                        "qc_recovery",
+                        0.92,
+                        "Re-running QC verification on recovered MP4",
+                        extra_detail={"substage": "running_qc"},
+                        db_client=db,
+                    )
                     qc_report = verify_video(output_mp4, script_data, project_dir=project_dir)
 
                 record["qc_recovery_history"].append({
@@ -481,7 +541,11 @@ def produce_single_video(
                     record["qc_recovered"] = True
                     record["production_status"] = "COMPLETED"
                     record["error"] = None
-                    db.save_video_record(video_id, record)
+                    db.save_video_record(video_id, {k: v for k, v in record.items() if k not in ("stage_progress", "lifecycle_stage")})
+                    complete_qc_recovery(video_id, db_client=db)
+                    latest_rec = db.get_video_record(video_id)
+                    if latest_rec and "stage_progress" in latest_rec:
+                        record["stage_progress"] = latest_rec["stage_progress"]
                     logger.info(
                         "[%s] QC RECOVERED on attempt %d/%d (%s)!",
                         video_id,
@@ -508,7 +572,7 @@ def produce_single_video(
                         f"QC Failed ({'; '.join(original_issues)}) | "
                         f"Recovery {next_attempt}/{MAX_QC_RECOVERY_ATTEMPTS} failed ({'; '.join(qc_report.issues)})"
                     )
-                    db.save_video_record(video_id, record)
+                    db.save_video_record(video_id, {k: v for k, v in record.items() if k not in ("stage_progress", "lifecycle_stage")})
 
             if not qc_report.passed:
                 try:
@@ -530,20 +594,25 @@ def produce_single_video(
 
         # 6. Record Local MP4 Storage URI
         record["storage_uri"] = str(output_mp4)
-        db.save_video_record(video_id, record)
+        db.save_video_record(video_id, {k: v for k, v in record.items() if k not in ("stage_progress", "lifecycle_stage")})
+        latest_final = db.get_video_record(video_id)
+        if isinstance(latest_final, dict):
+            record["stage_progress"] = latest_final.get("stage_progress", record.get("stage_progress"))
         logger.info(f"=== Video {video_id} Produced & Passed QC Successfully ===")
         return record
 
     except Exception as e:
         logger.error(f"Error during video {video_id} production: {e}")
         # Keep ASSETS_READY if assets remain valid so retry resumes cleanly instead of losing stage state
-        if record.get("production_status") not in ("ASSETS_READY", "SCRIPTED"):
-            record["production_status"] = "FAILED"
-        else:
-            record["production_status"] = "FAILED"
+        record["production_status"] = "FAILED"
         record["qc_passed"] = False
         record["error"] = str(e)
-        db.save_video_record(video_id, record)
+        db.save_video_record(video_id, {k: v for k, v in record.items() if k not in ("stage_progress", "lifecycle_stage")})
+        err_lower = str(e).lower()
+        cur_latest = db.get_video_record(video_id) or {}
+        cur_active = (cur_latest.get("stage_progress") or {}).get("active_stage")
+        fail_at = "running_qc" if ("rejected by qc" in err_lower or cur_active == "qc_recovery") else cur_active
+        record_stage_failed(video_id, fail_at, str(e), db_client=db)
         db.log_error("PRODUCTION_PIPELINE", f"Failed producing {video_id}: {e}", {"slot": slot_index})
         raise
 
@@ -609,6 +678,19 @@ def run_daily_generation(
             used_today.add(v1_record["topic"])
         if v2_record and v2_record.get("topic"):
             used_today.add(v2_record["topic"])
+
+        for s_idx, v_id, needs_pick in ((1, video_1_id, need_s1 and not t1_info), (2, video_2_id, need_s2 and not t2_info)):
+            if needs_pick:
+                if not db.get_video_record(v_id):
+                    db.save_video_record(v_id, {
+                        "video_id": v_id,
+                        "slot_index": s_idx,
+                        "target_date": target_date,
+                        "production_status": "SELECTING_TOPIC",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                record_stage_start(v_id, "selecting_topic", db_client=db)
+
         discovered_1, discovered_2 = select_daily_topics(target_date, exclude_topics=used_today)
         if need_s1 and not t1_info:
             t1_info = discovered_1
@@ -870,6 +952,7 @@ def run_slot_publishing(
 
     # 1. Independent YouTube Shorts Upload
     if not has_real_yt and (force_publish or not (record.get("youtube_upload_id") and effective_yt_mode == "simulation")):
+        record_stage_start(video_id, "uploading_privately", db_client=db)
         try:
             logger.info(f"Publishing {video_id} to YouTube Shorts (Mode: {effective_yt_mode})...")
             mp4_sha256: Optional[str] = None
@@ -932,12 +1015,16 @@ def run_slot_publishing(
                 "SIMULATED" if yt_res.get("simulated")
                 else ("SCHEDULED" if record["schedule_confirmed"] else "PUBLISHED")
             )
+            record_stage_complete(video_id, "uploading_privately", db_client=db)
+            if record["schedule_confirmed"]:
+                record_stage_complete(video_id, "scheduling_publication", db_client=db)
             yt_uploaded_now = True
         except Exception as yt_err:
             record["youtube_status"] = "FAILED"
             record["youtube_error"] = str(yt_err)
             record["publishing_status"] = "PUBLISH_FAILED"
-            db.save_video_record(video_id, record)
+            db.save_video_record(video_id, {k: v for k, v in record.items() if k not in ("stage_progress", "lifecycle_stage")})
+            record_stage_failed(video_id, "uploading_privately", str(yt_err), db_client=db)
             db.log_error("YOUTUBE_PUBLISHER", f"Failed publishing {video_id}: {yt_err}", {"slot": slot_index})
             logger.error(f"YouTube publishing failed for {video_id}: {yt_err}")
             try:
@@ -999,7 +1086,10 @@ def run_slot_publishing(
     else:
         record["publishing_status"] = "PUBLISHED" if record.get("publishing_status") == "PUBLISHED" else "PENDING"
 
-    db.save_video_record(video_id, record)
+    db.save_video_record(video_id, {k: v for k, v in record.items() if k not in ("stage_progress", "lifecycle_stage")})
+    latest_pub = db.get_video_record(video_id)
+    if isinstance(latest_pub, dict) and "stage_progress" in latest_pub:
+        record["stage_progress"] = latest_pub["stage_progress"]
     logger.info(
         f"Publishing flow complete for {video_id}. Status: {record.get('publishing_status')}, "
         f"YouTube: {record.get('youtube_status') or record.get('youtube_upload_id')}, "

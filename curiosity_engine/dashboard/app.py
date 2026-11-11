@@ -64,6 +64,7 @@ from curiosity_engine.runner.pipeline import (
     run_daily_generation,
     run_slot_publishing,
 )
+from curiosity_engine.runner.progress_tracker import build_slot_progress_snapshot
 from curiosity_engine.runner.storage_cleanup import get_storage_summary
 from curiosity_engine.state.db import db
 
@@ -243,69 +244,20 @@ def _derive_slot_lifecycle_stage(
     slot_index: int,
     video_rec: Optional[Dict[str, Any]],
     sched_slot_rec: Optional[Dict[str, Any]],
+    automation_enabled: bool = True,
+    oauth_paused: bool = False,
 ) -> Dict[str, Any]:
-    """Map slot production & publishing telemetry into one of 10 explicit lifecycle stages."""
+    """Map slot production & publishing telemetry into structured lifecycle + progress + ETA snapshot."""
     slot_time = SCHEDULER_PUBLISH_SLOT1_TIME if slot_index == 1 else SCHEDULER_PUBLISH_SLOT2_TIME
-    base = {
-        "slot_index": slot_index,
-        "slot_label": f"Slot {slot_index}",
-        "target_time_ist": _format_ist_slot_label(slot_time),
-        "stage": "Not started",
-        "video_id": video_rec.get("video_id") if video_rec else None,
-        "topic": video_rec.get("topic") if video_rec else None,
-        "title": video_rec.get("youtube_title") if video_rec else None,
-        "category": video_rec.get("category") if video_rec else None,
-        "style": video_rec.get("style") if video_rec else None,
-        "duration_sec": video_rec.get("duration_sec") if video_rec else None,
-        "recovery_attempts": int((video_rec or {}).get("recovery_attempts") or 0),
-        "max_recovery_attempts": MAX_QC_RECOVERY_ATTEMPTS,
-        "youtube_id": (video_rec or {}).get("youtube_upload_id"),
-        "scheduled_publish_at_ist": None,
-        "error": (video_rec or {}).get("youtube_error") or (video_rec or {}).get("error"),
-        "has_local_mp4": bool((video_rec or {}).get("has_local_mp4", False)),
-        "local_file_cleaned": bool((video_rec or {}).get("local_file_cleaned", False)),
-    }
-    if video_rec and video_rec.get("scheduled_publish_at"):
-        dt = _parse_iso_dt(video_rec.get("scheduled_publish_at"))
-        if dt:
-            base["scheduled_publish_at_ist"] = dt.astimezone(IST).strftime("%Y-%m-%d %H:%M IST")
-
-    if not video_rec:
-        if isinstance(sched_slot_rec, dict) and sched_slot_rec.get("generation_status") == "FAILED":
-            base["stage"] = "Failed after retries"
-            base["error"] = sched_slot_rec.get("error")
-        return base
-
-    ui_status = str(video_rec.get("ui_status") or compute_ui_status(video_rec))
-    prod_status = str(video_rec.get("production_status") or "PENDING").upper()
-    pub_status = str(video_rec.get("publishing_status") or "PENDING").upper()
-    stage_hint = str(video_rec.get("lifecycle_stage") or "").upper()
-
-    if ui_status == "PUBLISHED_PUBLIC":
-        stage = "Published"
-    elif ui_status == "SCHEDULED":
-        stage = "Scheduled"
-    elif prod_status in ("QC_RECOVERING", "RECOVERING") or stage_hint == "QC_RECOVERING":
-        stage = "QC failed — regenerating"
-    elif prod_status == "SELECTING_TOPIC" or stage_hint == "SELECTING_TOPIC":
-        stage = "Selecting topic"
-    elif prod_status == "WRITING_SCRIPT" or stage_hint == "WRITING_SCRIPT":
-        stage = "Writing script"
-    elif prod_status == "RENDERING" or stage_hint == "RENDERING":
-        stage = "Rendering video"
-    elif prod_status == "RUNNING_QC" or stage_hint == "RUNNING_QC":
-        stage = "Running QC"
-    elif ui_status == "FAILED":
-        stage = "Failed after retries"
-    elif pub_status == "UPLOADING" or ui_status == "UPLOADED_PRIVATE" or (prod_status == "COMPLETED" and video_rec.get("qc_passed")):
-        stage = "Uploading private"
-    elif ui_status == "SIMULATED":
-        stage = "Scheduled" if video_rec.get("scheduled_publish_at") else "Uploading private"
-    else:
-        stage = "Not started"
-
-    base["stage"] = stage
-    return base
+    return build_slot_progress_snapshot(
+        slot_index=slot_index,
+        video_rec=video_rec,
+        sched_slot_rec=sched_slot_rec,
+        target_time_ist=_format_ist_slot_label(slot_time),
+        automation_enabled=automation_enabled,
+        oauth_paused=oauth_paused,
+        output_dir=OUTPUT_DIR,
+    )
 
 
 def _compute_daily_progress(
@@ -768,8 +720,20 @@ def get_system_status() -> Dict[str, Any]:
         if not ev.get("is_test") and ev.get("slot_index") in (1, 2):
             slot_rec_map[int(ev["slot_index"])] = ev
     slot_timeline = [
-        _derive_slot_lifecycle_stage(1, slot_rec_map.get(1), today_auto.get("slot1")),
-        _derive_slot_lifecycle_stage(2, slot_rec_map.get(2), today_auto.get("slot2")),
+        _derive_slot_lifecycle_stage(
+            1,
+            slot_rec_map.get(1),
+            today_auto.get("slot1"),
+            automation_enabled=automation_enabled,
+            oauth_paused=oauth_paused,
+        ),
+        _derive_slot_lifecycle_stage(
+            2,
+            slot_rec_map.get(2),
+            today_auto.get("slot2"),
+            automation_enabled=automation_enabled,
+            oauth_paused=oauth_paused,
+        ),
     ]
     daily_progress = _compute_daily_progress(enriched_todays, slot_timeline, now_ist)
 

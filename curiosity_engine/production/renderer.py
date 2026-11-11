@@ -33,6 +33,15 @@ def _win_creation_flags() -> int:
     return 0
 
 
+def _progress_call(fn_name: str, *args: Any, **kwargs: Any) -> None:
+    """Invoke progress_tracker helper cleanly without affecting standalone renderer calls."""
+    try:
+        from curiosity_engine.runner import progress_tracker
+        getattr(progress_tracker, fn_name)(*args, **kwargs)
+    except Exception:
+        pass
+
+
 def validate_rendered_mp4(
     mp4_path: Path,
     expected_duration: Optional[float] = None,
@@ -238,6 +247,8 @@ def render_project_video(
             logger.info(f"Existing rendered file not reusable ({e}); re-rendering.")
 
     # 1. Capture Check (reuse only if log confirms CHECK OK)
+    vid_id = project_dir.name
+    _progress_call("record_stage_start", vid_id, "preparing_visuals")
     check_log = log_dir / "check.log"
     check_reusable = (
         resume
@@ -262,6 +273,7 @@ def render_project_video(
         if "CHECK FAILED" in check_out or "CHECK OK" not in check_out:
             raise RuntimeError(f"Visual check failed:\n{check_out[-1500:]}")
         logger.info("Visual timeline verified (CHECK OK).")
+    _progress_call("record_stage_checkpoint", vid_id, "preparing_visuals", 0.55, "Visual timeline verified")
 
     # 2. Extract sound cues
     cues_json_path = project_dir / "data" / "cues.json"
@@ -286,6 +298,7 @@ def render_project_video(
             timeout_sec=CUES_TIMEOUT_SEC,
             step_name="Cue extraction",
         )
+    _progress_call("record_stage_checkpoint", vid_id, "preparing_visuals", 0.75, "Audio cues extracted")
 
     # 3. Procedural audio mix
     mix_wav_path = project_dir / "data" / "mix.wav"
@@ -303,8 +316,17 @@ def render_project_video(
         )
         if not _is_valid_mix_wav(mix_wav_path, dur):
             raise RuntimeError(f"Audio mix completed without producing a valid mix.wav at {mix_wav_path}")
+    _progress_call("record_stage_checkpoint", vid_id, "preparing_visuals", 0.92, "Audio mix ready")
+    _progress_call("record_stage_complete", vid_id, "preparing_visuals")
 
     # 4. Stream frames to FFmpeg
+    total_frames = max(1, int(round(dur * 30)))
+    _progress_call(
+        "record_stage_start",
+        vid_id,
+        "rendering_video",
+        detail={"expected_duration_sec": dur, "total_frames": total_frames},
+    )
     logger.info(f"Rendering {dur:.2f}s video ({output_mp4.name})...")
     staging_mp4 = output_mp4.with_suffix(".tmp.mp4")
     try:
@@ -332,6 +354,7 @@ def render_project_video(
         _cleanup_partial_renders(project_dir, output_mp4, output_mp4.name)
         raise
 
+    _progress_call("record_stage_complete", vid_id, "rendering_video", frames_count=total_frames)
     logger.info(
         f"Video successfully rendered & validated: {output_mp4} "
         f"({meta['size_bytes']:,} bytes, {meta['duration']:.2f}s, {meta['width']}x{meta['height']})."

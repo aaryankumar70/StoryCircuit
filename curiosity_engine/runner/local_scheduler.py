@@ -71,6 +71,11 @@ from curiosity_engine.notifications.telegram_notifier import get_telegram_notifi
 from curiosity_engine.production.aligner import resolve_whisper_model_path
 from curiosity_engine.production.renderer import validate_rendered_mp4
 from curiosity_engine.runner.automation_state import automation_state
+from curiosity_engine.runner.progress_tracker import (
+    record_stage_complete,
+    record_stage_failed,
+    record_stage_start,
+)
 from curiosity_engine.runner.storage_cleanup import cleanup_old_generated_videos
 from curiosity_engine.runner.pipeline import (
     _has_valid_project_assets,
@@ -708,6 +713,7 @@ class LocalScheduler:
                 f"[{vid_id}] Uploading Slot {slot_idx} to YouTube "
                 f"(Mode: {YOUTUBE_PUBLISHING_MODE}, Privacy: private, Target: {target_pub_dt.strftime('%Y-%m-%d %H:%M IST')})..."
             )
+            record_stage_start(vid_id, "uploading_privately", db_client=db)
             try:
                 mp4_sha256: Optional[str] = None
                 if YOUTUBE_PUBLISHING_MODE == "live":
@@ -775,7 +781,10 @@ class LocalScheduler:
                     if sched_confirmed:
                         v_rec["scheduled_publish_at"] = upload_res.get("publish_at", target_pub_utc)
                         v_rec["scheduled_publish_at_ist"] = target_pub_dt.isoformat()
-                    db.save_video_record(vid_id, v_rec)
+                    db.save_video_record(vid_id, {k: v for k, v in v_rec.items() if k not in ("stage_progress", "lifecycle_stage")})
+                    record_stage_complete(vid_id, "uploading_privately", db_client=db)
+                    if sched_confirmed:
+                        record_stage_complete(vid_id, "scheduling_publication", db_client=db)
 
                     rec = automation_state.update_daily_record(date_str, {
                         slot_key: {
@@ -806,7 +815,8 @@ class LocalScheduler:
                 v_rec["youtube_status"] = "FAILED"
                 v_rec["publishing_status"] = "PUBLISH_FAILED"
                 v_rec["error"] = str(e)
-                db.save_video_record(vid_id, v_rec)
+                db.save_video_record(vid_id, {k: v for k, v in v_rec.items() if k not in ("stage_progress", "lifecycle_stage")})
+                record_stage_failed(vid_id, "uploading_privately", str(e), db_client=db)
                 err_lower = str(e).lower()
                 if isinstance(e, YouTubeAuthError) or "invalid_grant" in err_lower or "revoked" in err_lower:
                     self._handle_oauth_failure(str(e), "REVOKED_OR_EXPIRED")
@@ -839,6 +849,12 @@ class LocalScheduler:
                 f"[{vid_id}] Confirming/setting scheduled publication for real ID {yt_id} at "
                 f"{target_pub_dt.strftime('%Y-%m-%d %H:%M')} IST ({target_pub_utc})..."
             )
+            record_stage_start(
+                vid_id,
+                "scheduling_publication",
+                detail={"waiting_reason": "Confirming scheduled publication with YouTube API"},
+                db_client=db,
+            )
             try:
                 assert_daily_publication_capacity(
                     target_pub_dt,
@@ -856,7 +872,8 @@ class LocalScheduler:
                     v_rec["youtube_status"] = "SCHEDULED"
                     v_rec["publishing_status"] = "SCHEDULED"
                     v_rec["schedule_confirmed"] = True
-                    db.save_video_record(vid_id, v_rec)
+                    db.save_video_record(vid_id, {k: v for k, v in v_rec.items() if k not in ("stage_progress", "lifecycle_stage")})
+                    record_stage_complete(vid_id, "scheduling_publication", db_client=db)
                     rec = automation_state.update_daily_record(date_str, {
                         slot_key: {
                             "upload_status": "UPLOADED_PRIVATE",
@@ -881,7 +898,8 @@ class LocalScheduler:
                         v_rec["youtube_status"] = "SCHEDULED"
                         v_rec["publishing_status"] = "SCHEDULED"
                         v_rec["schedule_confirmed"] = True
-                        db.save_video_record(vid_id, v_rec)
+                        db.save_video_record(vid_id, {k: v for k, v in v_rec.items() if k not in ("stage_progress", "lifecycle_stage")})
+                        record_stage_complete(vid_id, "scheduling_publication", db_client=db)
                         rec = automation_state.update_daily_record(date_str, {
                             slot_key: {
                                 "upload_status": "UPLOADED_PRIVATE",
@@ -915,7 +933,8 @@ class LocalScheduler:
                 v_rec["publishing_status"] = "UPLOADED_PRIVATE"
                 v_rec["schedule_confirmed"] = False
                 v_rec["error"] = str(e)
-                db.save_video_record(vid_id, v_rec)
+                db.save_video_record(vid_id, {k: v for k, v in v_rec.items() if k not in ("stage_progress", "lifecycle_stage")})
+                record_stage_failed(vid_id, "scheduling_publication", str(e), db_client=db)
                 err_lower = str(e).lower()
                 if isinstance(e, YouTubeAuthError) or "invalid_grant" in err_lower or "revoked" in err_lower:
                     self._handle_oauth_failure(str(e), "REVOKED_OR_EXPIRED")
