@@ -1,6 +1,14 @@
-"""Intelligent YouTube Shorts Description Generator for CurioLoop.
-Produces topic-tailored, scientifically grounded descriptions with authentic source citations,
-CurioLoop brand sign-off, engagement prompts, and curated hashtags.
+"""Intelligent, Link-Free YouTube Shorts Metadata, Titles & Description Generator.
+
+Rules enforced:
+- Compelling, natural curiosity titles (avoiding ALL-CAPS hype & keyword stuffing);
+  adds `#Shorts` only when fitting (vertical short <= 60s).
+- Concise engaging story summary descriptions with viewer engagement prompt and
+  a small curated set of `#hashtags` (3-5).
+- STRICTLY NO EXTERNAL LINKS in YouTube descriptions (no http/https URLs,
+  no Reddit links, no affiliate/social/promotional links).
+- Separate `youtube_tags` metadata keyword array distinct from description hashtags.
+- Never invents sources or claims unverified stories as proven fact.
 """
 from __future__ import annotations
 
@@ -13,7 +21,6 @@ from curiosity_engine.content.gemini_client import gemini_client
 
 logger = logging.getLogger("curiosity_engine.description_generator")
 
-# Known authoritative title resolvers for curated source domains
 KNOWN_SOURCE_TITLES: Dict[str, str] = {
     "ncbi.nlm.nih.gov": "National Center for Biotechnology Information (NIH/NLM)",
     "sciencedirect.com": "Hearing Research Journal (ScienceDirect / Elsevier)",
@@ -25,46 +32,129 @@ KNOWN_SOURCE_TITLES: Dict[str, str] = {
     "nasa.gov": "NASA Heliophysics & Planetary Science Archives",
     "esa.int": "European Space Agency (ESA) Science Operations",
     "britannica.com": "Encyclopaedia Britannica Academic Edition",
+    "smithsonianmag.com": "Smithsonian Magazine Archives",
+    "planetary.org": "The Planetary Society",
+    "arxiv.org": "arXiv Astrophysics Preprint Archive",
 }
 
-BRAND_SIGN_OFF = "CurioLoop • Feed your daily curiosity with verified science and history."
+BRAND_SIGN_OFF = "CurioLoop • Daily curiosity grounded in real stories, history, and science."
+
+_EXTERNAL_LINK_PATTERN = re.compile(
+    r"(?:https?://\S+|www\.\S+|(?:reddit\.com|amzn\.to|bit\.ly|t\.co|linktr\.ee)\S*|(?<!\w)/?[ru]/[A-Za-z0-9_]+)",
+    re.IGNORECASE,
+)
 
 
 def infer_source_title(url: str) -> str:
-    """Infer a clear academic or institutional title from a verified source URL."""
+    """Infer an academic or institutional label from an internal reference URL."""
     parsed = urlparse(url)
     domain = parsed.netloc.lower()
-
     for key, title in KNOWN_SOURCE_TITLES.items():
         if key in domain:
             return title
-
-    # General fallback based on clean domain name
     clean_domain = domain.replace("www.", "").capitalize()
     return f"Research Archive ({clean_domain})"
 
 
 def validate_description_sources(description: str, allowed_sources: List[str]) -> Tuple[bool, List[str]]:
-    """Strictly verify that every URL in the description exists in research data."""
+    """Verify any URLs present against allowed internal sources (legacy helper)."""
     found_urls = re.findall(r"https?://[^\s)\]]+", description)
     issues = []
-
-    # Clean punctuation from URL match ends
     cleaned_urls = [u.rstrip(".,;!?:") for u in found_urls]
-
-    # Normalize allowed sources
     allowed_set = {s.strip().rstrip("/") for s in allowed_sources if s}
-
     for url in cleaned_urls:
-        norm_url = url.strip().rstrip("/")
-        if norm_url not in allowed_set:
+        if url.strip().rstrip("/") not in allowed_set:
             issues.append(f"Unverified or hallucinated URL detected: {url}")
-
     return len(issues) == 0, issues
 
 
+def validate_no_external_links(text: str) -> Tuple[bool, List[str]]:
+    """Strictly forbid external URLs, Reddit links, usernames, or promo links inside descriptions."""
+    matches = _EXTERNAL_LINK_PATTERN.findall(text or "")
+    issues = [f"Disallowed external link or handle in description: {m}" for m in matches]
+    return len(issues) == 0, issues
+
+
+def strip_external_links(text: str) -> str:
+    """Remove any external URLs or social handles cleanly from text."""
+    cleaned = _EXTERNAL_LINK_PATTERN.sub("", text or "")
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
+def generate_youtube_title(
+    topic: str,
+    script_data: Optional[Dict[str, Any]] = None,
+    duration_sec: Optional[float] = None,
+) -> str:
+    """Produce a compelling, natural YouTube title without all-caps hype or keyword stuffing."""
+    raw_title = str((script_data or {}).get("title") or topic or "CurioLoop Story").strip()
+    raw_title = strip_external_links(raw_title)
+    raw_title = re.sub(r"\s*#shorts\b", "", raw_title, flags=re.IGNORECASE).strip(" -|")
+
+    # Convert shouting ALL CAPS words cleanly while preserving standard acronyms (NASA, DNA, BC, AD, fMRI)
+    acronyms = {"NASA", "ESA", "DNA", "BC", "AD", "GIC", "FMRI", "WOW", "AI", "HZ", "DB", "LANSA", "IEASM", "ETH"}
+    words = raw_title.split()
+    fixed_words = []
+    for idx, w in enumerate(words):
+        bare = re.sub(r"[^A-Za-z0-9]", "", w)
+        if len(bare) >= 3 and bare.isupper() and bare.upper() not in acronyms:
+            fixed_words.append(w.capitalize() if idx == 0 else w.lower())
+        else:
+            fixed_words.append(w)
+    title_clean = " ".join(fixed_words)
+    if title_clean:
+        title_clean = title_clean[0].upper() + title_clean[1:]
+
+    # Include #Shorts only when duration <= 58s (and stays clean within 95 chars)
+    is_short = duration_sec is None or float(duration_sec) <= 58.0
+    if is_short and len(title_clean) <= 82:
+        return f"{title_clean} #Shorts"
+    return title_clean[:95].rstrip()
+
+
+def build_youtube_tags(
+    topic: str,
+    category: str,
+    script_data: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Generate separate YouTube API `tags` keywords (no `#` prefixes, distinct from hashtags)."""
+    base_tags: List[str] = ["CurioLoop", category.strip(), "Shorts", "Storytelling"]
+    stopwords = {
+        "what", "when", "where", "which", "while", "with", "into", "from", "that", "this",
+        "your", "their", "about", "there", "could", "would", "after", "before", "only", "alone",
+        "almost", "turns", "still", "because", "under", "found", "never",
+    }
+    raw_phrase = f"{topic} {(script_data or {}).get('title', '')}"
+    for tok in re.findall(r"[A-Za-z][A-Za-z0-9-]{3,}", raw_phrase):
+        low = tok.lower()
+        if low in stopwords:
+            continue
+        clean_kw = tok.capitalize() if tok.islower() else tok
+        if clean_kw not in base_tags:
+            base_tags.append(clean_kw)
+        if len(base_tags) >= 12:
+            break
+
+    cat_map = {
+        "History": ["AncientHistory", "TrueHistory", "Archaeology"],
+        "Survival": ["SurvivalStory", "TrueSurvival"],
+        "Mysteries": ["UnsolvedMystery", "TrueMystery"],
+        "Unexplained events": ["UnexplainedHistory", "MysteryCase"],
+        "Psychology": ["HumanBehavior", "PsychologyFacts"],
+        "Biology": ["HumanBody", "Neuroscience"],
+        "Space": ["Astronomy", "SpaceDiscovery"],
+        "Technology": ["SolarStorm", "Infrastructure"],
+        "Science": ["ScienceStory", "RealScience"],
+        "Nature": ["DeepSea", "Wildlife"],
+    }
+    for kw in cat_map.get(category, ["CuriousStories"]):
+        if kw not in base_tags:
+            base_tags.append(kw)
+    return base_tags[:15]
+
+
 class DescriptionGenerator:
-    """Generates and validates platform-appropriate YouTube Shorts descriptions."""
+    """Generates clean, link-free YouTube Shorts descriptions and separated metadata tags."""
 
     def __init__(self):
         self.brand_sign_off = BRAND_SIGN_OFF
@@ -77,28 +167,43 @@ class DescriptionGenerator:
         sources: Optional[List[str]] = None,
         claims: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Generate a complete, structured YouTube Shorts description."""
+        """Generate natural description with zero external links plus separate API tags."""
         verified_sources = [s.strip() for s in (sources or script_data.get("sources", [])) if s]
         verified_claims = claims or script_data.get("claims", [])
-        title = script_data.get("title", topic)
+        title = generate_youtube_title(topic, script_data)
+        youtube_tags = build_youtube_tags(topic, category, script_data)
 
-        # 1. Try Gemini API generation if configured
         if gemini_client.is_configured():
             try:
-                ai_desc = self._generate_with_ai(topic, category, title, script_data, verified_sources, verified_claims)
+                ai_desc = self._generate_with_ai(
+                    topic=topic,
+                    category=category,
+                    title=title,
+                    script_data=script_data,
+                    claims=verified_claims,
+                    youtube_tags=youtube_tags,
+                )
                 if ai_desc and ai_desc.get("full_description"):
-                    # Validate sources in AI output
-                    is_valid, issues = validate_description_sources(ai_desc["full_description"], verified_sources)
-                    if is_valid:
-                        logger.info(f"Generated verified description via Gemini for '{title}'.")
+                    ok_links, link_issues = validate_no_external_links(ai_desc["full_description"])
+                    if ok_links:
+                        ai_desc["recommended_title"] = title
+                        ai_desc["youtube_tags"] = youtube_tags
+                        ai_desc["further_reading"] = []
+                        ai_desc["sources_recorded_internally"] = len(verified_sources)
                         return ai_desc
-                    else:
-                        logger.warning(f"AI description failed source validation ({issues}); falling back to curated generator.")
+                    logger.warning("AI description contained disallowed links (%s); using structured generator.", link_issues)
             except Exception as e:
-                logger.warning(f"Gemini description generation failed ({e}); using deterministic fallback.")
+                logger.warning("Gemini description generation failed (%s); using structured fallback.", e)
 
-        # 2. Deterministic, peer-reviewed structured generator
-        return self._generate_structured(topic, category, title, script_data, verified_sources, verified_claims)
+        return self._generate_structured(
+            topic=topic,
+            category=category,
+            title=title,
+            script_data=script_data,
+            verified_sources=verified_sources,
+            claims=verified_claims,
+            youtube_tags=youtube_tags,
+        )
 
     def _generate_structured(
         self,
@@ -106,94 +211,73 @@ class DescriptionGenerator:
         category: str,
         title: str,
         script_data: Dict[str, Any],
-        sources: List[str],
+        verified_sources: List[str],
         claims: List[str],
+        youtube_tags: List[str],
     ) -> Dict[str, Any]:
-        """Generate high-quality grounded description using research claims and templates."""
-        category_lower = category.lower()
+        lines = script_data.get("lines") or []
+        evidence_type = script_data.get("evidence_type", "documented_fact")
 
-        # Topic-tailored hooks and educational bodies
-        if "ring" in topic.lower() or "silence" in topic.lower():
-            hook = "Ever wonder why absolute silence has a sound?"
-            body = (
-                "In an anechoic chamber below zero decibels, your brain doesn't find peace—it panics. "
-                "Deprived of ambient sound, the dorsal cochlear nucleus automatically dials up its internal neural gain, "
-                "amplifying microscopic synaptic noise and the quiet rush of blood through your inner ear. "
-                "It's not hearing damage; it's an evolutionary gain-control mechanism desperately searching for audio signals."
-            )
-            engagement = "Have you ever stayed in a place quiet enough to hear your own pulse? What did you experience?"
-            tags = ["#CurioLoop", "#Biology", "#HumanBody", "#Neuroscience", "#ScienceFacts", "#Shorts"]
-
-        elif "heracleion" in topic.lower() or "thonis" in topic.lower():
-            hook = "Before Alexandria, there was Thonis-Heracleion—Egypt's legendary gateway city that vanished into the sea."
-            body = (
-                "Founded around the 8th century BC at the mouth of the Nile, Thonis-Heracleion served as the mandatory "
-                "customs port of entry for all Mediterranean trade ships docking in Pharaoh's kingdom. "
-                "In the 8th century AD, cataclysmic earthquakes and soil liquefaction dragged colossal granite temples "
-                "and ancient merchant docks thirty feet beneath the Mediterranean silt, where divers rediscovered them in 2000."
-            )
-            engagement = "What lost ancient civilization or sunken wonder would you explore if you had a submarine?"
-            tags = ["#CurioLoop", "#History", "#AncientEgypt", "#Archaeology", "#DeepSea", "#Shorts"]
-
-        elif "solar" in topic.lower() or "carrington" in topic.lower():
-            hook = "Could a solar superstorm knock out our electrical civilization overnight?"
-            body = (
-                "In 1859, the Carrington Event induced ground currents so powerful that telegraph wires sparked into flames. "
-                "A coronal mass ejection of similar magnitude today would induce geomagnetically induced currents (GICs) "
-                "capable of melting massive high-voltage substation transformers that take up to a year to manufacture."
-            )
-            engagement = "How many days do you think your household could comfortably manage without the electric grid?"
-            tags = ["#CurioLoop", "#Technology", "#SpaceWeather", "#SolarStorm", "#Science", "#Shorts"]
-
+        if lines:
+            hook = strip_external_links(str(lines[0].get("text", "")))
         else:
-            # Generalized structured synthesis from claims
-            hook = f"The surprising science behind {topic.lower().rstrip('?')}:"
-            claims_text = " ".join(claims[:2]) if claims else "Discover the unexpected mechanics behind this phenomenon."
-            body = (
-                f"{claims_text} "
-                f"Understanding how this operates reveals just how intricate our world really is."
-            )
-            engagement = f"Did you know this about {topic.lower().rstrip('?')}, or did it surprise you?"
-            clean_category = category.replace(" ", "")
-            tags = ["#CurioLoop", f"#{clean_category}", "#Education", "#DidYouKnow", "#Shorts"]
+            hook = f"What happened inside this story behind {topic.lower().rstrip('?')}?"
 
-        # Further reading section (strictly verified sources only)
-        further_reading_lines: List[str] = []
-        further_reading_items: List[Dict[str, str]] = []
-        if sources:
-            further_reading_lines.append("\n📚 Verified Sources & Further Reading:")
-            for s in sources:
-                s_title = infer_source_title(s)
-                further_reading_lines.append(f"• {s_title}: {s}")
-                further_reading_items.append({"title": s_title, "url": s})
+        if claims:
+            summary_sentences = [strip_external_links(str(c).rstrip(".") + ".") for c in claims[:2]]
+            body = " ".join(summary_sentences)
+        elif len(lines) >= 3:
+            body = " ".join(strip_external_links(str(ln.get("text", ""))) for ln in lines[1:3])
+        else:
+            body = f"A concise look at the real details behind {topic.lower().rstrip('?')}."
 
-        # Assemble full description
+        if evidence_type == "unexplained_mystery":
+            body += " Key evidence remains documented, while final conclusions stay open to investigation."
+        elif evidence_type == "personal_account":
+            body += " Presented carefully to separate eyewitness details from proven record."
+
+        engagement_by_cat = {
+            "History": "Which forgotten historical detail in this story surprised you most?",
+            "Mysteries": "What explanation fits the physical evidence best in your view?",
+            "Unexplained events": "How would you weigh the documented evidence in this case?",
+            "Survival": "Would you have remembered that rule under extreme pressure?",
+            "Psychology": "Notice how quickly your mind filled in what wasn't actually there?",
+            "Biology": "What other strange instinct of the human body puzzles you?",
+            "Space": "Do you think this signal points to rare astrophysics or something deeper?",
+        }
+        engagement = engagement_by_cat.get(
+            category,
+            "What stood out most to you in the final reveal of this story?",
+        )
+
+        clean_category = re.sub(r"[^A-Za-z0-9]", "", category) or "Science"
+        hashtags = ["#CurioLoop", f"#{clean_category}", "#Storytelling", "#Shorts"]
+        if len(hashtags) < 5 and category != "Science":
+            hashtags.append("#CuriousMinds")
+
         parts = [
             hook,
             "",
             body,
+            "",
+            engagement,
+            "",
+            self.brand_sign_off,
+            "",
+            " ".join(hashtags[:5]),
         ]
-        if further_reading_lines:
-            parts.extend(further_reading_lines)
-
-        parts.extend([
-            "",
-            f"💬 {engagement}",
-            "",
-            f"✨ {self.brand_sign_off}",
-            "",
-            " ".join(tags),
-        ])
-
-        full_description = "\n".join(parts).strip()
+        full_description = strip_external_links("\n".join(parts)).strip()
 
         return {
+            "recommended_title": title,
             "hook": hook,
             "body": body,
-            "further_reading": further_reading_items,
+            "further_reading": [],
+            "sources_recorded_internally": len(verified_sources),
             "sign_off": self.brand_sign_off,
             "engagement_question": engagement,
-            "hashtags": tags,
+            "hashtags": hashtags[:5],
+            "youtube_tags": youtube_tags,
             "full_description": full_description,
             "char_count": len(full_description),
             "validated": True,
@@ -205,35 +289,29 @@ class DescriptionGenerator:
         category: str,
         title: str,
         script_data: Dict[str, Any],
-        sources: List[str],
         claims: List[str],
+        youtube_tags: List[str],
     ) -> Optional[Dict[str, Any]]:
-        """Prompt Gemini for a nuanced, non-repetitive YouTube Shorts description."""
-        sources_str = "\n".join(f"- {s}" for s in sources) if sources else "None provided."
-        claims_str = "\n".join(f"- {c}" for c in claims) if claims else "None provided."
-
+        claims_str = "\n".join(f"- {c}" for c in claims) if claims else "Stick strictly to the script summary."
+        evidence_type = script_data.get("evidence_type", "documented_fact")
         prompt = f"""
-Create a compelling, scientifically accurate YouTube Shorts description for an educational video.
+Create a concise, engaging YouTube Shorts description (250-650 chars).
 
 Topic: {topic}
 Category: {category}
+Evidence classification: {evidence_type}
 Title: {title}
-Research Claims:
+Key Points:
 {claims_str}
 
-Verified Sources:
-{sources_str}
+STRICT RULES:
+1. Hook: 1 crisp sentence sparking curiosity without "Did you know?".
+2. Summary: 2 engaging sentences summarizing the story honestly (never assert unverified mysteries as settled fact).
+3. Engagement: 1 thoughtful question inviting comments.
+4. End cleanly with "{self.brand_sign_off}" and 4 concise hashtags (#CurioLoop, #Shorts, plus 2 relevant tags).
+5. ABSOLUTELY NO URLs, NO links, NO reddit/social handles anywhere in the text.
 
-STRICT INSTRUCTIONS:
-1. Hook: Write an intriguing 1-sentence hook (do NOT repeat the video title verbatim).
-2. Body: In 2-3 engaging, clear sentences, explain the mechanism or history behind the topic without copying the script verbatim. Preserve scientific nuance and uncertainty.
-3. Further Reading: If verified sources are provided, list them with clear publisher names. You MUST ONLY use the exact URLs provided above. DO NOT invent or fabricate any URL! If no sources are provided, omit this section.
-4. Engagement Question: End with a thoughtful, open question for viewers.
-5. Brand Sign-off: Must include "{self.brand_sign_off}".
-6. Hashtags: Provide exactly 4-5 relevant hashtags (always include #CurioLoop and #Shorts).
-7. Length: Keep total length between 350 and 800 characters.
-
-Return strict JSON:
+Return JSON:
 {{
   "hook": "...",
   "body": "...",
@@ -244,7 +322,9 @@ Return strict JSON:
 """
         res = gemini_client.generate_json(prompt)
         if res and isinstance(res, dict) and res.get("full_description"):
-            res["char_count"] = len(res["full_description"])
+            cleaned_desc = strip_external_links(str(res["full_description"]))
+            res["full_description"] = cleaned_desc
+            res["char_count"] = len(cleaned_desc)
             res["validated"] = True
             return res
         return None

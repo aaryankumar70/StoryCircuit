@@ -82,13 +82,15 @@ def test_description_formatting_and_constraints():
 
     full_desc = desc_data["full_description"]
     assert len(full_desc) <= 5000
-    assert len(full_desc) >= 150
+    assert len(full_desc) >= 100
+    assert "http" not in full_desc.lower()
     assert BRAND_SIGN_OFF in full_desc
     assert "?" in desc_data["engagement_question"]
     assert 3 <= len(desc_data["hashtags"]) <= 6
     assert all(h.startswith("#") for h in desc_data["hashtags"])
     assert "#CurioLoop" in desc_data["hashtags"]
     assert "#Shorts" in desc_data["hashtags"]
+    assert len(desc_data.get("youtube_tags", [])) >= 3
 
 
 def test_description_uniqueness_across_videos():

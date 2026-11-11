@@ -55,8 +55,13 @@ from curiosity_engine.config import (
     YOUTUBE_PUBLISHING_MODE,
     get_chrome_executable,
 )
+from curiosity_engine.content.description_generator import (
+    build_youtube_tags,
+    generate_youtube_title,
+)
 from curiosity_engine.content.topic_discovery import select_daily_topics
 from curiosity_engine.distribution.token_manager import token_manager
+from curiosity_engine.distribution.youtube_analytics import performance_tracker
 from curiosity_engine.distribution.youtube_publisher import (
     NON_PRODUCTION_TEST_YOUTUBE_IDS,
     YouTubeAuthError,
@@ -66,6 +71,7 @@ from curiosity_engine.notifications.telegram_notifier import get_telegram_notifi
 from curiosity_engine.production.aligner import resolve_whisper_model_path
 from curiosity_engine.production.renderer import validate_rendered_mp4
 from curiosity_engine.runner.automation_state import automation_state
+from curiosity_engine.runner.storage_cleanup import cleanup_old_generated_videos
 from curiosity_engine.runner.pipeline import (
     _has_valid_project_assets,
     assert_daily_publication_capacity,
@@ -688,9 +694,15 @@ class LocalScheduler:
                 })
 
             script = v_rec.get("script", {})
-            title = script.get("title", v_rec.get("topic", "Curiosity Explainer"))
+            title = v_rec.get("youtube_title") or generate_youtube_title(
+                v_rec.get("topic", "Curiosity Explainer"),
+                script,
+                duration_sec=v_rec.get("duration_sec"),
+            )
             desc = v_rec.get("youtube_description") or script.get("description", title)
-            tags = script.get("tags", [v_rec.get("category", "Education"), "CurioLoop", "Shorts"])
+            tags = v_rec.get("youtube_tags") or build_youtube_tags(
+                v_rec.get("topic", title), v_rec.get("category", "Education"), script
+            )
 
             logger.info(
                 f"[{vid_id}] Uploading Slot {slot_idx} to YouTube "
@@ -776,6 +788,18 @@ class LocalScheduler:
                             "error": None,
                         }
                     })
+                    try:
+                        get_telegram_notifier().notify_upload_completed(
+                            video_id=vid_id,
+                            title=title,
+                            youtube_id=str(yt_id or ""),
+                            upload_status="SCHEDULED" if sched_confirmed else "UPLOADED_PRIVATE",
+                            scheduled_time_ist=target_pub_dt.strftime("%Y-%m-%d %H:%M IST") if sched_confirmed else "",
+                            youtube_url=str(v_rec.get("youtube_url") or ""),
+                            simulated=False,
+                        )
+                    except Exception:
+                        pass
                 logger.info(f"[{vid_id}] Upload completed (ID={yt_id}, simulated={yt_sim}, schedule_confirmed={sched_confirmed}).")
             except Exception as e:
                 logger.error(f"[{vid_id}] YouTube upload failed: {e}")
@@ -870,6 +894,19 @@ class LocalScheduler:
                             }
                         })
                         logger.info(f"[{vid_id}] YouTube API confirmed schedule at {v_rec['scheduled_publish_at']}")
+                        try:
+                            sched_title = str(v_rec.get("youtube_title") or (v_rec.get("script") or {}).get("title") or vid_id)
+                            get_telegram_notifier().notify_upload_completed(
+                                video_id=vid_id,
+                                title=sched_title,
+                                youtube_id=str(yt_id or ""),
+                                upload_status="SCHEDULED",
+                                scheduled_time_ist=target_pub_dt.strftime("%Y-%m-%d %H:%M IST"),
+                                youtube_url=str(v_rec.get("youtube_url") or f"https://www.youtube.com/shorts/{yt_id}"),
+                                simulated=False,
+                            )
+                        except Exception:
+                            pass
                     else:
                         raise RuntimeError(f"YouTube API did not confirm schedule: {sched_res}")
             except Exception as e:
@@ -1531,6 +1568,24 @@ class LocalScheduler:
         reauth_ist = str(yt_health.get("estimated_reauth_date_ist") or "Unknown")
         last_err = str(self._state.get("last_error") or "")
 
+        prod_failures_count = sum(
+            1 for v in today_vids
+            if v.get("production_status") in ("FAILED", "REJECTED_QC") or v.get("qc_passed") is False
+        )
+        qc_recovery_attempts = sum(int(v.get("recovery_attempts") or 0) for v in today_vids)
+        today_rec = automation_state.get_daily_record(today_str)
+        rem_or_missed: List[str] = []
+        for s_idx in (1, 2):
+            s_st = today_rec.get(f"slot{s_idx}", {})
+            if s_st.get("scheduled_status") != "SCHEDULED" and s_st.get("scheduled_status") != "SIMULATED":
+                rem_or_missed.append(f"Slot {s_idx} ({s_st.get('generation_status', 'PENDING')})")
+
+        oauth_warn = ""
+        if yt_health.get("warning_24h_due"):
+            oauth_warn = f"Expires in ~{yt_health.get('hours_until_expiry', '?')}h ({reauth_ist})"
+        elif not yt_health.get("healthy") and yt_health.get("status") != "UNCONFIGURED":
+            oauth_warn = str(yt_health.get("alert") or oauth_status)[:140]
+
         return get_telegram_notifier().notify_daily_summary(
             date_str=today_str,
             production_count=prod_count,
@@ -1541,6 +1596,10 @@ class LocalScheduler:
             oauth_status=oauth_status,
             oauth_reauth_ist=reauth_ist,
             last_failure=last_err,
+            production_failures_count=prod_failures_count,
+            qc_recovery_attempts_count=qc_recovery_attempts,
+            remaining_or_missed_slots=", ".join(rem_or_missed) if rem_or_missed else "All slots covered",
+            oauth_warnings=oauth_warn,
         )
 
     def _needs_retryable_work(self, date_str: str) -> bool:
@@ -1557,12 +1616,27 @@ class LocalScheduler:
             "quotaexceeded",
             "uploadlimitexceeded",
             "youtube rejected uploaded video",
+            "exhausted",
         )
+        all_terminal = True
         for slot_key in ("slot1", "slot2"):
-            err = str((rec.get(slot_key) or {}).get("error") or "").lower()
+            s_rec = rec.get(slot_key) or {}
+            if s_rec.get("scheduled_status") in ("SCHEDULED", "SIMULATED"):
+                continue
+            err = str(s_rec.get("error") or "").lower()
             if err and any(marker in err for marker in terminal_markers):
-                return False
-        return True
+                continue
+            vid_id = str(s_rec.get("video_id") or "")
+            if vid_id:
+                v_db = db.get_video_record(vid_id)
+                if (
+                    v_db
+                    and int(v_db.get("recovery_attempts") or 0) >= config.MAX_QC_RECOVERY_ATTEMPTS
+                    and not v_db.get("qc_passed")
+                ):
+                    continue
+            all_terminal = False
+        return not all_terminal
 
     def run_daemon(self, poll_interval_sec: int = 15, retry_interval_sec: int = 300) -> None:
         """Run continuous autonomous scheduling daemon with graceful stop support."""
@@ -1594,6 +1668,7 @@ class LocalScheduler:
         last_oauth_check_ts = time.monotonic()
         last_pub_verify_ts = 0.0
         last_summary_check_ts = 0.0
+        last_analytics_sync_ts = 0.0
         retry_attempts_today = 0
         was_enabled = self.is_automation_enabled()
 
@@ -1602,6 +1677,12 @@ class LocalScheduler:
             get_telegram_notifier().flush_pending_events()
         except Exception:
             pass
+
+        # Safe daily storage cleanup for eligible previous IST days (never deletes pending/today/DB)
+        try:
+            cleanup_old_generated_videos()
+        except Exception as cleanup_exc:
+            logger.warning("Startup storage cleanup warning: %s", cleanup_exc)
 
         # Availability-driven startup execution for current date
         try:
@@ -1651,6 +1732,14 @@ class LocalScheduler:
                     except Exception as exc:
                         logger.warning("Scheduled publication verification check error: %s", exc)
 
+                # Passive YouTube channel performance stats check (every 4 hours in live mode)
+                if YOUTUBE_PUBLISHING_MODE == "live" and (mono_now - last_analytics_sync_ts) >= 14400:
+                    last_analytics_sync_ts = mono_now
+                    try:
+                        performance_tracker.refresh_public_video_metrics(youtube_publisher)
+                    except Exception as exc:
+                        logger.warning("Performance metrics refresh warning: %s", exc)
+
                 # Daily / periodic OAuth health verification (every 6h)
                 if (mono_now - last_oauth_check_ts) >= 21600:
                     last_oauth_check_ts = mono_now
@@ -1667,12 +1756,16 @@ class LocalScheduler:
                     except Exception as exc:
                         logger.warning("Daily summary dispatch check error: %s", exc)
 
-                # Date rollover: When date changes in IST, trigger new daily batch & OAuth audit
+                # Date rollover: When date changes in IST, clean previous days, audit OAuth & trigger batch
                 if current_date != last_date:
                     logger.info(f"Date rollover detected ({last_date} -> {current_date}). Initiating daily batch...")
                     last_date = current_date
                     retry_attempts_today = 0
                     last_oauth_check_ts = mono_now
+                    try:
+                        cleanup_old_generated_videos()
+                    except Exception as cleanup_exc:
+                        logger.warning("Rollover storage cleanup warning: %s", cleanup_exc)
                     try:
                         self.check_oauth_lifecycle_and_notify()
                     except Exception:

@@ -44,12 +44,23 @@ MAX_TRUE_PEAK_DB = -0.5
 # Video Geometry & Timing Constraints
 MAX_DAILY_VIDEOS = 2
 MIN_DURATION_SEC = 20.0
-MAX_DURATION_SEC = 30.0
+MAX_DURATION_SEC = 60.0
+TARGET_DURATION_MIN_SEC = 25.0
+TARGET_DURATION_MAX_SEC = 45.0
 MIN_WORD_COUNT = 48
-MAX_WORD_COUNT = 62
+MAX_WORD_COUNT = 145
+TARGET_WORD_COUNT_MIN = 62
+TARGET_WORD_COUNT_MAX = 115
+MAX_QC_RECOVERY_ATTEMPTS = 2
 TARGET_FPS = 30
 VIDEO_WIDTH = 1080
 VIDEO_HEIGHT = 1920
+
+# Safe Local Storage Retention & Cleanup (Asia/Kolkata calendar days)
+VIDEO_RETENTION_DAYS = int(os.environ.get("VIDEO_RETENTION_DAYS", "1"))
+
+# YouTube Data API v3 Reference Daily Quota (standard project allocation)
+YOUTUBE_API_DAILY_QUOTA_REF = 10000
 
 # Safe Caption Zones (Pixels from top)
 SAFE_ZONE_TOP = 250
@@ -69,21 +80,27 @@ CONTENT_PILLARS = [
     "Geography",
     "Nature",
     "Interesting discoveries",
+    "Survival",
+    "Human behavior",
+    "Unexplained events",
 ]
 
 # Visual Style Mappings
 STYLE_MAPPINGS = {
     "Biology": "inside-out",
     "Psychology": "inside-out",
+    "Human behavior": "inside-out",
     "Science": "inside-out",
+    "Nature": "inside-out",
     "History": "paper-atlas",
     "Geography": "paper-atlas",
     "Interesting discoveries": "paper-atlas",
     "Mysteries": "paper-atlas",
+    "Unexplained events": "paper-atlas",
     "Technology": "stick-story",
     "AI": "stick-story",
     "Space": "stick-story",
-    "Nature": "inside-out",
+    "Survival": "stick-story",
 }
 
 # Voice Configuration
@@ -123,6 +140,7 @@ _SYNCABLE_ENV_KEYS = (
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
     "TELEGRAM_DAILY_SUMMARY_HOUR_IST",
+    "VIDEO_RETENTION_DAYS",
 )
 
 

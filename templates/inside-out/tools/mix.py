@@ -191,7 +191,8 @@ def music_tension():
     return x / (np.abs(x).max() + 1e-9) * fade
 
 def load_audio(f):
-    out = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(f), '-f', 'f32le', '-ac', '2', '-ar', str(SR), '-'], capture_output=True, check=True).stdout
+    kw = {'creationflags': 0x08000000} if sys.platform == 'win32' else {}
+    out = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(f), '-f', 'f32le', '-ac', '2', '-ar', str(SR), '-'], capture_output=True, check=True, **kw).stdout
     a = np.frombuffer(out, dtype=np.float32).reshape(-1, 2).astype(np.float64); return a
 
 

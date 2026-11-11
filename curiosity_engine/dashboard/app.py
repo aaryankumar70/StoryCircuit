@@ -31,19 +31,28 @@ from curiosity_engine.config import (
     DATA_DIR,
     INSTAGRAM_PUBLISHING_MODE,
     MAX_DAILY_VIDEOS,
+    MAX_DURATION_SEC,
+    MAX_QC_RECOVERY_ATTEMPTS,
+    MIN_DURATION_SEC,
     OUTPUT_DIR,
     PROJECT_ROOT,
     PUBLISHING_MODE,
+    SCHEDULER_PUBLISH_SLOT1_TIME,
+    SCHEDULER_PUBLISH_SLOT2_TIME,
+    TARGET_DURATION_MAX_SEC,
+    TARGET_DURATION_MIN_SEC,
     YOUTUBE_PRIVACY_STATUS,
     YOUTUBE_PUBLISHING_MODE,
     YOUTUBE_UPLOAD_DAILY_LIMIT,
     get_hidden_subprocess_kwargs,
 )
 from curiosity_engine.distribution.token_manager import token_manager
+from curiosity_engine.distribution.youtube_analytics import performance_tracker
 from curiosity_engine.distribution.youtube_publisher import (
     NON_PRODUCTION_TEST_YOUTUBE_IDS,
     youtube_publisher,
 )
+from curiosity_engine.distribution.youtube_quota import youtube_quota
 from curiosity_engine.notifications.telegram_notifier import (
     get_telegram_notifier,
     redact_telegram_secrets,
@@ -55,6 +64,7 @@ from curiosity_engine.runner.pipeline import (
     run_daily_generation,
     run_slot_publishing,
 )
+from curiosity_engine.runner.storage_cleanup import get_storage_summary
 from curiosity_engine.state.db import db
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -178,6 +188,178 @@ def compute_ui_status(v: Dict[str, Any]) -> str:
     if prod_status == "COMPLETED" and v.get("qc_passed"):
         return "GENERATED"
     return prod_status
+
+
+def _resolve_local_mp4_path(video_id: str) -> Optional[Path]:
+    """Return existing local rendered MP4 path under OUTPUT_DIR, if present."""
+    clean_id = Path(str(video_id or "")).name
+    if not clean_id:
+        return None
+    primary = OUTPUT_DIR / f"{clean_id}.mp4"
+    if primary.is_file():
+        return primary
+    nested = OUTPUT_DIR / clean_id / "renders" / f"{clean_id}.mp4"
+    if nested.is_file():
+        return nested
+    return None
+
+
+def _enrich_video_record(v: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach normalized UI status, duration, recovery, and local availability metadata."""
+    out = dict(v)
+    out["ui_status"] = compute_ui_status(out)
+    vid = str(out.get("video_id") or "")
+    out["has_local_mp4"] = _resolve_local_mp4_path(vid) is not None
+    out["local_file_cleaned"] = bool(out.get("local_file_cleaned", False))
+    script_obj = out.get("script") if isinstance(out.get("script"), dict) else {}
+    qc_checks = (out.get("qc_results") or {}).get("checks") or {}
+    raw_dur = out.get("duration_sec") or qc_checks.get("duration_sec") or script_obj.get("duration")
+    try:
+        out["duration_sec"] = round(float(raw_dur), 2) if raw_dur is not None else None
+    except (TypeError, ValueError):
+        out["duration_sec"] = None
+    out["recovery_attempts"] = int(out.get("recovery_attempts") or 0)
+    out["qc_recovery_history"] = list(out.get("qc_recovery_history") or out.get("recovery_history") or [])
+    out["recovery_history"] = out["qc_recovery_history"]
+    out["youtube_title"] = out.get("youtube_title") or script_obj.get("title") or out.get("topic")
+    out["youtube_tags"] = list(out.get("youtube_tags") or [])
+    return out
+
+
+def _format_ist_slot_label(hhmm: str) -> str:
+    """Format 24h HH:MM slot string as friendly IST display label."""
+    try:
+        parts = str(hhmm).strip().split(":")
+        hour = int(parts[0])
+        minute = int(parts[1])
+        suffix = "PM" if hour >= 12 else "AM"
+        hr12 = hour % 12 or 12
+        return f"{hr12}:{minute:02d} {suffix} IST"
+    except Exception:
+        return f"{hhmm} IST"
+
+
+def _derive_slot_lifecycle_stage(
+    slot_index: int,
+    video_rec: Optional[Dict[str, Any]],
+    sched_slot_rec: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Map slot production & publishing telemetry into one of 10 explicit lifecycle stages."""
+    slot_time = SCHEDULER_PUBLISH_SLOT1_TIME if slot_index == 1 else SCHEDULER_PUBLISH_SLOT2_TIME
+    base = {
+        "slot_index": slot_index,
+        "slot_label": f"Slot {slot_index}",
+        "target_time_ist": _format_ist_slot_label(slot_time),
+        "stage": "Not started",
+        "video_id": video_rec.get("video_id") if video_rec else None,
+        "topic": video_rec.get("topic") if video_rec else None,
+        "title": video_rec.get("youtube_title") if video_rec else None,
+        "category": video_rec.get("category") if video_rec else None,
+        "style": video_rec.get("style") if video_rec else None,
+        "duration_sec": video_rec.get("duration_sec") if video_rec else None,
+        "recovery_attempts": int((video_rec or {}).get("recovery_attempts") or 0),
+        "max_recovery_attempts": MAX_QC_RECOVERY_ATTEMPTS,
+        "youtube_id": (video_rec or {}).get("youtube_upload_id"),
+        "scheduled_publish_at_ist": None,
+        "error": (video_rec or {}).get("youtube_error") or (video_rec or {}).get("error"),
+        "has_local_mp4": bool((video_rec or {}).get("has_local_mp4", False)),
+        "local_file_cleaned": bool((video_rec or {}).get("local_file_cleaned", False)),
+    }
+    if video_rec and video_rec.get("scheduled_publish_at"):
+        dt = _parse_iso_dt(video_rec.get("scheduled_publish_at"))
+        if dt:
+            base["scheduled_publish_at_ist"] = dt.astimezone(IST).strftime("%Y-%m-%d %H:%M IST")
+
+    if not video_rec:
+        if isinstance(sched_slot_rec, dict) and sched_slot_rec.get("generation_status") == "FAILED":
+            base["stage"] = "Failed after retries"
+            base["error"] = sched_slot_rec.get("error")
+        return base
+
+    ui_status = str(video_rec.get("ui_status") or compute_ui_status(video_rec))
+    prod_status = str(video_rec.get("production_status") or "PENDING").upper()
+    pub_status = str(video_rec.get("publishing_status") or "PENDING").upper()
+    stage_hint = str(video_rec.get("lifecycle_stage") or "").upper()
+
+    if ui_status == "PUBLISHED_PUBLIC":
+        stage = "Published"
+    elif ui_status == "SCHEDULED":
+        stage = "Scheduled"
+    elif prod_status in ("QC_RECOVERING", "RECOVERING") or stage_hint == "QC_RECOVERING":
+        stage = "QC failed — regenerating"
+    elif prod_status == "SELECTING_TOPIC" or stage_hint == "SELECTING_TOPIC":
+        stage = "Selecting topic"
+    elif prod_status == "WRITING_SCRIPT" or stage_hint == "WRITING_SCRIPT":
+        stage = "Writing script"
+    elif prod_status == "RENDERING" or stage_hint == "RENDERING":
+        stage = "Rendering video"
+    elif prod_status == "RUNNING_QC" or stage_hint == "RUNNING_QC":
+        stage = "Running QC"
+    elif ui_status == "FAILED":
+        stage = "Failed after retries"
+    elif pub_status == "UPLOADING" or ui_status == "UPLOADED_PRIVATE" or (prod_status == "COMPLETED" and video_rec.get("qc_passed")):
+        stage = "Uploading private"
+    elif ui_status == "SIMULATED":
+        stage = "Scheduled" if video_rec.get("scheduled_publish_at") else "Uploading private"
+    else:
+        stage = "Not started"
+
+    base["stage"] = stage
+    return base
+
+
+def _compute_daily_progress(
+    todays_videos: List[Dict[str, Any]],
+    slot_timeline: List[Dict[str, Any]],
+    now_ist: datetime,
+) -> Dict[str, Any]:
+    """Compute honest daily target counts where only public YouTube videos count toward target."""
+    real_vids = [v for v in todays_videos if isinstance(v, dict) and not v.get("is_test")]
+    published_public = 0
+    scheduled_private = 0
+    generated_pending = 0
+    failed = 0
+
+    for v in real_vids:
+        ui = compute_ui_status(v)
+        if ui == "PUBLISHED_PUBLIC":
+            published_public += 1
+        elif ui == "SCHEDULED":
+            scheduled_private += 1
+        elif ui == "FAILED":
+            failed += 1
+        elif ui in ("GENERATED", "UPLOADED_PRIVATE"):
+            generated_pending += 1
+
+    # Count missed slot windows only after the scheduled IST publish minute passed without public/scheduled output
+    missed = 0
+    slot_minutes = {
+        1: SCHEDULER_PUBLISH_SLOT1_TIME,
+        2: SCHEDULER_PUBLISH_SLOT2_TIME,
+    }
+    for s in slot_timeline:
+        idx = int(s.get("slot_index") or 0)
+        hhmm = slot_minutes.get(idx, "23:59")
+        try:
+            hh, mm = [int(x) for x in hhmm.split(":")]
+            slot_dt = now_ist.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        except Exception:
+            slot_dt = now_ist
+        if now_ist > slot_dt and s.get("stage") not in ("Published", "Scheduled"):
+            missed += 1
+
+    remaining = max(0, MAX_DAILY_VIDEOS - published_public - scheduled_private)
+    return {
+        "published_public_count": published_public,
+        "daily_target": MAX_DAILY_VIDEOS,
+        "scheduled_count": scheduled_private,
+        "generated_pending_count": generated_pending,
+        "failed_count": failed,
+        "missed_count": missed,
+        "remaining_slots": remaining,
+        "target_met": published_public >= MAX_DAILY_VIDEOS,
+        "note": "Published count increments only when YouTube video status is live public (private/scheduled are tracked separately).",
+    }
 
 
 def _parse_iso_dt(value: Any) -> Optional[datetime]:
@@ -356,7 +538,20 @@ def get_system_status() -> Dict[str, Any]:
     error_logs = db.get_recent_logs(limit=10)
 
     # YouTube Dedicated Upload Quota (100 uploads/day) - count real uploads only
+    now_ist = scheduler.now_ist()
     yt_uploads_today = len([v for v in todays_videos if is_real_youtube_upload(v)])
+
+    try:
+        yt_api_quota_estimate = youtube_quota.get_quota_status()
+    except Exception:
+        yt_api_quota_estimate = {
+            "is_estimate": True,
+            "daily_reference_units": 10000,
+            "estimated_units_used": 0,
+            "remaining_units": 10000,
+            "usage_percent": 0.0,
+            "operations_breakdown": {},
+        }
 
     quota_status = {
         "gemini": {
@@ -371,6 +566,7 @@ def get_system_status() -> Dict[str, Any]:
             "daily_limit": YOUTUBE_UPLOAD_DAILY_LIMIT,
             "status": "HEALTHY" if yt_uploads_today < YOUTUBE_UPLOAD_DAILY_LIMIT else "QUOTA_EXHAUSTED",
         },
+        "youtube_api_estimate": yt_api_quota_estimate,
         "instagram": {
             "tier": "Instagram Login (v22.0)",
             "hourly_calls_used": len([v for v in todays_videos if v.get("instagram_media_id")]) * 3,
@@ -563,10 +759,33 @@ def get_system_status() -> Dict[str, Any]:
         "last_resolved_failure": resolved_logs[0] if resolved_logs else None,
     }
 
-    for v in todays_videos:
-        v["ui_status"] = compute_ui_status(v)
-    for v in recent_videos:
-        v["ui_status"] = compute_ui_status(v)
+    enriched_todays = [_enrich_video_record(v) for v in todays_videos if isinstance(v, dict)]
+    enriched_recent = [_enrich_video_record(v) for v in recent_videos if isinstance(v, dict)]
+
+    today_auto = (scheduler_telemetry.get("today_automation") or {}) if isinstance(scheduler_telemetry, dict) else {}
+    slot_rec_map = {}
+    for ev in enriched_todays:
+        if not ev.get("is_test") and ev.get("slot_index") in (1, 2):
+            slot_rec_map[int(ev["slot_index"])] = ev
+    slot_timeline = [
+        _derive_slot_lifecycle_stage(1, slot_rec_map.get(1), today_auto.get("slot1")),
+        _derive_slot_lifecycle_stage(2, slot_rec_map.get(2), today_auto.get("slot2")),
+    ]
+    daily_progress = _compute_daily_progress(enriched_todays, slot_timeline, now_ist)
+
+    try:
+        storage_summary = get_storage_summary()
+    except Exception:
+        storage_summary = {}
+
+    try:
+        performance_summary = performance_tracker.get_summary()
+    except Exception:
+        performance_summary = {}
+
+    operational_status["storage_summary"] = storage_summary
+    operational_status["quota_estimate"] = yt_api_quota_estimate
+    operational_status["daily_progress"] = daily_progress
 
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -578,9 +797,21 @@ def get_system_status() -> Dict[str, Any]:
         "automation_enabled": automation_enabled,
         "oauth_paused": oauth_paused,
         "oauth_pause_reason": oauth_pause_reason,
-        "todays_videos": todays_videos,
-        "recent_videos": recent_videos,
+        "todays_videos": enriched_todays,
+        "recent_videos": enriched_recent,
         "quotas": quota_status,
+        "daily_progress": daily_progress,
+        "slot_timeline": slot_timeline,
+        "storage": storage_summary,
+        "performance": performance_summary,
+        "policy": {
+            "min_duration_sec": MIN_DURATION_SEC,
+            "max_duration_sec": MAX_DURATION_SEC,
+            "target_duration_min_sec": TARGET_DURATION_MIN_SEC,
+            "target_duration_max_sec": TARGET_DURATION_MAX_SEC,
+            "max_qc_recovery_attempts": MAX_QC_RECOVERY_ATTEMPTS,
+            "daily_limit": MAX_DAILY_VIDEOS,
+        },
         "token_health": token_health,
         "scheduler": scheduler_telemetry,
         "notifications": notif_health,
@@ -660,12 +891,15 @@ def get_video_description(video_id: str) -> Dict[str, Any]:
         )
         desc = desc_data["full_description"]
         record["youtube_description"] = desc
+        if not record.get("youtube_tags") and desc_data.get("tags"):
+            record["youtube_tags"] = desc_data["tags"]
         db.save_video_record(clean_id, record)
 
     return {
         "video_id": clean_id,
-        "title": record.get("script", {}).get("title", record.get("topic")),
+        "title": record.get("youtube_title") or record.get("script", {}).get("title", record.get("topic")),
         "description": desc,
+        "youtube_tags": record.get("youtube_tags", []),
         "sources": record.get("sources", []),
         "is_edited": record.get("description_edited", False),
         "char_count": len(desc),
@@ -949,6 +1183,26 @@ def get_sanitized_log_tail(source: str = "dashboard", lines: int = 80):
         return {"source": source, "exists": True, "path": str(target), "lines": tailed}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed reading log file: {exc}")
+
+
+@app.get("/api/storage")
+def get_storage_telemetry():
+    """Return local output storage footprint and safe cleanup audit telemetry."""
+    return sanitize_data(get_storage_summary())
+
+
+@app.get("/api/analytics")
+@app.get("/api/performance")
+def get_performance_analytics():
+    """Return read-only YouTube public video performance metrics and honest sample/scope disclosures."""
+    return sanitize_data(performance_tracker.get_summary())
+
+
+@app.post("/api/performance/refresh")
+def refresh_performance_analytics(auth: str = Depends(verify_auth_header)):
+    """Trigger read-only YouTube Data API public statistics refresh (Requires X-Studio-Auth)."""
+    res = performance_tracker.refresh_public_video_metrics(youtube_publisher)
+    return sanitize_data(res)
 
 
 def start_local_dashboard():

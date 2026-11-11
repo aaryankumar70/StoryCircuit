@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -14,12 +15,23 @@ from zoneinfo import ZoneInfo
 from curiosity_engine.config import (
     INSTAGRAM_PUBLISHING_MODE,
     MAX_DAILY_VIDEOS,
+    MAX_QC_RECOVERY_ATTEMPTS,
     OUTPUT_DIR,
     SCHEDULER_TIMEZONE,
     YOUTUBE_PRIVACY_STATUS,
     YOUTUBE_PUBLISHING_MODE,
+    get_hidden_subprocess_kwargs,
 )
-from curiosity_engine.content.scriptwriter import write_video_script
+from curiosity_engine.content.description_generator import (
+    build_youtube_tags,
+    description_generator,
+    generate_youtube_title,
+)
+from curiosity_engine.content.scriptwriter import (
+    assign_line_scenes,
+    revise_script_for_duration,
+    write_video_script,
+)
 from curiosity_engine.content.topic_discovery import select_daily_topics
 from curiosity_engine.distribution.instagram_publisher import instagram_publisher
 from curiosity_engine.distribution.youtube_publisher import (
@@ -35,6 +47,130 @@ from curiosity_engine.state.db import db
 
 logger = logging.getLogger("curiosity_engine.pipeline")
 IST = ZoneInfo(SCHEDULER_TIMEZONE)
+
+
+def _compute_file_sha256(path: Path) -> Optional[str]:
+    """Compute SHA-256 hex digest of a file if it exists, else None."""
+    if not path.exists() or not path.is_file():
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _run_ffmpeg_loudnorm_fix(source_mp4: Path, target_mp4: Path) -> bool:
+    """Apply EBU R128 loudness normalization in-place via staging file (audio fix without altering visuals)."""
+    try:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", str(source_mp4),
+            "-af", "loudnorm=I=-16.0:TP=-1.5:LRA=7.0",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            str(target_mp4),
+        ]
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            **get_hidden_subprocess_kwargs(),
+        )
+        return res.returncode == 0 and target_mp4.exists() and target_mp4.stat().st_size > 100_000
+    except Exception as exc:
+        logger.warning("Audio loudnorm recovery pass failed (%s); falling back to full rebuild.", exc)
+        return False
+
+
+def _choose_recovery_strategy(qc_report: Any) -> Tuple[str, str]:
+    """Determine targeted recovery strategy cleanly from categorized QC issues."""
+    checks = getattr(qc_report, "checks", {}) or {}
+    cats = set(checks.get("failure_categories") or [])
+    issues_txt = " ".join(getattr(qc_report, "issues", []) or []).lower()
+
+    if "duration_exceeded" in cats or "duration_too_short" in cats or "duration" in issues_txt:
+        if "exceed" in issues_txt or "duration_exceeded" in cats:
+            return "revise_script_duration_down", "Revising script and re-rendering video within 20-60s."
+        return "revise_script_duration_up", "Expanding story depth and re-rendering within 20-60s."
+    if "sync_mismatch" in cats or "caption" in issues_txt or "drift" in issues_txt:
+        return "resync_tts_alignment", "Re-aligning narration timings and regenerating fresh render."
+    if ("audio_loudness" in cats or "audio_codec" in cats or "loudness" in issues_txt or "true peak" in issues_txt) and not (
+        {"integrity_missing", "integrity_codec", "visual_black_frames", "visual_geometry"} & cats
+    ):
+        return "audio_normalization", "Normalizing audio loudness/codec and verifying broadcast standards."
+    if "visual_black_frames" in cats or "visual_geometry" in cats or "black frame" in issues_txt:
+        return "regenerate_visual_sequence", "Regenerating visual scene choreography and fresh render."
+    return "full_fresh_render", "Rebuilding assets cleanly and rendering a fresh output MP4."
+
+
+def _execute_recovery_attempt(
+    attempt: int,
+    video_id: str,
+    project_dir: Path,
+    output_mp4: Path,
+    script_data: Dict[str, Any],
+    qc_report: Any,
+    prev_hash: Optional[str],
+) -> Tuple[Dict[str, Any], Path, str, str]:
+    """Execute one targeted recovery action, guaranteeing a fresh output artifact before re-QC."""
+    attempt_id = f"{video_id}_rec{attempt}"
+    strategy, action_desc = _choose_recovery_strategy(qc_report)
+    checks = getattr(qc_report, "checks", {}) or {}
+    curr_dur = float(checks.get("duration_sec") or 0.0)
+    updated_script = dict(script_data)
+
+    logger.info(
+        "[%s] QC Recovery Attempt %d/2 (%s): strategy=%s",
+        video_id,
+        attempt,
+        attempt_id,
+        strategy,
+    )
+
+    if strategy in ("revise_script_duration_down", "revise_script_duration_up"):
+        fallback_dur = 65.0 if strategy == "revise_script_duration_down" else 17.0
+        revised_script, rev_note = revise_script_for_duration(
+            updated_script,
+            curr_dur if curr_dur > 0 else fallback_dur,
+        )
+        updated_script = revised_script
+        action_desc = rev_note
+        prep_dir = prepare_project(video_id, updated_script)
+        render_project_video(prep_dir, output_mp4, resume=False, force_rebuild=True)
+        return updated_script, prep_dir, strategy, action_desc
+
+    if strategy == "audio_normalization" and output_mp4.exists():
+        staged = output_mp4.with_name(f".{attempt_id}_norm.mp4")
+        if _run_ffmpeg_loudnorm_fix(output_mp4, staged):
+            staged.replace(output_mp4)
+            return updated_script, project_dir, strategy, "Applied FFmpeg EBU R128 loudness normalization"
+        # Fallback if audio-only mux failed (e.g. corrupt stream): remove & run fresh render cleanly
+
+    if strategy == "regenerate_visual_sequence":
+        for idx, ln in enumerate(updated_script.get("lines") or []):
+            if isinstance(ln, dict):
+                sc = dict(ln.get("scene") or {})
+                alt_moods = ("wonder", "calm", "tense")
+                sc["mood"] = alt_moods[idx % len(alt_moods)]
+                ln["scene"] = sc
+        assign_line_scenes(updated_script)
+
+    # Remove prior failed MP4 so render_project_video never reuses the failed artifact
+    try:
+        if output_mp4.exists():
+            output_mp4.unlink()
+    except Exception:
+        pass
+
+    prep_dir = project_dir
+    if strategy in ("resync_tts_alignment", "regenerate_visual_sequence") or not _has_valid_project_assets(project_dir):
+        prep_dir = prepare_project(video_id, updated_script)
+    render_project_video(prep_dir, output_mp4, resume=False, force_rebuild=True)
+    return updated_script, prep_dir, strategy, action_desc
 
 
 def _has_valid_project_assets(project_dir: Path) -> bool:
@@ -102,32 +238,78 @@ def produce_single_video(
         "topic": base_record.get("topic") or topic_info.get("topic"),
         "category": base_record.get("category") or topic_info.get("category"),
         "style": base_record.get("style") or topic_info.get("style"),
-        "production_status": base_record.get("production_status") or "STARTING",
+        "evidence_type": base_record.get("evidence_type") or topic_info.get("evidence_type", "documented_fact"),
+        "discovery_origin": base_record.get("discovery_origin") or topic_info.get("discovery_origin", "curated_research"),
+        "production_status": "STARTING",
         "publishing_status": base_record.get("publishing_status") or "PENDING",
+        "recovery_attempts": 0 if force_rebuild else int(base_record.get("recovery_attempts") or 0),
+        "qc_recovery_history": [] if force_rebuild else list(base_record.get("qc_recovery_history") or []),
         "created_at": base_record.get("created_at") or datetime.now(timezone.utc).isoformat(),
     }
+    if force_rebuild:
+        record["failed_mp4_sha256"] = None
     db.save_video_record(video_id, record)
 
+    # Notify Telegram immediately when production begins (never blocks execution)
     try:
+        from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
+        sched_window = "12:30 PM IST" if int(slot_index) == 1 else "8:30 PM IST"
+        get_telegram_notifier().notify_production_started(
+            video_id=video_id,
+            date_str=target_date,
+            slot_index=slot_index,
+            scheduled_time_ist=sched_window,
+            topic=str(record.get("topic") or topic_info.get("topic") or ""),
+            dedup_tag="rebuild" if force_rebuild else "",
+        )
+    except Exception:
+        pass
+
+    try:
+        # Respect prior exhausted QC recovery limit cleanly instead of re-testing the exact failed file
+        current_disk_hash = _compute_file_sha256(output_mp4)
+        prior_failed_hash = record.get("failed_mp4_sha256")
+        prior_attempts = int(record.get("recovery_attempts") or 0)
+        if (
+            not force_rebuild
+            and prior_attempts >= MAX_QC_RECOVERY_ATTEMPTS
+            and current_disk_hash
+            and current_disk_hash == prior_failed_hash
+        ):
+            raise RuntimeError(
+                record.get("error")
+                or f"Video {video_id} previously exhausted {MAX_QC_RECOVERY_ATTEMPTS} QC recovery attempts."
+            )
+
         # 2. Scriptwriting & Source Verification (reuse valid saved script when resuming)
         script_data = None
         if not force_rebuild and isinstance(record.get("script"), dict) and record["script"].get("lines"):
             script_data = record["script"]
+            assign_line_scenes(script_data)
             logger.info(f"[{video_id}] Reusing existing verified script for '{record.get('topic')}'.")
         else:
-            logger.info(f"[{video_id}] Writing script and checking sources...")
+            logger.info(f"[{video_id}] Writing storytelling script and verifying internal sources...")
             script_data = write_video_script(topic_info)
             record["script"] = script_data
             record["sources"] = script_data.get("sources", [])
             record["claims"] = script_data.get("claims", [])
+            record["evidence_type"] = script_data.get("evidence_type", record.get("evidence_type"))
+            record["discovery_origin"] = script_data.get("discovery_origin", record.get("discovery_origin"))
             record["production_status"] = "SCRIPTED"
 
-        # 2b. Intelligent Description Generation (preserve user-edited or already generated descriptions)
+        # 2b. Link-Free YouTube Title, Description & Separate API Tags Generation
         if not force_rebuild and record.get("youtube_description"):
             logger.info(f"[{video_id}] Preserving existing YouTube description.")
+            if not record.get("youtube_title"):
+                record["youtube_title"] = generate_youtube_title(
+                    record.get("topic") or "", script_data
+                )
+            if not record.get("youtube_tags"):
+                record["youtube_tags"] = build_youtube_tags(
+                    record.get("topic") or "", record.get("category") or "Science", script_data
+                )
         else:
-            logger.info(f"[{video_id}] Generating intelligent YouTube Shorts description...")
-            from curiosity_engine.content.description_generator import description_generator
+            logger.info(f"[{video_id}] Generating link-free YouTube title, description & search tags...")
             desc_data = description_generator.generate(
                 topic=record.get("topic") or topic_info.get("topic", ""),
                 category=record.get("category") or topic_info.get("category", ""),
@@ -136,12 +318,19 @@ def produce_single_video(
                 claims=record.get("claims", []),
             )
             record["youtube_description"] = desc_data["full_description"]
+            record["youtube_title"] = desc_data.get("recommended_title") or generate_youtube_title(
+                record.get("topic") or "", script_data
+            )
+            record["youtube_tags"] = desc_data.get("youtube_tags") or build_youtube_tags(
+                record.get("topic") or "", record.get("category") or "Science", script_data
+            )
             record["description_data"] = desc_data
         db.save_video_record(video_id, record)
 
-        # 3. Check if valid rendered MP4 already exists on disk (skip prep & render -> go straight to QC)
+        # 3. Check if valid rendered MP4 already exists on disk (NEVER reuse an unchanged previously failed MP4!)
         rendered_valid = False
-        if not force_rebuild and output_mp4.exists():
+        is_same_failed_file = bool(prior_failed_hash and current_disk_hash and current_disk_hash == prior_failed_hash)
+        if not force_rebuild and output_mp4.exists() and not is_same_failed_file:
             try:
                 validate_rendered_mp4(output_mp4)
                 rendered_valid = True
@@ -152,8 +341,10 @@ def produce_single_video(
                     output_mp4.unlink()
                 except Exception:
                     pass
+        elif is_same_failed_file:
+            logger.info(f"[{video_id}] Existing MP4 matches previously rejected failed hash; skipping redundant unchanged QC.")
 
-        if not rendered_valid:
+        if not rendered_valid and not is_same_failed_file:
             # 3b. Preparation: TTS and Alignment (resume from valid project assets if intact)
             if not force_rebuild and _has_valid_project_assets(project_dir):
                 logger.info(f"[{video_id}] Resuming from valid existing ASSETS_READY project at {project_dir}.")
@@ -171,25 +362,170 @@ def produce_single_video(
             record["local_video_path"] = str(output_mp4)
             record["production_status"] = "RENDERED"
             db.save_video_record(video_id, record)
-        else:
+        elif rendered_valid:
             record["local_video_path"] = str(output_mp4)
             record["production_status"] = "RENDERED"
             db.save_video_record(video_id, record)
 
-        # 5. Programmatic Quality Control Gatekeeper
-        logger.info(f"[{video_id}] Running Quality Control checks...")
-        qc_report = verify_video(output_mp4, script_data)
+        # 5. Programmatic Quality Control Gatekeeper (+ Bounded Automatic Recovery up to 2 attempts)
+        record["production_status"] = "QC_RUNNING"
+        db.save_video_record(video_id, record)
+
+        if is_same_failed_file and record.get("qc_results"):
+            # Reconstruct last failed QC report without running redundant QC on identical unchanged file
+            prev_qc = record["qc_results"]
+            from curiosity_engine.quality.qc_gatekeeper import QCReport
+            qc_report = QCReport(
+                passed=False,
+                checks=prev_qc.get("checks", {}),
+                issues=list(prev_qc.get("issues") or [record.get("error") or "Prior QC failure"]),
+            )
+            current_hash = current_disk_hash
+        else:
+            logger.info(f"[{video_id}] Running Quality Control checks...")
+            qc_report = verify_video(output_mp4, script_data, project_dir=project_dir)
+            current_hash = _compute_file_sha256(output_mp4)
+
         record["qc_passed"] = qc_report.passed
         record["qc_results"] = qc_report.to_dict()
+        if qc_report.checks.get("duration_sec"):
+            record["duration_sec"] = qc_report.checks["duration_sec"]
 
         if not qc_report.passed:
+            original_issues = list(qc_report.issues)
+            record["original_qc_issues"] = record.get("original_qc_issues") or original_issues
+            record["failed_mp4_sha256"] = current_hash
             record["production_status"] = "REJECTED_QC"
-            record["error"] = f"QC Failed: {'; '.join(qc_report.issues)}"
+            record["error"] = f"QC Failed: {'; '.join(original_issues)}"
             db.save_video_record(video_id, record)
-            db.log_error("QC_GATEKEEPER", f"Video {video_id} failed QC", {"issues": qc_report.issues})
-            raise RuntimeError(f"Video {video_id} rejected by QC: {qc_report.issues}")
+            db.log_error("QC_GATEKEEPER", f"Video {video_id} failed QC", {"issues": original_issues})
+
+            attempts_done = int(record.get("recovery_attempts") or 0)
+            while not qc_report.passed and attempts_done < MAX_QC_RECOVERY_ATTEMPTS:
+                next_attempt = attempts_done + 1
+                strategy, next_action_desc = _choose_recovery_strategy(qc_report)
+                record["production_status"] = "RECOVERING"
+                record["recovery_attempts"] = next_attempt
+                db.save_video_record(video_id, record)
+
+                try:
+                    from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
+                    get_telegram_notifier().notify_qc_failed(
+                        video_id=video_id,
+                        topic=str(record.get("topic") or video_id),
+                        slot_index=slot_index,
+                        reason="; ".join(qc_report.issues),
+                        attempt=next_attempt,
+                        max_attempts=MAX_QC_RECOVERY_ATTEMPTS,
+                        next_action=next_action_desc,
+                    )
+                except Exception:
+                    pass
+
+                rec_error = None
+                try:
+                    updated_script, project_dir, used_strategy, action_desc = _execute_recovery_attempt(
+                        attempt=next_attempt,
+                        video_id=video_id,
+                        project_dir=project_dir,
+                        output_mp4=output_mp4,
+                        script_data=script_data,
+                        qc_report=qc_report,
+                        prev_hash=current_hash,
+                    )
+                    script_data = updated_script
+                    record["script"] = script_data
+                    record["local_video_path"] = str(output_mp4)
+                except Exception as exc:
+                    rec_error = str(exc)
+                    used_strategy = strategy
+                    action_desc = f"Recovery raised {rec_error}"
+
+                new_hash = _compute_file_sha256(output_mp4)
+                # NEVER pass QC against the exact same unchanged failed output artifact!
+                if rec_error:
+                    from curiosity_engine.quality.qc_gatekeeper import QCReport
+                    qc_report = QCReport(False, {"failure_categories": ["recovery_error"]}, [rec_error])
+                elif not new_hash or (current_hash and new_hash == current_hash):
+                    from curiosity_engine.quality.qc_gatekeeper import QCReport
+                    qc_report = QCReport(
+                        False,
+                        {"failure_categories": ["unchanged_failed_output"]},
+                        [f"Recovery attempt {next_attempt} did not produce a new/changed output MP4."],
+                    )
+                else:
+                    qc_report = verify_video(output_mp4, script_data, project_dir=project_dir)
+
+                record["qc_recovery_history"].append({
+                    "attempt": next_attempt,
+                    "attempt_id": f"{video_id}_rec{next_attempt}",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "original_issues": original_issues,
+                    "strategy": used_strategy,
+                    "action_taken": action_desc,
+                    "sha256_before": current_hash,
+                    "sha256_after": new_hash,
+                    "passed": qc_report.passed,
+                    "issues_after": list(qc_report.issues),
+                    "duration_sec": qc_report.checks.get("duration_sec"),
+                })
+                record["qc_passed"] = qc_report.passed
+                record["qc_results"] = qc_report.to_dict()
+                if qc_report.checks.get("duration_sec"):
+                    record["duration_sec"] = qc_report.checks["duration_sec"]
+                current_hash = new_hash
+                attempts_done = next_attempt
+
+                if qc_report.passed:
+                    record["failed_mp4_sha256"] = None
+                    record["qc_recovered"] = True
+                    record["production_status"] = "COMPLETED"
+                    record["error"] = None
+                    db.save_video_record(video_id, record)
+                    logger.info(
+                        "[%s] QC RECOVERED on attempt %d/%d (%s)!",
+                        video_id,
+                        next_attempt,
+                        MAX_QC_RECOVERY_ATTEMPTS,
+                        used_strategy,
+                    )
+                    try:
+                        from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
+                        get_telegram_notifier().notify_qc_recovered(
+                            video_id=video_id,
+                            topic=str(record.get("topic") or video_id),
+                            slot_index=slot_index,
+                            attempt=next_attempt,
+                            duration_sec=qc_report.checks.get("duration_sec"),
+                        )
+                    except Exception:
+                        pass
+                    break
+                else:
+                    record["failed_mp4_sha256"] = new_hash
+                    record["production_status"] = "REJECTED_QC"
+                    record["error"] = (
+                        f"QC Failed ({'; '.join(original_issues)}) | "
+                        f"Recovery {next_attempt}/{MAX_QC_RECOVERY_ATTEMPTS} failed ({'; '.join(qc_report.issues)})"
+                    )
+                    db.save_video_record(video_id, record)
+
+            if not qc_report.passed:
+                try:
+                    from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
+                    get_telegram_notifier().notify_failure(
+                        failure_type="PRODUCTION_FAILED",
+                        title=f"QC recovery exhausted for {video_id}",
+                        detail=f"Original: {'; '.join(original_issues)} | Latest: {'; '.join(qc_report.issues)}",
+                        video_id=video_id,
+                        dedup_key=f"prod_fail:{video_id}:{attempts_done}",
+                    )
+                except Exception:
+                    pass
+                raise RuntimeError(f"Video {video_id} rejected by QC: {original_issues} (exhausted {attempts_done}/{MAX_QC_RECOVERY_ATTEMPTS} recovery attempts)")
 
         record["production_status"] = "COMPLETED"
+        record["failed_mp4_sha256"] = None
         record["error"] = None
 
         # 6. Record Local MP4 Storage URI
@@ -517,19 +853,15 @@ def run_slot_publishing(
             raise FileNotFoundError(f"Video file {video_id}.mp4 not found on disk.")
 
     script = record.get("script", {})
-    title = script.get("title", record.get("topic", "Fascinating Fact"))
+    title = record.get("youtube_title") or generate_youtube_title(
+        record.get("topic", "Fascinating Fact"), script, duration_sec=record.get("duration_sec")
+    )
     category = record.get("category", "Science")
-    category_id = "27" if category in ["History", "Geography", "Interesting discoveries"] else "28"
+    category_id = "27" if category in ["History", "Geography", "Interesting discoveries", "Mysteries", "Unexplained events"] else "28"
 
-    tags = [
-        "Shorts",
-        "Curiosity",
-        category.replace(" ", ""),
-        "Science",
-        "DidYouKnow",
-        "Education",
-        "Interesting",
-    ]
+    tags = record.get("youtube_tags") or build_youtube_tags(
+        record.get("topic", title), category, script
+    )
 
     record["publishing_status"] = "UPLOADING"
     db.save_video_record(video_id, record)
@@ -555,7 +887,6 @@ def run_slot_publishing(
 
             yt_description = record.get("youtube_description")
             if not yt_description:
-                from curiosity_engine.content.description_generator import description_generator
                 desc_data = description_generator.generate(
                     topic=record.get("topic", title),
                     category=category,
@@ -565,6 +896,9 @@ def run_slot_publishing(
                 )
                 yt_description = desc_data["full_description"]
                 record["youtube_description"] = yt_description
+                if not record.get("youtube_tags"):
+                    tags = desc_data.get("youtube_tags") or tags
+                    record["youtube_tags"] = tags
 
             all_vids_for_excl = db.get_all_videos(limit=100)
             if not isinstance(all_vids_for_excl, list):

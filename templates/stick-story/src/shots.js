@@ -4,6 +4,7 @@
 import { ctx, W, H, clamp, lerp, seg, eo, eio, eob, rnd, rr, circle, ell, line } from './core/lib.js';
 import { L, Wd, T } from './core/timing.js';
 import * as K from './core/kit.js';
+import { buildDynamicStoryShots } from './core/scenes.js';
 const { P, GROUND } = K;
 
 // small set pieces for this story
@@ -14,7 +15,13 @@ function candle(x, y, s, t) { ctx.save(); ctx.translate(x, y); ctx.scale(s, s); 
 function curtain(x, y, h, wave) { ctx.beginPath(); ctx.moveTo(x, y); for (let k = 0; k <= 10; k++) ctx.lineTo(x + 200 + Math.sin(k + wave) * 18, y + h * k / 10); ctx.lineTo(x, y + h); ctx.closePath(); ctx.fillStyle = '#C96B5B'; ctx.fill(); }
 function bolt(x, y, s) { ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.beginPath(); ctx.moveTo(10, -120); ctx.lineTo(-50, 10); ctx.lineTo(0, 10); ctx.lineTo(-20, 120); ctx.lineTo(60, -20); ctx.lineTo(10, -20); ctx.closePath(); ctx.fillStyle = '#FFD43B'; ctx.fill(); ctx.lineWidth = 8; ctx.strokeStyle = P.ink; ctx.stroke(); ctx.restore(); }
 
-export function buildShots() {
+export function buildShots(script = null) {
+  const isExampleBlackout =
+    script?.id === 'example_blackout' ||
+    (Array.isArray(script?.lines) && script.lines.length === 12 && !script?.lines[0]?.scene);
+  if (script && !isExampleBlackout) {
+    return buildDynamicStoryShots(script);
+  }
   const S = [], CUES = [], add = (o) => (S.push(o), o), cue = (t, type, o = {}) => CUES.push({ t: +t.toFixed(3), type, ...o });
   const cut = (i) => (i === 0 ? 0 : L(i) - 0.08);
   const blink = (t) => ((t % 3.1) < 0.12 ? 1 : 0);

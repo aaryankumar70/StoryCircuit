@@ -598,9 +598,22 @@ class TestRendererAndPipelineReliability:
 
         failed_qc = MagicMock(passed=False, issues=["Integrated loudness -32.0 LUFS outside range"])
         failed_qc.to_dict.return_value = {"passed": False, "checks": {}, "issues": failed_qc.issues}
+        attempt_counter = {"n": 0}
+
+        def _fake_prep(topic, category, style, vid_id, script_data=None, output_dir=None, **kwargs):
+            pdir = out_dir / vid_id
+            pdir.mkdir(parents=True, exist_ok=True)
+            return pdir, script_data or {"title": "Bad", "lines": [{"text": "One"}], "duration": 25.0}
+
+        def _fake_render(p_dir, out_mp4, **kwargs):
+            attempt_counter["n"] += 1
+            out_mp4.write_bytes(f"rendered mp4 attempt {attempt_counter['n']}".encode("utf-8"))
+            return out_mp4
 
         with patch("curiosity_engine.runner.pipeline.db", iso_db), \
              patch("curiosity_engine.runner.pipeline.OUTPUT_DIR", out_dir), \
+             patch("curiosity_engine.runner.pipeline.prepare_project", side_effect=_fake_prep), \
+             patch("curiosity_engine.runner.pipeline.render_project_video", side_effect=_fake_render), \
              patch("curiosity_engine.runner.pipeline.validate_rendered_mp4", return_value={"duration": 25.0}), \
              patch("curiosity_engine.runner.pipeline.verify_video", return_value=failed_qc):
 
@@ -610,6 +623,7 @@ class TestRendererAndPipelineReliability:
 
             saved = iso_db.get_video_record(vid_id)
             assert saved["qc_passed"] is False
+            assert saved["recovery_attempts"] == 2
             assert "loudness" in saved["error"].lower()
 
     def test_slot_independent_generation_preserves_completed_slot(self, tmp_path):
@@ -661,8 +675,13 @@ class TestRendererAndPipelineReliability:
              patch("curiosity_engine.content.topic_discovery.gemini_client.generate_json", return_value=None):
 
             t1, t2 = select_daily_topics(today, record_usage=False)
-            # Unused topic ("Carrington solar storm") MUST be picked first instead of repeating both yesterday topics
-            assert "solar storm" in t1["topic"].lower()
+            # An unused curated topic MUST be selected ahead of yesterday's already-used topics
+            used_topics = {
+                "The sunken Egyptian port city of Thonis-Heracleion",
+                "Why do your ears ring in absolute silence?",
+            }
+            assert t1["topic"] not in used_topics
+            assert t2["topic"] not in used_topics
             assert t1["topic"] != t2["topic"]
 
 

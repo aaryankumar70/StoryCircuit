@@ -4,6 +4,7 @@
 import { ctx, W, H, TAU, clamp, lerp, seg, eo, eio, eob, rnd, rr, circle, ell, line } from './core/lib.js';
 import { L, Wd, T } from './core/timing.js';
 import * as K from './core/kit.js';
+import { buildDynamicStoryShots } from './core/scenes.js';
 
 const { P, cut, P_rr, P_poly, P_circ } = K;
 
@@ -111,7 +112,13 @@ function drawUnderwaterRuins(t, diverProgress = 1) {
   circle(dx + 32, dy - 6, 14, P.royal);
 }
 
-export function buildShots() {
+export function buildShots(script = null) {
+  const isHeracleionTopic =
+    script?.id === 'hist_thonis_heracleion' ||
+    String(script?.topic || script?.title || '').toLowerCase().includes('heracleion');
+  if (script && !isHeracleionTopic) {
+    return buildDynamicStoryShots(script);
+  }
   const S = [], CUES = [];
   const add = (o) => (S.push(o), o);
   const cue = (t, type, o = {}) => CUES.push({ t: +t.toFixed(3), type, ...o });

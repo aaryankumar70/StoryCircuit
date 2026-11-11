@@ -390,6 +390,127 @@ class TelegramNotifier:
     # ------------------------------------------------------------------
     # Domain Notification Methods
     # ------------------------------------------------------------------
+    def notify_production_started(
+        self,
+        video_id: str,
+        date_str: str,
+        slot_index: int,
+        scheduled_time_ist: str,
+        topic: str = "",
+        dedup_tag: str = "",
+    ) -> Dict[str, Any]:
+        """Alert immediately when a new production slot starts generating."""
+        key = f"prod_start:{video_id}{(':' + dedup_tag) if dedup_tag else ''}"
+        esc_topic = html.escape(str(topic or "Selecting curated story"))
+        esc_time = html.escape(str(scheduled_time_ist or ("12:30 PM IST" if slot_index == 1 else "8:30 PM IST")))
+        msg = (
+            f"<b>CurioLoop Production Started</b>\n\n"
+            f"<b>Date:</b> {html.escape(str(date_str))}\n"
+            f"<b>Slot:</b> {int(slot_index)}\n"
+            f"<b>Time:</b> {esc_time}\n"
+            f"<b>Topic:</b> {esc_topic}\n"
+            f"<b>Job ID:</b> <code>{html.escape(str(video_id))}</code>\n"
+            f"<b>Status:</b> Generating script and assets."
+        )
+        return self.send_event(
+            category="PRODUCTION_STARTED",
+            event_key=key,
+            summary=f"Production started Slot {slot_index}: {topic or video_id}",
+            message_html=msg,
+        )
+
+    def notify_qc_failed(
+        self,
+        video_id: str,
+        topic: str,
+        slot_index: int,
+        reason: str,
+        attempt: int,
+        max_attempts: int,
+        next_action: str,
+    ) -> Dict[str, Any]:
+        """Alert immediately when QC fails and report targeted recovery attempt status."""
+        key = f"qc_fail:{video_id}:att{int(attempt)}"
+        safe_reason = redact_telegram_secrets(str(reason or "QC check rejected"))
+        msg = (
+            f"<b>QC FAILED</b>\n\n"
+            f"<b>Topic:</b> {html.escape(str(topic or video_id))}\n"
+            f"<b>Slot:</b> {int(slot_index)}\n"
+            f"<b>Reason:</b> {html.escape(safe_reason[:240])}\n"
+            f"<b>Recovery:</b> Attempt {int(attempt)}/{int(max_attempts)}\n"
+            f"<b>Action:</b> {html.escape(str(next_action))}"
+        )
+        return self.send_event(
+            category="QC_FAILED",
+            event_key=key,
+            summary=f"QC Failed Slot {slot_index} ({attempt}/{max_attempts}): {safe_reason[:110]}",
+            message_html=msg,
+        )
+
+    def notify_qc_recovered(
+        self,
+        video_id: str,
+        topic: str,
+        slot_index: int,
+        attempt: int,
+        duration_sec: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Confirm when a failed video is regenerated/fixed and passes QC cleanly."""
+        key = f"qc_recovered:{video_id}:att{int(attempt)}"
+        dur_line = f"\n<b>Duration:</b> {float(duration_sec):.1f}s" if duration_sec else ""
+        msg = (
+            f"<b>CurioLoop QC Recovered</b>\n\n"
+            f"<b>Topic:</b> {html.escape(str(topic or video_id))}\n"
+            f"<b>Slot:</b> {int(slot_index)}\n"
+            f"<b>Recovery Attempt:</b> {int(attempt)} passed QC{dur_line}\n"
+            f"<b>Next Step:</b> Proceeding to YouTube upload and scheduling."
+        )
+        return self.send_event(
+            category="QC_RECOVERED",
+            event_key=key,
+            summary=f"QC recovered Slot {slot_index} on attempt {attempt}: {topic or video_id}",
+            message_html=msg,
+        )
+
+    def notify_upload_completed(
+        self,
+        video_id: str,
+        title: str,
+        youtube_id: str,
+        upload_status: str,
+        scheduled_time_ist: str = "",
+        youtube_url: str = "",
+        simulated: bool = False,
+    ) -> Dict[str, Any]:
+        """Send distinct upload/scheduled alert without falsely claiming public publication."""
+        st_upper = str(upload_status or "UPLOADED_PRIVATE").upper()
+        if simulated or st_upper == "SIMULATED":
+            status_label = "Simulated local preview (not uploaded to YouTube)"
+        elif st_upper == "SCHEDULED":
+            status_label = f"Uploaded privately & scheduled for public release ({scheduled_time_ist or 'UTC publishAt'})"
+        else:
+            status_label = "Uploaded privately (pending scheduling confirmation)"
+
+        key = f"upload_done:{video_id}:{youtube_id}:{st_upper}"
+        yt_link = youtube_url or (f"https://www.youtube.com/shorts/{youtube_id}" if youtube_id and not simulated else "")
+        link_line = f"\n<b>YouTube URL (private until publishAt):</b> {html.escape(yt_link)}" if yt_link else ""
+        sched_line = f"\n<b>Scheduled Publish (IST):</b> {html.escape(scheduled_time_ist)}" if scheduled_time_ist else ""
+
+        msg = (
+            f"<b>CurioLoop: Upload Completed</b>\n\n"
+            f"<b>Title:</b> {html.escape(str(title or video_id))}\n"
+            f"<b>YouTube ID:</b> <code>{html.escape(str(youtube_id or ''))}</code>\n"
+            f"<b>Status:</b> {html.escape(status_label)}"
+            f"{sched_line}"
+            f"{link_line}"
+        )
+        return self.send_event(
+            category="UPLOAD_COMPLETED",
+            event_key=key,
+            summary=f"Upload completed ({st_upper}): {title} ({youtube_id})",
+            message_html=msg,
+        )
+
     def notify_publication_success(
         self,
         video_id: str,
@@ -549,6 +670,10 @@ class TelegramNotifier:
         oauth_status: str,
         oauth_reauth_ist: str,
         last_failure: str = "",
+        production_failures_count: int = 0,
+        qc_recovery_attempts_count: int = 0,
+        remaining_or_missed_slots: str = "",
+        oauth_warnings: str = "",
     ) -> Dict[str, Any]:
         """Send once-per-IST-day operational summary."""
         state = self._load_state()
@@ -560,13 +685,27 @@ class TelegramNotifier:
             if last_failure
             else "\n<b>Failures Today:</b> None"
         )
+        slots_line = (
+            f"\n<b>Remaining/Missed Slots:</b> {html.escape(remaining_or_missed_slots)}"
+            if remaining_or_missed_slots
+            else ""
+        )
+        oauth_warn_line = (
+            f"\n<b>OAuth Warning:</b> {html.escape(oauth_warnings)}"
+            if oauth_warnings
+            else ""
+        )
         msg = (
             f"<b>CurioLoop Daily Operational Summary ({html.escape(date_str)})</b>\n\n"
             f"<b>Produced Today:</b> {production_count} / {daily_limit}\n"
-            f"<b>Confirmed Public:</b> {published_public_count}\n"
+            f"<b>Published Publicly:</b> {published_public_count}\n"
             f"<b>Scheduled Pending:</b> {scheduled_pending_count}\n"
+            f"<b>Production Failures:</b> {int(production_failures_count)}\n"
+            f"<b>QC Recovery Attempts:</b> {int(qc_recovery_attempts_count)}"
+            f"{slots_line}\n"
             f"<b>Next Scheduled (IST):</b> {html.escape(next_scheduled_ist or 'None queued')}\n"
             f"<b>YouTube OAuth:</b> {html.escape(oauth_status)} (Reauth est: {html.escape(oauth_reauth_ist or 'Unknown')})"
+            f"{oauth_warn_line}"
             f"{fail_line}"
         )
         res = self.send_event(

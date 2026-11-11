@@ -20,6 +20,7 @@ from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
 from curiosity_engine import config
+from curiosity_engine.distribution.youtube_quota import youtube_quota
 from curiosity_engine.config import (
     PUBLISHING_MODE,
     YOUTUBE_CLIENT_ID,
@@ -143,6 +144,7 @@ class YouTubePublisher:
         try:
             # Query recent uploads on the channel
             channels_response = self.service.channels().list(mine=True, part="contentDetails").execute()
+            youtube_quota.record_operation("channels.list")
             items = channels_response.get("items", [])
             if not items:
                 return None
@@ -153,6 +155,7 @@ class YouTubePublisher:
                 part="snippet",
                 maxResults=25,
             ).execute()
+            youtube_quota.record_operation("playlistItems.list")
 
             for item in playlist_items.get("items", []):
                 snippet = item.get("snippet", {})
@@ -289,6 +292,7 @@ class YouTubePublisher:
                     if status:
                         logger.info(f"YouTube Upload Progress: {int(status.progress() * 100)}%")
                     if response is not None:
+                        youtube_quota.record_operation("videos.insert")
                         video_id = response.get("id")
                         resp_status = response.get("status", {})
                         confirmed_publish_at = resp_status.get("publishAt")
@@ -391,6 +395,7 @@ class YouTubePublisher:
         existing_status: Dict[str, Any] = {}
         try:
             list_resp = self.service.videos().list(part="status", id=video_id).execute()
+            youtube_quota.record_operation("videos.list")
             items = list_resp.get("items", [])
             if items:
                 existing_status = items[0].get("status", {})
@@ -450,6 +455,7 @@ class YouTubePublisher:
             body = {"id": video_id, "status": merged_status}
             try:
                 response = self.service.videos().update(part="status", body=body).execute()
+                youtube_quota.record_operation("videos.update")
                 status = response.get("status", {})
                 confirmed_at = status.get("publishAt")
                 confirmed_privacy = status.get("privacyStatus")
@@ -499,6 +505,7 @@ class YouTubePublisher:
         try:
             request = self.service.videos().list(part="status,snippet", id=video_id)
             response = request.execute()
+            youtube_quota.record_operation("videos.list")
             items = response.get("items", [])
             if not items:
                 return None
@@ -552,6 +559,7 @@ class YouTubePublisher:
                 part="status",
                 body={"id": video_id, "status": merged_status},
             ).execute()
+            youtube_quota.record_operation("videos.update")
             status_obj = response.get("status", {})
             last_privacy = status_obj.get("privacyStatus")
             last_publish_at = status_obj.get("publishAt")

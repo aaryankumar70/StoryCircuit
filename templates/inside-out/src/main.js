@@ -23,7 +23,7 @@ function draw(t) {
   sh.draw(lt, d, t);
   ctx.restore();
   ctx.globalAlpha = 1; ctx.letterSpacing = '0px';
-  if (i > 0 && lt < 0.12) { ctx.fillStyle = '#FFFFFF'; ctx.globalAlpha = 0.55 * (1 - lt / 0.12); ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  if (i > 0 && lt < 0.16) { ctx.fillStyle = '#090B0E'; ctx.globalAlpha = 0.24 * (1 - lt / 0.16); ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
   // fade from / to black on the first and last 0.25 s
   const fade = Math.min(clamp(t / 0.25), clamp((T.dur - t) / 0.35));
   if (fade < 1) { ctx.fillStyle = '#000'; ctx.globalAlpha = 1 - fade; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
@@ -37,7 +37,7 @@ function draw(t) {
     const script = await (await fetch('script.json', { cache: 'no-store' })).json();
     await loadTiming();
     buildCaptions(script);
-    const { shots, cues } = buildShots();
+    const { shots, cues } = buildShots(script);
     shots.sort((a, b) => a.at - b.at);
     OP._shots = shots; OP.script = script;
     OP.duration = () => T.dur;

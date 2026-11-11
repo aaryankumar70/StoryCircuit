@@ -4,6 +4,7 @@
 import { ctx, C, W, H, TAU, clamp, lerp, seg, eo, eio, eob, rnd, rr, circle, ell, line, fillAll, bigText } from './core/lib.js';
 import { L, Le, Wd, T } from './core/timing.js';
 import * as K from './core/kit.js';
+import { buildDynamicStoryShots } from './core/scenes.js';
 
 // ── Additional Anatomical & Acoustic Set Pieces ──
 function drawAcousticChamber(doorClosed = 1) {
@@ -110,7 +111,14 @@ function drawBloodVessel(t) {
   }
 }
 
-export function buildShots() {
+export function buildShots(script = null) {
+  const isEarAnatomyTopic =
+    script?.id === 'bio_silence_ringing' ||
+    String(script?.topic || script?.title || '').toLowerCase().includes('ears ring');
+  const hasExplicitDynamicScenes = Array.isArray(script?.lines) && script.lines.some((ln) => ln?.scene?.visual_type);
+  if (script && (!isEarAnatomyTopic || hasExplicitDynamicScenes && script.lines.length !== 6)) {
+    return buildDynamicStoryShots(script);
+  }
   const S = [], CUES = [];
   const add = (o) => (S.push(o), o);
   const cue = (t, type, o = {}) => CUES.push({ t: +t.toFixed(3), type, ...o });

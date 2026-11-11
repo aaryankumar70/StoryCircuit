@@ -1,17 +1,32 @@
-"""Scriptwriting Engine for Curiosity Engine.
-Generates 20-30s narration scripts (48-62 words) with authentic verifiable sources,
-natural satisfying conclusions (looping ending optional), and word-synced caption chunks.
+"""Storytelling Scriptwriter for CurioLoop.
+
+Supports 20-60s narration scripts (preferred target 25-45s, ~62-115 spoken words,
+strict ceiling <= 145 words). Enforces retention narrative structure:
+  - Opening (0-3s): Immediate curiosity hook (never generic "Did you know?")
+  - Development: Progressive information reveal with narrative momentum
+  - Curiosity & Suspense: Unanswered tension / meaningful turn before payoff
+  - Ending: Satisfying, memorable resolution
+
+Also generates narration-matched visual `scene` directives per cut line and
+provides `revise_script_for_duration` for targeted QC duration recovery.
 """
 from __future__ import annotations
 
+import copy
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from curiosity_engine.config import (
+    MAX_DURATION_SEC,
     MAX_WORD_COUNT,
+    MIN_DURATION_SEC,
     MIN_WORD_COUNT,
+    TARGET_DURATION_MAX_SEC,
+    TARGET_DURATION_MIN_SEC,
+    TARGET_WORD_COUNT_MAX,
+    TARGET_WORD_COUNT_MIN,
     VOICE_MAP,
 )
 from curiosity_engine.content.curated_fallback import CURATED_TOPICS
@@ -33,13 +48,31 @@ TRUSTED_DOMAINS = [
     "britannica.com",
     "wikipedia.org",
     "si.edu",
+    "smithsonianmag.com",
     "nationalgeographic.com",
     "scientificamerican.com",
+    "planetary.org",
+    "arxiv.org",
 ]
+
+VISUAL_TYPES = (
+    "tension_room",
+    "radar_scan",
+    "archive_map",
+    "timeline",
+    "neural_pulse",
+    "meter_surge",
+    "cosmic_burst",
+    "ocean_depth",
+    "vault_mystery",
+    "split_compare",
+    "micro_stream",
+    "payoff_reveal",
+)
 
 
 def validate_factual_sources(sources: List[str]) -> Tuple[bool, List[str]]:
-    """Validate that source URLs are accessible, well-formed, and from reputable domains."""
+    """Validate that internal source URLs are well-formed and from reputable domains."""
     valid_sources: List[str] = []
     for s in sources:
         if not s or not isinstance(s, str):
@@ -49,13 +82,12 @@ def validate_factual_sources(sources: List[str]) -> Tuple[bool, List[str]]:
         if not (parsed.scheme in ("http", "https") and parsed.netloc):
             continue
 
-        # Check if domain is reputable or ends with reliable educational/gov TLD
         netloc = parsed.netloc.lower()
         is_trusted = (
-            any(td in netloc for td in TRUSTED_DOMAINS) or
-            netloc.endswith(".edu") or
-            netloc.endswith(".gov") or
-            netloc.endswith(".org")
+            any(td in netloc for td in TRUSTED_DOMAINS)
+            or netloc.endswith(".edu")
+            or netloc.endswith(".gov")
+            or netloc.endswith(".org")
         )
         if is_trusted:
             valid_sources.append(s_clean)
@@ -64,16 +96,16 @@ def validate_factual_sources(sources: List[str]) -> Tuple[bool, List[str]]:
 
 
 def count_spoken_words(lines: List[Dict[str, Any]]) -> int:
-    """Accurately count words spoken across all script lines."""
+    """Accurately count spoken words across all script lines."""
     total = 0
     for line in lines:
-        words = [w for w in line["text"].split() if re.sub(r"[^a-zA-Z0-9]", "", w)]
+        words = [w for w in str(line.get("text", "")).split() if re.sub(r"[^a-zA-Z0-9]", "", w)]
         total += len(words)
     return total
 
 
 def format_auto_caps(text: str) -> str:
-    """Generate default uppercase caption chunks with one highlighted keyword (*) per chunk."""
+    """Generate clean uppercase caption chunks with one emphasized (*) word per chunk."""
     words = text.strip().split()
     if not words:
         return ""
@@ -97,109 +129,416 @@ def format_auto_caps(text: str) -> str:
     return " | ".join(chunks)
 
 
+def _infer_line_scene(
+    text: str,
+    idx: int,
+    total_lines: int,
+    prev_visual_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Derive a narration-matched non-repetitive visual scene descriptor from line semantics."""
+    low = text.lower()
+    if idx == 0:
+        default_vt = "cosmic_burst" if any(k in low for k in ("space", "sun", "star", "storm", "plane", "signal")) else (
+            "ocean_depth" if any(k in low for k in ("ocean", "sea", "ship", "arctic", "shark", "water")) else "tension_room"
+        )
+        mood = "mystery"
+        accent = "yellow"
+        cue = "whoosh"
+    elif idx == total_lines - 1:
+        default_vt = "payoff_reveal"
+        mood = "calm"
+        accent = "green"
+        cue = "sparkle"
+    elif any(k in low for k in ("map", "city", "egypt", "jungle", "river", "port", "island", "portugal", "mile")):
+        default_vt = "archive_map"
+        mood = "mystery"
+        accent = "yellow"
+        cue = "pop"
+    elif any(k in low for k in ("century", "year", "eighteen", "nineteen", "two thousand", "day", "hour", "decade", "ago", "time")):
+        default_vt = "timeline"
+        mood = "wonder"
+        accent = "crimson"
+        cue = "tock"
+    elif any(k in low for k in ("ocean", "sea", "dive", "deep", "ship", "water", "arctic", "shark")):
+        default_vt = "ocean_depth"
+        mood = "wonder"
+        accent = "cyan"
+        cue = "bubbles"
+    elif any(k in low for k in ("scan", "signal", "radio", "radar", "x-ray", "search", "helicopter", "frequency", "ring")):
+        default_vt = "radar_scan"
+        mood = "tense"
+        accent = "cyan"
+        cue = "whoosh"
+    elif any(k in low for k in ("brain", "neuron", "amygdala", "memory", "mind", "gear", "compute")):
+        default_vt = "neural_pulse"
+        mood = "wonder"
+        accent = "cyan"
+        cue = "sparkle"
+    elif any(k in low for k in ("gain", "spike", "surge", "volume", "beat", "percent", "times", "power", "current")):
+        default_vt = "meter_surge"
+        mood = "urgent"
+        accent = "yellow"
+        cue = "slide"
+    elif any(k in low for k in ("compare", "instead", "either", "vs", "switched", "same", "neither", "off", "disconnected")):
+        default_vt = "split_compare"
+        mood = "mystery"
+        accent = "cyan"
+        cue = "pop"
+    elif any(k in low for k in ("blood", "cell", "stream", "flow", "ripple", "fume")):
+        default_vt = "micro_stream"
+        mood = "tense"
+        accent = "crimson"
+        cue = "bubbles"
+    else:
+        default_vt = "vault_mystery"
+        mood = "tense"
+        accent = "yellow"
+        cue = "tock"
+
+    if prev_visual_type == default_vt:
+        cycle = ("radar_scan", "split_compare", "timeline", "neural_pulse", "meter_surge", "tension_room", "vault_mystery")
+        for alt in cycle:
+            if alt != prev_visual_type:
+                default_vt = alt
+                break
+
+    words = [re.sub(r"[^A-Za-z0-9'-]", "", w).upper() for w in text.split()]
+    words = [w for w in words if len(w) >= 2]
+    headline = " ".join(words[:4])[:28] or f"CHAPTER {idx + 1}"
+    sublabel = " ".join(words[4:8])[:28] or (f"BEAT {idx + 1} OF {total_lines}")
+
+    return {
+        "visual_type": default_vt,
+        "headline": headline,
+        "sublabel": sublabel,
+        "mood": mood,
+        "accent": accent,
+        "cue": cue,
+    }
+
+
+def assign_line_scenes(script_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure every narration line carries a structured, non-repetitive scene descriptor."""
+    lines = script_data.get("lines") or []
+    total = len(lines)
+    prev_vt: Optional[str] = None
+    for idx, line in enumerate(lines):
+        scene = line.get("scene")
+        if not isinstance(scene, dict) or scene.get("visual_type") not in VISUAL_TYPES:
+            scene = _infer_line_scene(str(line.get("text", "")), idx, total, prev_vt)
+            line["scene"] = scene
+        elif scene.get("visual_type") == prev_vt and idx not in (0, total - 1):
+            scene = dict(scene)
+            scene["visual_type"] = _infer_line_scene(str(line.get("text", "")), idx, total, prev_vt)["visual_type"]
+            line["scene"] = scene
+        prev_vt = line["scene"].get("visual_type")
+    return script_data
+
+
+def _strip_pii_and_links(text: str) -> str:
+    cleaned = re.sub(r"https?://\S+|www\.\S+", "", text or "")
+    cleaned = re.sub(r"(?:/?u/[A-Za-z0-9_-]+|/?r/[A-Za-z0-9_]+)", "", cleaned, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def validate_script_quality(script_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    """Validate storytelling structure, hook quality, duration range words, and PII safety."""
+    issues: List[str] = []
+    lines = script_data.get("lines") or []
+    if len(lines) < 4:
+        issues.append("Script has fewer than 4 narrative beats.")
+        return False, issues
+
+    first_text = str(lines[0].get("text", "")).strip().lower()
+    if first_text.startswith("did you know"):
+        issues.append("Opening line uses prohibited generic 'Did you know?' cliché.")
+
+    word_count = count_spoken_words(lines)
+    if word_count < MIN_WORD_COUNT or word_count > MAX_WORD_COUNT + 5:
+        issues.append(f"Word count {word_count} outside safe bounds [{MIN_WORD_COUNT}, {MAX_WORD_COUNT}].")
+
+    full_text = " ".join(str(ln.get("text", "")) for ln in lines)
+    if re.search(r"https?://|/?u/[A-Za-z0-9_-]+|/?r/[A-Za-z0-9_]+", full_text, re.IGNORECASE):
+        issues.append("Script text contains disallowed URL or Reddit username/subreddit reference.")
+
+    return len(issues) == 0, issues
+
+
 def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate or retrieve a verified script for the selected topic."""
-    topic = topic_info.get("topic", "")
+    """Generate or retrieve a high-retention storytelling script (25-45s target, <= 60s)."""
+    topic = _strip_pii_and_links(str(topic_info.get("topic", "")))
     category = topic_info.get("category", "Science")
     style = topic_info.get("style", "inside-out")
     voice = VOICE_MAP.get(style, "am_michael")
+    evidence_type = topic_info.get("evidence_type", "documented_fact")
+    discovery_origin = topic_info.get("discovery_origin", "curated_research")
+    angle_note = _strip_pii_and_links(str(topic_info.get("angle_note", "")))
 
-    # 1. Match curated peer-reviewed catalog if available
+    # 1. Match exact or same-category curated high-retention story when Gemini isn't used
+    matched_item = None
     for item in CURATED_TOPICS:
-        if (
-            item["topic"].lower() == topic.lower() or
-            item.get("id") == topic_info.get("id") or
-            (item["category"].lower() == category.lower() and item.get("style") == style)
+        if item["topic"].lower() == topic.lower() or (
+            topic_info.get("id") and item.get("id") == topic_info.get("id")
         ):
-            script_data = item["script"].copy()
-            script_data["sources"] = item["sources"]
-            script_data["claims"] = item["claims"]
-            script_data["topic"] = item["topic"]
-            script_data["category"] = item["category"]
-            script_data["style"] = item["style"]
-            script_data["scores"] = item.get("scores", topic_info.get("scores", {}))
-            word_count = count_spoken_words(script_data["lines"])
-            logger.info(f"Using verified curated script for '{item['topic']}' ({word_count} words).")
-            return script_data
+            matched_item = item
+            break
+    if matched_item is None and not gemini_client.is_configured():
+        for item in CURATED_TOPICS:
+            if item["category"].lower() == category.lower() and item.get("style") == style:
+                matched_item = item
+                break
+        if matched_item is None:
+            for item in CURATED_TOPICS:
+                if item["style"] == style:
+                    matched_item = item
+                    break
 
-    # 2. Otherwise generate via Gemini API with strict factual constraints
+    if matched_item is not None:
+        script_data = copy.deepcopy(matched_item["script"])
+        script_data["id"] = matched_item.get("id")
+        script_data["sources"] = list(matched_item.get("sources", []))
+        script_data["claims"] = list(matched_item.get("claims", []))
+        script_data["topic"] = matched_item["topic"]
+        script_data["category"] = matched_item["category"]
+        script_data["style"] = matched_item["style"]
+        script_data["evidence_type"] = matched_item.get("evidence_type", "documented_fact")
+        script_data["discovery_origin"] = matched_item.get("discovery_origin", "curated_research")
+        script_data["scores"] = matched_item.get("scores", topic_info.get("scores", {}))
+        assign_line_scenes(script_data)
+        word_count = count_spoken_words(script_data["lines"])
+        logger.info("Using verified curated story script for '%s' (%d words).", matched_item["topic"], word_count)
+        return script_data
+
+    # 2. Generate high-retention original storytelling script via Gemini
+    evidence_guidance = {
+        "unexplained_mystery": "Frame documented evidence honestly as an unresolved mystery and label hypotheses as hypotheses rather than settled fact.",
+        "personal_account": "Frame clearly as a documented account without asserting unproven supernatural/fictional claims as scientific fact.",
+        "historical_incident": "Anchor to documented dates, archives, or recorded physical evidence.",
+        "scientific_study": "Anchor clearly to observed mechanisms or peer-reviewed research.",
+        "documented_fact": "Present verifiable mechanisms and concrete evidence clearly.",
+    }.get(evidence_type, "Be strictly factual.")
+
+    extra_context = f"\nBackground context note (transform into original narrative, zero usernames/URLs): {angle_note}" if angle_note else ""
+    visual_choices = ", ".join(VISUAL_TYPES)
     prompt = f"""
-Write an original 20-25 second educational short-form narration script on the topic: "{topic}" (Category: {category}).
+Write an original short-form storytelling narration script on: "{topic}" (Category: {category}).
+Target length: approximately {int(TARGET_DURATION_MIN_SEC)}-{int(TARGET_DURATION_MAX_SEC)} seconds ({TARGET_WORD_COUNT_MIN}-{TARGET_WORD_COUNT_MAX} spoken words ideal; strictly within {MIN_WORD_COUNT}-{MAX_WORD_COUNT} words, max 60 seconds).
+Storytelling origin: {discovery_origin} | Evidence framing: {evidence_type} ({evidence_guidance}){extra_context}
 
-STRICT SCRIPT CONSTRAINTS:
-1. Total spoken word count must be between {MIN_WORD_COUNT} and {MAX_WORD_COUNT} words (around 52-56 words is ideal).
-2. Structure into exactly 5 or 6 natural cut lines (one line per camera cut).
-3. Opening Hook: The first line must hook the viewer in the first 3 seconds with an intriguing question or statement.
-4. Natural, conversational narration: Explaining a real discovery clearly to a curious friend.
-5. Satisfying Conclusion: Provide a natural, satisfying conclusion that delivers a clear insight. A looping ending is strictly optional; prioritize a natural, memorable takeaway.
-6. Factual Verification: Must provide at least 2 real, accessible research source URLs and 2-3 verified factual claims. Never fabricate claims or dates.
-7. For each line, provide:
-   - "text": Spoken sentence part.
-   - "caps": All-caps caption chunks separated by " | ", with exactly one yellow highlighted word prefixed with "*" in each chunk.
-   - "gap": Silence after line in seconds (0.28 to 0.35s).
+STORYTELLING & RETENTION RULES:
+1. Opening Hook (0-3s): Line 1 MUST hook immediately with an unusual situation, striking tension, or gripping question. NEVER start with "Did you know?".
+2. Development: Establish the situation quickly, reveal clues progressively, eliminate encyclopedic filler.
+3. Curiosity & Suspense: Introduce an unanswered question or meaningful narrative twist before revealing the answer.
+4. Natural Spoken Cadence: Sound conversational, vivid, and human—never robotic textbook prose.
+5. Ending Payoff: Deliver a crisp, memorable resolution that resolves the curiosity gap without artificial cliffhangers.
+6. Honesty & Privacy: NEVER invent fake facts/dates, NEVER copy posts verbatim, NEVER include URLs, usernames, or personal info.
+7. Visual Scene Matching: Structure into 6 to 9 natural cut lines; pair each line with a matching `scene` visual type from [{visual_choices}] (avoid repeating consecutive `visual_type`!), concise visual `headline` (2-5 words), `sublabel`, `mood` (mystery/tense/urgent/wonder/calm), `accent` (yellow/cyan/crimson/green), and `cue` (whoosh/pop/tock/slide/bubbles/slam/sparkle).
 
 Return valid JSON:
 {{
-  "title": "Concise Engaging Title",
+  "title": "Curiosity-Sparking Natural Title (not all-caps, no clickbait)",
   "sources": ["https://..."],
-  "claims": ["Factual claim 1", "Factual claim 2"],
+  "claims": ["Verified factual claim 1", "Verified factual claim 2"],
   "lines": [
      {{
-       "text": "Hook question text here?",
-       "caps": "HOOK *QUESTION | TEXT *HERE?",
-       "gap": 0.3
+       "text": "Hook sentence...",
+       "caps": "THREE WORD *CAPS | SECOND *CHUNK",
+       "gap": 0.28,
+       "scene": {{
+         "visual_type": "tension_room",
+         "headline": "SHORT VISUAL LABEL",
+         "sublabel": "CONTEXT DETAIL",
+         "mood": "mystery",
+         "accent": "yellow",
+         "cue": "whoosh"
+       }}
      }}
   ]
 }}
 """
     system_instruction = (
-        "You are a master scriptwriter and factual science communicator for CurioLoop. "
-        "Every claim must be strictly accurate. Word count must be 48-62 words. Never fabricate URLs or facts."
+        f"You are lead story writer for CurioLoop. Target {TARGET_WORD_COUNT_MIN}-{TARGET_WORD_COUNT_MAX} words "
+        f"(strict max {MAX_WORD_COUNT} words for <={int(MAX_DURATION_SEC)}s runtime). Never fabricate claims or leak usernames/URLs."
     )
     response = gemini_client.generate_json(prompt, system_instruction=system_instruction)
 
     if response and "lines" in response and len(response["lines"]) >= 4:
-        lines = response["lines"]
-        for line in lines:
-            if "caps" not in line or not line["caps"]:
-                line["caps"] = format_auto_caps(line["text"])
-            if "gap" not in line:
-                line["gap"] = 0.3
+        lines = []
+        for raw_ln in response["lines"]:
+            clean_txt = _strip_pii_and_links(str(raw_ln.get("text", "")))
+            if not clean_txt:
+                continue
+            caps = str(raw_ln.get("caps") or "").strip() or format_auto_caps(clean_txt)
+            try:
+                gap = min(0.45, max(0.18, float(raw_ln.get("gap", 0.28))))
+            except (TypeError, ValueError):
+                gap = 0.28
+            lines.append({
+                "text": clean_txt,
+                "caps": caps,
+                "gap": gap,
+                "scene": raw_ln.get("scene"),
+            })
 
         word_count = count_spoken_words(lines)
-        sources = response.get("sources", [])
-        is_valid, validated_sources = validate_factual_sources(sources)
+        raw_sources = response.get("sources", []) or topic_info.get("sources", [])
+        is_valid_src, validated_sources = validate_factual_sources(raw_sources)
+        if not validated_sources and topic_info.get("sources"):
+            validated_sources = list(topic_info.get("sources", []))
 
-        if is_valid and MIN_WORD_COUNT <= word_count <= MAX_WORD_COUNT + 5:
-            logger.info(f"Generated verified script via Gemini for '{topic}' ({word_count} words).")
-            return {
-                "title": response.get("title", topic),
-                "voice": voice,
-                "speed": 1.0,
-                "lead": 0.45,
-                "outro": 0.9,
-                "gap": 0.32,
-                "topic": topic,
-                "category": category,
-                "style": style,
-                "scores": topic_info.get("scores", {}),
-                "sources": validated_sources,
-                "claims": response.get("claims", [topic]),
-                "lines": lines,
-            }
-        else:
-            logger.warning(
-                f"Generated script failed factual source validation or word count ({word_count} words). "
-                "Falling back to curated verified topic."
-            )
+        script_candidate: Dict[str, Any] = {
+            "title": _strip_pii_and_links(str(response.get("title") or topic)),
+            "voice": voice,
+            "speed": 1.0,
+            "lead": 0.40,
+            "outro": 0.75,
+            "gap": 0.28,
+            "topic": topic,
+            "category": category,
+            "style": style,
+            "evidence_type": evidence_type,
+            "discovery_origin": discovery_origin,
+            "scores": topic_info.get("scores", {}),
+            "sources": validated_sources if is_valid_src else list(topic_info.get("sources", [])),
+            "claims": response.get("claims") or topic_info.get("claims") or [topic],
+            "lines": lines,
+        }
+        assign_line_scenes(script_candidate)
+        q_ok, q_issues = validate_script_quality(script_candidate)
+        if q_ok and (is_valid_src or evidence_type in ("unexplained_mystery", "personal_account")):
+            logger.info("Generated high-retention Gemini script for '%s' (%d words).", topic, word_count)
+            return script_candidate
+        logger.warning("Gemini script failed quality/source check (%s); falling back to curated story.", q_issues)
 
-    # 3. Robust curated fallback
+    # 3. Robust curated fallback (pick by matching category/style before default)
     fallback = CURATED_TOPICS[0]
-    script_data = fallback["script"].copy()
-    script_data["sources"] = fallback["sources"]
-    script_data["claims"] = fallback["claims"]
+    for cand in CURATED_TOPICS:
+        if cand["category"].lower() == category.lower() or cand["style"] == style:
+            fallback = cand
+            break
+    script_data = copy.deepcopy(fallback["script"])
+    script_data["id"] = fallback.get("id")
+    script_data["sources"] = list(fallback.get("sources", []))
+    script_data["claims"] = list(fallback.get("claims", []))
     script_data["topic"] = fallback["topic"]
     script_data["category"] = fallback["category"]
     script_data["style"] = fallback["style"]
+    script_data["evidence_type"] = fallback.get("evidence_type", "documented_fact")
+    script_data["discovery_origin"] = fallback.get("discovery_origin", "curated_research")
     script_data["scores"] = fallback["scores"]
+    assign_line_scenes(script_data)
     return script_data
+
+
+def revise_script_for_duration(
+    script_data: Dict[str, Any],
+    current_duration_sec: float,
+    target_min_sec: float = TARGET_DURATION_MIN_SEC,
+    target_max_sec: float = TARGET_DURATION_MAX_SEC,
+) -> Tuple[Dict[str, Any], str]:
+    """Revise a script for QC duration recovery without cutting off the ending or distorting pacing.
+
+    Returns `(updated_script, revision_summary)`.
+    """
+    revised = copy.deepcopy(script_data)
+    lines = list(revised.get("lines") or [])
+    if not lines:
+        return revised, "No lines to revise"
+
+    # Case A: Exceeded MAX_DURATION_SEC (> 60s) -> condense via Gemini or drop filler clauses while preserving hook & ending
+    if current_duration_sec > MAX_DURATION_SEC:
+        if gemini_client.is_configured():
+            existing_text = "\n".join(f"{i+1}. {ln['text']}" for i, ln in enumerate(lines))
+            prompt = f"""
+Revise the following narration script cleanly because it rendered to {current_duration_sec:.1f}s, exceeding the 60s hard maximum.
+Target ~{int(target_max_sec)}s (~{TARGET_WORD_COUNT_MIN}-{TARGET_WORD_COUNT_MAX} spoken words total) across 6-8 cut lines.
+CRITICAL RULES:
+- Preserve the opening curiosity hook AND the final satisfying ending payoff.
+- Tighten middle explanations and remove filler phrases WITHOUT chopping off sentences mid-thought.
+- Keep spoken flow natural.
+
+Original lines:
+{existing_text}
+
+Return strict JSON: {{"lines": [{{"text": "...", "gap": 0.25}}]}}
+"""
+            ai_res = gemini_client.generate_json(prompt)
+            if ai_res and isinstance(ai_res.get("lines"), list) and len(ai_res["lines"]) >= 4:
+                new_lines = []
+                for idx, raw_ln in enumerate(ai_res["lines"]):
+                    txt = _strip_pii_and_links(str(raw_ln.get("text", "")))
+                    if not txt:
+                        continue
+                    old_scene = lines[min(idx, len(lines) - 1)].get("scene")
+                    new_lines.append({
+                        "text": txt,
+                        "caps": format_auto_caps(txt),
+                        "gap": min(0.30, max(0.18, float(raw_ln.get("gap", 0.24)))),
+                        "scene": old_scene,
+                    })
+                if MIN_WORD_COUNT <= count_spoken_words(new_lines) <= MAX_WORD_COUNT:
+                    revised["lines"] = new_lines
+                    revised["lead"] = min(float(revised.get("lead", 0.4)), 0.35)
+                    revised["outro"] = min(float(revised.get("outro", 0.7)), 0.55)
+                    assign_line_scenes(revised)
+                    return revised, f"Condensed script via AI from {current_duration_sec:.1f}s to {count_spoken_words(new_lines)} words"
+
+        # Deterministic clean condensation: shrink gaps & lead/outro slightly first, and condense verbose middle lines
+        scale_ratio = min(0.82, (target_max_sec / max(current_duration_sec, 61.0)))
+        revised["lead"] = 0.30
+        revised["outro"] = 0.50
+        revised["gap"] = 0.22
+        condensed_lines: List[Dict[str, Any]] = []
+        # Keep Hook (0) and Ending (-1) intact; condense or merge excess middle lines when >6 lines
+        for idx, ln in enumerate(lines):
+            ln_copy = copy.deepcopy(ln)
+            ln_copy["gap"] = 0.20
+            txt = str(ln_copy.get("text", "")).strip()
+            # Drop optional parenthetical/aside filler clauses only inside middle lines if way over length
+            if 0 < idx < len(lines) - 1 and current_duration_sec > MAX_DURATION_SEC:
+                txt = re.sub(r"\s*[—–-]\s*[^.;!?]+$", ".", txt)
+                txt = re.sub(r",\s*(?:which|while|though|because)[^,.;!?]+", "", txt, count=1, flags=re.IGNORECASE).strip()
+                if txt and not txt[-1] in ".!?":
+                    txt += "."
+                ln_copy["text"] = txt
+                ln_copy["caps"] = format_auto_caps(txt)
+            condensed_lines.append(ln_copy)
+
+        # If still likely >60s (>125 words) and many middle lines exist, trim lowest-priority redundant middle beat cleanly
+        while len(condensed_lines) > 5 and count_spoken_words(condensed_lines) > int(TARGET_WORD_COUNT_MAX * max(0.85, scale_ratio)):
+            drop_idx = len(condensed_lines) // 2
+            condensed_lines.pop(drop_idx)
+
+        revised["lines"] = condensed_lines
+        revised["revision_applied"] = "condensed_for_60s_limit"
+        assign_line_scenes(revised)
+        return revised, (
+            f"Condensed script deterministically ({len(lines)} -> {len(condensed_lines)} beats, "
+            f"{count_spoken_words(condensed_lines)} words) preserving hook & ending"
+        )
+
+    # Case B: Too short (< MIN_DURATION_SEC 20s)
+    if current_duration_sec < MIN_DURATION_SEC:
+        revised["lead"] = max(float(revised.get("lead", 0.4)), 0.55)
+        revised["outro"] = max(float(revised.get("outro", 0.7)), 1.0)
+        for ln in lines:
+            ln["gap"] = min(0.45, max(float(ln.get("gap", 0.3)), 0.36))
+        if len(lines) >= 2 and count_spoken_words(lines) < MIN_WORD_COUNT:
+            claims = [str(c).strip() for c in (revised.get("claims") or []) if len(str(c).strip()) > 15]
+            existing_txt = " ".join(ln["text"].lower() for ln in lines)
+            for c in claims:
+                if c.lower()[:25] not in existing_txt:
+                    insert_line = {
+                        "text": c if c.endswith((".", "!", "?")) else f"{c}.",
+                        "caps": format_auto_caps(c),
+                        "gap": 0.32,
+                    }
+                    lines.insert(-1, insert_line)
+                    break
+        revised["lines"] = lines
+        revised["revision_applied"] = "expanded_for_min_20s"
+        assign_line_scenes(revised)
+        return revised, f"Expanded story beat spacing/claim depth from {current_duration_sec:.1f}s cleanly"
+
+    assign_line_scenes(revised)
+    return revised, "Refreshed script scene timing"
