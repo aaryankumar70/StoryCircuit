@@ -86,10 +86,11 @@ def generate_youtube_title(
     script_data: Optional[Dict[str, Any]] = None,
     duration_sec: Optional[float] = None,
 ) -> str:
-    """Produce a compelling, natural YouTube title without all-caps hype or keyword stuffing."""
+    """Produce a compelling, natural YouTube title without all-caps hype or stray hashtag stuffing."""
     raw_title = str((script_data or {}).get("title") or topic or "CurioLoop Story").strip()
     raw_title = strip_external_links(raw_title)
-    raw_title = re.sub(r"\s*#shorts\b", "", raw_title, flags=re.IGNORECASE).strip(" -|")
+    # Strip ALL hashtags from the title text cleanly so only one optional trailing #Shorts can be placed
+    raw_title = re.sub(r"\s*#[A-Za-z0-9_]+\b", "", raw_title, flags=re.IGNORECASE).strip(" -|")
 
     # Convert shouting ALL CAPS words cleanly while preserving standard acronyms (NASA, DNA, BC, AD, fMRI)
     acronyms = {"NASA", "ESA", "DNA", "BC", "AD", "GIC", "FMRI", "WOW", "AI", "HZ", "DB", "LANSA", "IEASM", "ETH"}
@@ -110,6 +111,77 @@ def generate_youtube_title(
     if is_short and len(title_clean) <= 82:
         return f"{title_clean} #Shorts"
     return title_clean[:95].rstrip()
+
+
+def recommend_hashtags(
+    topic: str,
+    category: str,
+    script_data: Optional[Dict[str, Any]] = None,
+    trend_signals: Optional[Dict[str, Any]] = None,
+    recent_hashtags: Optional[List[List[str]]] = None,
+) -> Dict[str, Any]:
+    """Select 3-5 relevant hashtags, distinguishing verified trend evidence from recommendations."""
+    cat_clean = re.sub(r"[^A-Za-z0-9]", "", category or "Science") or "Science"
+    topic_words = [
+        w.capitalize()
+        for w in re.findall(r"[A-Za-z][A-Za-z0-9]{3,}", f"{topic} {(script_data or {}).get('title', '')}")
+        if w.lower() not in {"what", "when", "where", "which", "while", "with", "into", "from", "that", "this", "your", "their", "about", "could", "would", "after", "never", "shorts", "almost"}
+    ]
+    topic_tag = f"#{topic_words[0]}" if topic_words else "#TrueStory"
+
+    chosen: List[str] = []
+    trend_used: List[str] = []
+    signals = trend_signals or {}
+    observed = bool(signals.get("observed") and signals.get("trending_tags"))
+    topic_tokens_low = {w.lower() for w in re.findall(r"[A-Za-z0-9]+", f"{topic} {category}")}
+
+    if observed:
+        for raw_tag in signals.get("trending_tags") or []:
+            clean = "#" + re.sub(r"[^A-Za-z0-9]", "", str(raw_tag).lstrip("#"))
+            if len(clean) < 3:
+                continue
+            stem = clean[1:].lower()
+            if stem in topic_tokens_low or cat_clean.lower() in stem or stem in {"shorts", "truestory", "sciencefacts", "historyfacts"}:
+                if clean not in chosen:
+                    chosen.append(clean)
+                    trend_used.append(clean)
+            if len(chosen) >= 3:
+                break
+
+    cat_secondary = {
+        "History": "#AncientHistory",
+        "Survival": "#TrueSurvival",
+        "Psychology": "#HumanBehavior",
+        "Biology": "#HumanBody",
+        "Space": "#Astronomy",
+        "Mysteries": "#UnsolvedMystery",
+        "Unexplained events": "#TrueMystery",
+        "Technology": "#ScienceFacts",
+        "Science": "#RealScience",
+    }.get(category, "#Storytelling")
+
+    candidates = [topic_tag, f"#{cat_clean}", cat_secondary, "#CurioLoop", "#Shorts", "#CuriousMinds"]
+    for cand in candidates:
+        if len(chosen) >= 5:
+            break
+        if cand.lower() not in {c.lower() for c in chosen}:
+            chosen.append(cand)
+
+    # Rotate 5th optional tag if exact hashtag list was used recently
+    recent_sets = [tuple(x) for x in (recent_hashtags or [])]
+    if tuple(chosen) in recent_sets and "#DidYouKnow" not in chosen and len(chosen) >= 4:
+        chosen = chosen[:3] + ["#TrueFacts", "#Shorts"]
+
+    chosen = chosen[:5]
+    if "#Shorts" not in chosen and len(chosen) < 5:
+        chosen.append("#Shorts")
+
+    return {
+        "hashtags": chosen[:5],
+        "trend_evidence_available": observed and len(trend_used) > 0,
+        "evidence_mode": "trend_informed" if (observed and len(trend_used) > 0) else "recommended_no_trend_data",
+        "trend_matched_tags": trend_used,
+    }
 
 
 def build_youtube_tags(
@@ -166,12 +238,21 @@ class DescriptionGenerator:
         script_data: Dict[str, Any],
         sources: Optional[List[str]] = None,
         claims: Optional[List[str]] = None,
+        trend_signals: Optional[Dict[str, Any]] = None,
+        recent_hashtags: Optional[List[List[str]]] = None,
     ) -> Dict[str, Any]:
-        """Generate natural description with zero external links plus separate API tags."""
+        """Generate natural description with zero external links plus separate API tags and hashtags."""
         verified_sources = [s.strip() for s in (sources or script_data.get("sources", [])) if s]
         verified_claims = claims or script_data.get("claims", [])
         title = generate_youtube_title(topic, script_data)
         youtube_tags = build_youtube_tags(topic, category, script_data)
+        hash_meta = recommend_hashtags(
+            topic=topic,
+            category=category,
+            script_data=script_data,
+            trend_signals=trend_signals,
+            recent_hashtags=recent_hashtags,
+        )
 
         if gemini_client.is_configured():
             try:
@@ -182,16 +263,20 @@ class DescriptionGenerator:
                     script_data=script_data,
                     claims=verified_claims,
                     youtube_tags=youtube_tags,
+                    hashtags=hash_meta["hashtags"],
                 )
                 if ai_desc and ai_desc.get("full_description"):
                     ok_links, link_issues = validate_no_external_links(ai_desc["full_description"])
-                    if ok_links:
+                    if ok_links and self._description_matches_topic(ai_desc["full_description"], topic, category, script_data):
+                        ai_desc["topic"] = topic
                         ai_desc["recommended_title"] = title
                         ai_desc["youtube_tags"] = youtube_tags
+                        ai_desc["hashtags"] = hash_meta["hashtags"]
+                        ai_desc["hashtag_metadata"] = hash_meta
                         ai_desc["further_reading"] = []
                         ai_desc["sources_recorded_internally"] = len(verified_sources)
                         return ai_desc
-                    logger.warning("AI description contained disallowed links (%s); using structured generator.", link_issues)
+                    logger.warning("AI description failed safety/topic-alignment (%s); using structured generator.", link_issues)
             except Exception as e:
                 logger.warning("Gemini description generation failed (%s); using structured fallback.", e)
 
@@ -203,7 +288,27 @@ class DescriptionGenerator:
             verified_sources=verified_sources,
             claims=verified_claims,
             youtube_tags=youtube_tags,
+            hash_meta=hash_meta,
         )
+
+    @staticmethod
+    def _description_matches_topic(
+        description: str,
+        topic: str,
+        category: str,
+        script_data: Dict[str, Any],
+    ) -> bool:
+        """Guard against stale/off-topic AI description hallucinations."""
+        desc_low = str(description or "").lower()
+        ref = f"{topic} {(script_data or {}).get('title', '')}".lower()
+        keywords = [
+            w for w in re.findall(r"[a-z]{4,}", ref)
+            if w not in {"what", "when", "where", "which", "while", "with", "into", "from", "that", "this", "your", "their", "about", "could", "would", "today", "story"}
+        ]
+        if not keywords:
+            return True
+        hits = sum(1 for kw in set(keywords) if kw in desc_low)
+        return hits >= 1
 
     def _generate_structured(
         self,
@@ -214,6 +319,7 @@ class DescriptionGenerator:
         verified_sources: List[str],
         claims: List[str],
         youtube_tags: List[str],
+        hash_meta: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         lines = script_data.get("lines") or []
         evidence_type = script_data.get("evidence_type", "documented_fact")
@@ -250,10 +356,8 @@ class DescriptionGenerator:
             "What stood out most to you in the final reveal of this story?",
         )
 
-        clean_category = re.sub(r"[^A-Za-z0-9]", "", category) or "Science"
-        hashtags = ["#CurioLoop", f"#{clean_category}", "#Storytelling", "#Shorts"]
-        if len(hashtags) < 5 and category != "Science":
-            hashtags.append("#CuriousMinds")
+        resolved_hash_meta = hash_meta or recommend_hashtags(topic, category, script_data)
+        hashtags = resolved_hash_meta["hashtags"][:5]
 
         parts = [
             hook,
@@ -264,11 +368,12 @@ class DescriptionGenerator:
             "",
             self.brand_sign_off,
             "",
-            " ".join(hashtags[:5]),
+            " ".join(hashtags),
         ]
         full_description = strip_external_links("\n".join(parts)).strip()
 
         return {
+            "topic": topic,
             "recommended_title": title,
             "hook": hook,
             "body": body,
@@ -276,7 +381,8 @@ class DescriptionGenerator:
             "sources_recorded_internally": len(verified_sources),
             "sign_off": self.brand_sign_off,
             "engagement_question": engagement,
-            "hashtags": hashtags[:5],
+            "hashtags": hashtags,
+            "hashtag_metadata": resolved_hash_meta,
             "youtube_tags": youtube_tags,
             "full_description": full_description,
             "char_count": len(full_description),
@@ -291,9 +397,11 @@ class DescriptionGenerator:
         script_data: Dict[str, Any],
         claims: List[str],
         youtube_tags: List[str],
+        hashtags: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         claims_str = "\n".join(f"- {c}" for c in claims) if claims else "Stick strictly to the script summary."
         evidence_type = script_data.get("evidence_type", "documented_fact")
+        tag_str = " ".join(hashtags or ["#CurioLoop", "#Shorts"])
         prompt = f"""
 Create a concise, engaging YouTube Shorts description (250-650 chars).
 
@@ -308,7 +416,7 @@ STRICT RULES:
 1. Hook: 1 crisp sentence sparking curiosity without "Did you know?".
 2. Summary: 2 engaging sentences summarizing the story honestly (never assert unverified mysteries as settled fact).
 3. Engagement: 1 thoughtful question inviting comments.
-4. End cleanly with "{self.brand_sign_off}" and 4 concise hashtags (#CurioLoop, #Shorts, plus 2 relevant tags).
+4. End cleanly with "{self.brand_sign_off}" and these concise hashtags: {tag_str}.
 5. ABSOLUTELY NO URLs, NO links, NO reddit/social handles anywhere in the text.
 
 Return JSON:

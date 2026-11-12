@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import wave
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -22,7 +23,8 @@ logger = logging.getLogger("curiosity_engine.renderer")
 CHECK_TIMEOUT_SEC = 600
 CUES_TIMEOUT_SEC = 180
 MIX_TIMEOUT_SEC = 180
-RENDER_TIMEOUT_SEC = 1800
+RENDER_TIMEOUT_SEC = 2400
+RENDER_STALL_TIMEOUT_SEC = 360
 MIN_VALID_MP4_BYTES = 100_000
 
 
@@ -162,6 +164,27 @@ def _is_valid_mix_wav(mix_path: Path, expected_dur: float) -> bool:
         return False
 
 
+def _terminate_process_tree(proc: subprocess.Popen) -> None:
+    """Best-effort termination of a stalled/timed-out subprocess and its children (e.g. Chrome)."""
+    try:
+        if sys.platform == "win32" and proc.pid:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                creationflags=_win_creation_flags(),
+            )
+    except Exception:
+        pass
+    try:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+    except Exception:
+        pass
+
+
 def _run_subprocess_logged(
     cmd: list[str],
     cwd: Path,
@@ -169,26 +192,60 @@ def _run_subprocess_logged(
     log_path: Path,
     timeout_sec: int,
     step_name: str,
+    stall_timeout_sec: Optional[int] = None,
 ) -> None:
-    """Execute a subprocess writing combined stdout/stderr to log_path, enforcing timeout and non-zero exit handling."""
-    try:
-        with open(log_path, "w", encoding="utf-8") as lf:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=lf,
-                stderr=subprocess.STDOUT,
-                timeout=timeout_sec,
-                creationflags=_win_creation_flags(),
-            )
-    except subprocess.TimeoutExpired as e:
-        tail = ""
-        if log_path.exists():
-            tail = log_path.read_text(encoding="utf-8", errors="replace")[-1000:]
-        logger.error(f"{step_name} timed out after {timeout_sec}s.\n{tail}")
-        raise RuntimeError(f"{step_name} timed out after {timeout_sec}s: {tail}") from e
+    """Execute a subprocess writing combined stdout/stderr to log_path, enforcing
+    overall timeout, optional zero-progress stall timeout, and clean process-tree teardown.
+    """
+    with open(log_path, "w", encoding="utf-8") as lf:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(cwd),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+            creationflags=_win_creation_flags(),
+        )
+        start_at = time.monotonic()
+        last_activity_at = start_at
+        last_size = -1
+        poll_interval = min(
+            2.0,
+            max(0.1, min(timeout_sec, stall_timeout_sec or timeout_sec) / 10.0),
+        )
+        while proc.poll() is None:
+            time.sleep(poll_interval)
+            now = time.monotonic()
+            try:
+                cur_size = log_path.stat().st_size if log_path.exists() else 0
+            except OSError:
+                cur_size = last_size
+            if cur_size != last_size:
+                last_size = cur_size
+                last_activity_at = now
+
+            if stall_timeout_sec and (now - last_activity_at) >= stall_timeout_sec:
+                _terminate_process_tree(proc)
+                tail = (
+                    log_path.read_text(encoding="utf-8", errors="replace")[-1000:]
+                    if log_path.exists()
+                    else ""
+                )
+                logger.error(f"{step_name} stalled with no log progress for {stall_timeout_sec}s.\n{tail}")
+                raise RuntimeError(
+                    f"{step_name} stalled with no progress for {stall_timeout_sec}s: {tail}"
+                )
+
+            if (now - start_at) >= timeout_sec:
+                _terminate_process_tree(proc)
+                tail = (
+                    log_path.read_text(encoding="utf-8", errors="replace")[-1000:]
+                    if log_path.exists()
+                    else ""
+                )
+                logger.error(f"{step_name} timed out after {timeout_sec}s.\n{tail}")
+                raise RuntimeError(f"{step_name} timed out after {timeout_sec}s: {tail}")
 
     if proc.returncode != 0:
         err_text = ""
@@ -329,14 +386,16 @@ def render_project_video(
     )
     logger.info(f"Rendering {dur:.2f}s video ({output_mp4.name})...")
     staging_mp4 = output_mp4.with_suffix(".tmp.mp4")
+    effective_render_timeout = max(RENDER_TIMEOUT_SEC, int(dur * 55) + 300)
     try:
         _run_subprocess_logged(
             ["node", "tools/capture.mjs", "video", relative_render_dest, "0", str(dur)],
             cwd=project_dir,
             env=env,
             log_path=log_dir / "render.log",
-            timeout_sec=RENDER_TIMEOUT_SEC,
+            timeout_sec=effective_render_timeout,
             step_name="Video render",
+            stall_timeout_sec=RENDER_STALL_TIMEOUT_SEC,
         )
 
         # Strict MP4 validation before copying/replacing destination

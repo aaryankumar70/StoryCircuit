@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
 from curiosity_engine import config
+from curiosity_engine.content.description_generator import strip_external_links
 from curiosity_engine.distribution.youtube_quota import youtube_quota
 from curiosity_engine.config import (
     PUBLISHING_MODE,
@@ -214,16 +216,15 @@ class YouTubePublisher:
         if not video_path.exists():
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
-        # Format title with #Shorts
-        if "#Shorts" not in title and "#shorts" not in title:
-            yt_title = f"{title[:80]} #Shorts"
-        else:
-            yt_title = title[:100]
+        # Sanitize title cleanly (strip external links and stray hashtag stuffing before appending #Shorts)
+        clean_title_base = re.sub(r"\s*#[A-Za-z0-9_]+\b", "", strip_external_links(title)).strip(" -|")
+        yt_title = f"{clean_title_base[:80].rstrip()} #Shorts" if clean_title_base else "CurioLoop Story #Shorts"
 
-        if "#Shorts" not in description:
-            yt_description = f"{description}\n\n#Shorts #Curiosity #Education"
+        safe_desc = strip_external_links(description)
+        if "#Shorts" not in safe_desc and "#shorts" not in safe_desc:
+            yt_description = f"{safe_desc}\n\n#Shorts #Curiosity" if safe_desc else "#Shorts #Curiosity"
         else:
-            yt_description = description
+            yt_description = safe_desc
 
         clean_tags = [t.replace("#", "").strip() for t in tags if t.strip()]
 

@@ -71,6 +71,7 @@ from curiosity_engine.notifications.telegram_notifier import get_telegram_notifi
 from curiosity_engine.production.aligner import resolve_whisper_model_path
 from curiosity_engine.production.renderer import validate_rendered_mp4
 from curiosity_engine.runner.automation_state import automation_state
+from curiosity_engine.runner.watchdog import WATCHDOG_CHECK_INTERVAL_SEC, production_watchdog
 from curiosity_engine.runner.progress_tracker import (
     record_stage_complete,
     record_stage_failed,
@@ -1263,7 +1264,25 @@ class LocalScheduler:
                 return automation_state.get_daily_record(today_str)
 
         # 2. Complete upload/scheduling for remaining pending stages without touching completed slots
-        return self.process_daily_automation(target_date=today_str)
+        res = self.process_daily_automation(target_date=today_str)
+        return res
+
+    def recover_slot_autonomously(
+        self,
+        slot_index: int,
+        target_date: Optional[str] = None,
+        reason: str = "",
+    ) -> bool:
+        """Invoked by ProductionWatchdog to recover a single failed/stalled/missed slot safely."""
+        today_str = target_date or self.now_ist().strftime("%Y-%m-%d")
+        logger.info("Watchdog autonomous recovery for Slot %s (%s): %s", slot_index, today_str, reason)
+        rec = self.retry_slot(slot_index=slot_index, target_date=today_str)
+        slot_state = rec.get(f"slot{slot_index}", {})
+        if YOUTUBE_PUBLISHING_MODE == "live":
+            return slot_state.get("scheduled_status") == "SCHEDULED"
+        return slot_state.get("scheduled_status") in ("SCHEDULED", "SIMULATED") or (
+            slot_state.get("generation_status") == "COMPLETED"
+        )
 
     # -------------------------------------------------------------------------
     # Catch-Up & Daemon Execution
@@ -1684,11 +1703,11 @@ class LocalScheduler:
         )
 
         last_attempt_ts = time.monotonic()
+        last_watchdog_check_ts = time.monotonic()
         last_oauth_check_ts = time.monotonic()
         last_pub_verify_ts = 0.0
         last_summary_check_ts = 0.0
         last_analytics_sync_ts = 0.0
-        retry_attempts_today = 0
         was_enabled = self.is_automation_enabled()
 
         # Recover any queued Telegram alerts persisted before shutdown/outage
@@ -1779,7 +1798,6 @@ class LocalScheduler:
                 if current_date != last_date:
                     logger.info(f"Date rollover detected ({last_date} -> {current_date}). Initiating daily batch...")
                     last_date = current_date
-                    retry_attempts_today = 0
                     last_oauth_check_ts = mono_now
                     try:
                         cleanup_old_generated_videos()
@@ -1799,7 +1817,6 @@ class LocalScheduler:
                             self._save_state()
                 elif is_enabled and not was_enabled:
                     logger.info(f"Automation enabled while running; evaluating daily batch for {current_date}...")
-                    retry_attempts_today = 0
                     try:
                         self.process_daily_automation(target_date=current_date)
                         last_attempt_ts = time.monotonic()
@@ -1807,21 +1824,29 @@ class LocalScheduler:
                         logger.error(f"Error executing resumed automation for {current_date}: {e}")
                         self._state["last_error"] = str(e)
                         self._save_state()
-                elif (
-                    is_enabled
-                    and retry_attempts_today < 6
-                    and (time.monotonic() - last_attempt_ts) >= max(30, int(retry_interval_sec))
-                    and self._needs_retryable_work(current_date)
-                ):
-                    retry_attempts_today += 1
-                    logger.info(
-                        f"Failure-monitor check ({retry_attempts_today}/6) for incomplete slots on {current_date}..."
-                    )
-                    last_attempt_ts = time.monotonic()
+                elif (mono_now - last_watchdog_check_ts) >= max(10, WATCHDOG_CHECK_INTERVAL_SEC):
+                    last_watchdog_check_ts = mono_now
                     try:
-                        self.process_daily_automation(target_date=current_date)
+                        yt_health = (
+                            token_manager.check_youtube_health()
+                            if YOUTUBE_PUBLISHING_MODE == "live"
+                            else {"healthy": True, "status": "SIMULATION"}
+                        )
+                    except Exception as exc:
+                        yt_health = {"healthy": False, "status": "CHECK_ERROR", "alert": str(exc)}
+                    try:
+                        daily_rec = self.reconcile_daily_state(current_date)
+                        production_watchdog.run_health_check(
+                            now_ist=now,
+                            automation_enabled=is_enabled,
+                            oauth_healthy=bool(yt_health.get("healthy", True)),
+                            oauth_status=str(yt_health.get("status") or "UNKNOWN"),
+                            oauth_reason=yt_health.get("alert"),
+                            daily_record=daily_rec,
+                            recover_fn=self.recover_slot_autonomously,
+                        )
                     except Exception as e:
-                        logger.error(f"Error during monitored retry for {current_date}: {e}")
+                        logger.error(f"Error during Watchdog health check for {current_date}: {e}")
                         self._state["last_error"] = str(e)
                         self._save_state()
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -265,6 +266,148 @@ class YouTubePerformanceTracker:
             "pattern_insights": insights,
             "videos": sorted(vids, key=lambda x: str(x.get("published_at") or ""), reverse=True)[:20],
             "last_synced_at": state.get("last_synced_at"),
+        }
+
+    def audit_uploaded_videos(
+        self,
+        youtube_publisher_client: Any,
+        video_ids: Optional[List[str]] = None,
+        db_client: Any = None,
+    ) -> Dict[str, Any]:
+        """Audit uploaded channel videos honestly, surfacing metadata flaws and exact API limits."""
+        store = db_client or db
+        has_analytics = self._has_analytics_scope()
+        yt_summary = token_manager.get_summary().get("youtube", {})
+        granted_scopes = list(yt_summary.get("scopes") or [])
+
+        target_ids = list(video_ids or [])
+        if not target_ids:
+            all_vids = store.get_all_videos(limit=100)
+            if isinstance(all_vids, list):
+                seen = set()
+                for v in all_vids:
+                    if not isinstance(v, dict) or v.get("is_test") or v.get("youtube_simulated"):
+                        continue
+                    yt_id = str(v.get("youtube_upload_id") or "").strip()
+                    if (
+                        yt_id
+                        and not yt_id.startswith("yt_sim_")
+                        and str(v.get("youtube_privacy_status") or "").lower() == "public"
+                        and yt_id not in seen
+                    ):
+                        seen.add(yt_id)
+                        target_ids.append(yt_id)
+
+        service = getattr(youtube_publisher_client, "service", None)
+        audited_videos: List[Dict[str, Any]] = []
+        channel_stats: Optional[Dict[str, Any]] = None
+        api_error: Optional[str] = None
+
+        if service and target_ids:
+            try:
+                ch_resp = service.channels().list(part="statistics,snippet", mine=True).execute()
+                youtube_quota.record_operation("channels.list")
+                ch_items = ch_resp.get("items") or []
+                if ch_items:
+                    channel_stats = {
+                        "channel_id": ch_items[0].get("id"),
+                        "title": (ch_items[0].get("snippet") or {}).get("title"),
+                        "view_count": int((ch_items[0].get("statistics") or {}).get("viewCount", 0)),
+                        "subscriber_count": int((ch_items[0].get("statistics") or {}).get("subscriberCount", 0)),
+                        "video_count": int((ch_items[0].get("statistics") or {}).get("videoCount", 0)),
+                    }
+                v_resp = service.videos().list(
+                    part="snippet,contentDetails,status,statistics",
+                    id=",".join(target_ids[:50]),
+                ).execute()
+                youtube_quota.record_operation("videos.list")
+                items = v_resp.get("items") or []
+            except Exception as exc:
+                api_error = str(exc)
+                items = []
+
+            seen_titles: Dict[str, str] = {}
+            for it in items:
+                vid = str(it.get("id") or "")
+                snip = it.get("snippet") or {}
+                stats = it.get("statistics") or {}
+                cd = it.get("contentDetails") or {}
+                st = it.get("status") or {}
+                title = str(snip.get("title") or "")
+                desc = str(snip.get("description") or "")
+                tags = list(snip.get("tags") or [])
+                issues: List[str] = []
+
+                extra_hashes = [h for h in re.findall(r"#[A-Za-z0-9_]+", title) if h.lower() != "#shorts"]
+                if extra_hashes:
+                    issues.append(f"Title polluted with hashtags: {' '.join(extra_hashes)}")
+                base_norm = re.sub(r"#[A-Za-z0-9_]+", "", title).strip().lower()
+                if base_norm in seen_titles:
+                    issues.append(f"Duplicate topic uploaded vs video {seen_titles[base_norm]}")
+                else:
+                    seen_titles[base_norm] = vid
+
+                title_words = {
+                    w.lower() for w in re.findall(r"[A-Za-z]{4,}", base_norm)
+                    if w.lower() not in {"what", "today", "your", "when", "why", "into", "from"}
+                }
+                if title_words and desc:
+                    desc_low = desc.lower()
+                    if not any(w in desc_low for w in title_words):
+                        issues.append("Description topic does not match video title (stale/cached metadata)")
+                if len(tags) < 4:
+                    issues.append(f"Sparse API tags ({len(tags)} tag(s))")
+
+                audited_videos.append({
+                    "youtube_id": vid,
+                    "title": title,
+                    "published_at": snip.get("publishedAt"),
+                    "privacy_status": st.get("privacyStatus"),
+                    "duration": cd.get("duration"),
+                    "category_id": snip.get("categoryId"),
+                    "tags": tags,
+                    "description_preview": desc[:140],
+                    "views": int(stats.get("viewCount", 0)),
+                    "likes": int(stats.get("likeCount", 0)),
+                    "comments": int(stats.get("commentCount", 0)),
+                    "metadata_issues": issues,
+                    # Unavailable without yt-analytics.readonly
+                    "impressions": None,
+                    "shorts_feed_reach": None,
+                    "viewed_vs_swiped_pct": None,
+                    "average_view_duration_sec": None,
+                    "average_percentage_viewed": None,
+                    "subscribers_delta": None,
+                })
+
+        total_views = sum(v["views"] for v in audited_videos)
+        sample_count = len(audited_videos)
+        small_sample = sample_count < MIN_SAMPLE_FOR_INSIGHTS
+        return {
+            "channel": channel_stats,
+            "videos": audited_videos,
+            "video_count_audited": sample_count,
+            "total_views": total_views,
+            "small_sample_warning": small_sample,
+            "auto_delete_permitted": False,
+            "sample_conclusion_guard": (
+                f"Only {sample_count} video(s) ({total_views} total views) observed; insufficient sample size "
+                f"(minimum {MIN_SAMPLE_FOR_INSIGHTS} videos >=24h) for broad format or niche pivots."
+                if small_sample
+                else "Minimum sample size met for directional comparison."
+            ),
+            "analytics_api_available": has_analytics,
+            "granted_oauth_scopes": granted_scopes,
+            "missing_analytics_scopes": [] if has_analytics else [ANALYTICS_SCOPE],
+            "unavailable_metrics": [] if has_analytics else [
+                "impressions",
+                "shorts_feed_reach",
+                "viewed_vs_swiped_away",
+                "averageViewDuration",
+                "averageViewPercentage",
+                "subscribersGained_Lost",
+            ],
+            "api_error": api_error,
         }
 
 

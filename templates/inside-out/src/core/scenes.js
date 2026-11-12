@@ -151,9 +151,9 @@ function drawVisualArchetype(vt, lt, d, t, accentColor, mood) {
     K.man({
       x: 540, y: 1020, s: 1.32,
       mouth: mood === 'urgent' ? 'o' : 'flat',
-      eyes: mood === 'mystery' ? 'squint' : 'wide',
+      eyes: mood === 'mystery' ? 'closed' : 'wide',
       brow: 1,
-      arm: K.armPose(K.ARM.down, K.ARM.chin, clamp(lt * 1.4)),
+      arm: K.armPose(K.ARM.down, K.ARM.mouth, clamp(lt * 1.4)),
     });
   }
 }

@@ -398,16 +398,19 @@ class TelegramNotifier:
         scheduled_time_ist: str,
         topic: str = "",
         dedup_tag: str = "",
+        started_at_ist: str = "",
     ) -> Dict[str, Any]:
         """Alert immediately when a new production slot starts generating."""
         key = f"prod_start:{video_id}{(':' + dedup_tag) if dedup_tag else ''}"
         esc_topic = html.escape(str(topic or "Selecting curated story"))
         esc_time = html.escape(str(scheduled_time_ist or ("12:30 PM IST" if slot_index == 1 else "8:30 PM IST")))
+        started_disp = html.escape(str(started_at_ist or self._now_ist_iso()))
         msg = (
             f"<b>CurioLoop Production Started</b>\n\n"
             f"<b>Date:</b> {html.escape(str(date_str))}\n"
             f"<b>Slot:</b> {int(slot_index)}\n"
-            f"<b>Time:</b> {esc_time}\n"
+            f"<b>Target Window:</b> {esc_time}\n"
+            f"<b>Started (IST):</b> {started_disp}\n"
             f"<b>Topic:</b> {esc_topic}\n"
             f"<b>Job ID:</b> <code>{html.escape(str(video_id))}</code>\n"
             f"<b>Status:</b> Generating script and assets."
@@ -416,6 +419,90 @@ class TelegramNotifier:
             category="PRODUCTION_STARTED",
             event_key=key,
             summary=f"Production started Slot {slot_index}: {topic or video_id}",
+            message_html=msg,
+        )
+
+    def notify_production_stalled(
+        self,
+        video_id: str,
+        slot_index: int,
+        stage: str,
+        reason: str,
+        recovery_action: str = "Scheduling automatic recovery",
+    ) -> Dict[str, Any]:
+        """Alert immediately when the Watchdog detects a stalled or crashed production stage."""
+        hour_bucket = datetime.now(IST).strftime("%Y-%m-%d_%H%M")[:-1]
+        key = f"prod_stalled:{video_id}:{stage}:{hour_bucket}"
+        safe_reason = redact_telegram_secrets(str(reason or "No stage progress detected"))
+        msg = (
+            f"<b>CurioLoop Production Stalled</b>\n\n"
+            f"<b>Job ID:</b> <code>{html.escape(str(video_id))}</code>\n"
+            f"<b>Slot:</b> {int(slot_index)}\n"
+            f"<b>Stage:</b> {html.escape(str(stage or 'unknown'))}\n"
+            f"<b>Issue:</b> {html.escape(safe_reason[:240])}\n"
+            f"<b>Recovery Action:</b> {html.escape(str(recovery_action))}"
+        )
+        return self.send_event(
+            category="PRODUCTION_STALLED",
+            event_key=key,
+            summary=f"Production stalled Slot {slot_index} at {stage}: {safe_reason[:100]}",
+            message_html=msg,
+        )
+
+    def notify_recovery_started(
+        self,
+        video_id: str,
+        slot_index: int,
+        reason: str,
+        attempt: int,
+        max_attempts: int,
+        action: str = "Restarting slot pipeline",
+    ) -> Dict[str, Any]:
+        """Alert immediately when the Watchdog starts an automatic recovery cycle."""
+        key = f"recovery_started:{video_id}:cycle{int(attempt)}"
+        safe_reason = redact_telegram_secrets(str(reason or "Incomplete/failed slot"))
+        msg = (
+            f"<b>CurioLoop Automatic Recovery Started</b>\n\n"
+            f"<b>Job ID:</b> <code>{html.escape(str(video_id))}</code>\n"
+            f"<b>Slot:</b> {int(slot_index)}\n"
+            f"<b>Recovery Cycle:</b> {int(attempt)}/{int(max_attempts)}\n"
+            f"<b>Trigger:</b> {html.escape(safe_reason[:240])}\n"
+            f"<b>Action:</b> {html.escape(str(action))}"
+        )
+        return self.send_event(
+            category="RECOVERY_STARTED",
+            event_key=key,
+            summary=f"Recovery cycle {attempt}/{max_attempts} started for Slot {slot_index}",
+            message_html=msg,
+        )
+
+    def notify_production_permanently_failed(
+        self,
+        video_id: str,
+        slot_index: int,
+        topic: str,
+        reason: str,
+        cycles_used: int,
+        max_cycles: int,
+        slot_missed: bool = False,
+    ) -> Dict[str, Any]:
+        """Alert when all bounded recovery cycles are exhausted for a slot."""
+        key = f"prod_perm_fail:{video_id}:c{int(cycles_used)}"
+        safe_reason = redact_telegram_secrets(str(reason or "Recovery cycles exhausted"))
+        missed_txt = "Yes — release window passed without completion" if slot_missed else "Pending next available window"
+        msg = (
+            f"<b>CurioLoop Slot Permanently Failed</b>\n\n"
+            f"<b>Job ID:</b> <code>{html.escape(str(video_id))}</code>\n"
+            f"<b>Slot:</b> {int(slot_index)}\n"
+            f"<b>Topic:</b> {html.escape(str(topic or video_id))}\n"
+            f"<b>Reason:</b> {html.escape(safe_reason[:240])}\n"
+            f"<b>Recovery Cycles Exhausted:</b> {int(cycles_used)}/{int(max_cycles)}\n"
+            f"<b>Slot Missed:</b> {html.escape(missed_txt)}"
+        )
+        return self.send_event(
+            category="PRODUCTION_PERMANENT_FAILURE",
+            event_key=key,
+            summary=f"Slot {slot_index} failed permanently after {cycles_used}/{max_cycles} cycles",
             message_html=msg,
         )
 

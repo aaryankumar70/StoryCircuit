@@ -58,6 +58,7 @@ from curiosity_engine.notifications.telegram_notifier import (
     redact_telegram_secrets,
 )
 from curiosity_engine.runner.automation_state import AutomationStateManager
+from curiosity_engine.runner.watchdog import production_watchdog
 from curiosity_engine.runner.local_scheduler import scheduler
 from curiosity_engine.runner.pipeline import (
     is_real_youtube_upload,
@@ -246,6 +247,7 @@ def _derive_slot_lifecycle_stage(
     sched_slot_rec: Optional[Dict[str, Any]],
     automation_enabled: bool = True,
     oauth_paused: bool = False,
+    watchdog_slot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Map slot production & publishing telemetry into structured lifecycle + progress + ETA snapshot."""
     slot_time = SCHEDULER_PUBLISH_SLOT1_TIME if slot_index == 1 else SCHEDULER_PUBLISH_SLOT2_TIME
@@ -257,6 +259,7 @@ def _derive_slot_lifecycle_stage(
         automation_enabled=automation_enabled,
         oauth_paused=oauth_paused,
         output_dir=OUTPUT_DIR,
+        watchdog_slot=watchdog_slot,
     )
 
 
@@ -715,6 +718,11 @@ def get_system_status() -> Dict[str, Any]:
     enriched_recent = [_enrich_video_record(v) for v in recent_videos if isinstance(v, dict)]
 
     today_auto = (scheduler_telemetry.get("today_automation") or {}) if isinstance(scheduler_telemetry, dict) else {}
+    try:
+        watchdog_summary = production_watchdog.get_health_summary(target_date=today_str)
+    except Exception:
+        watchdog_summary = {"status": "UNKNOWN", "slots": {}}
+    wd_slots = watchdog_summary.get("slots", {}) if isinstance(watchdog_summary, dict) else {}
     slot_rec_map = {}
     for ev in enriched_todays:
         if not ev.get("is_test") and ev.get("slot_index") in (1, 2):
@@ -726,6 +734,7 @@ def get_system_status() -> Dict[str, Any]:
             today_auto.get("slot1"),
             automation_enabled=automation_enabled,
             oauth_paused=oauth_paused,
+            watchdog_slot=wd_slots.get("slot1"),
         ),
         _derive_slot_lifecycle_stage(
             2,
@@ -733,6 +742,7 @@ def get_system_status() -> Dict[str, Any]:
             today_auto.get("slot2"),
             automation_enabled=automation_enabled,
             oauth_paused=oauth_paused,
+            watchdog_slot=wd_slots.get("slot2"),
         ),
     ]
     daily_progress = _compute_daily_progress(enriched_todays, slot_timeline, now_ist)
@@ -750,6 +760,7 @@ def get_system_status() -> Dict[str, Any]:
     operational_status["storage_summary"] = storage_summary
     operational_status["quota_estimate"] = yt_api_quota_estimate
     operational_status["daily_progress"] = daily_progress
+    operational_status["watchdog"] = watchdog_summary
 
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -761,6 +772,7 @@ def get_system_status() -> Dict[str, Any]:
         "automation_enabled": automation_enabled,
         "oauth_paused": oauth_paused,
         "oauth_pause_reason": oauth_pause_reason,
+        "watchdog": watchdog_summary,
         "todays_videos": enriched_todays,
         "recent_videos": enriched_recent,
         "quotas": quota_status,

@@ -558,6 +558,7 @@
           <span id="ytBadge" class="pill-chip">YT: CHECKING</span>
           <span id="igBadge" class="pill-chip">IG: DISABLED</span>
           <span id="schedBadge" class="pill-chip">SCHEDULER: CHECKING</span>
+          <span id="watchdogBadge" class="pill-chip">WATCHDOG: CHECKING</span>
           <span id="dateBadge" class="pill-chip">DATE: ...</span>
           <span id="opsPauseBanner" class="badge badge-red" style="display:none;">OAUTH PAUSED</span>
         </div>
@@ -951,9 +952,11 @@
       if (phase === 'completed') { stageBadgeCls = 'badge-lime'; phaseTag = 'COMPLETE'; }
       else if (phase === 'waiting_schedule') { stageBadgeCls = 'badge-teal'; phaseTag = 'SCHEDULED'; barCls = 'teal'; }
       else if (phase === 'waiting_distribution') { stageBadgeCls = 'badge-teal'; phaseTag = 'READY TO UPLOAD'; barCls = 'teal'; }
-      else if (phase === 'recovery') { stageBadgeCls = 'badge-amber'; phaseTag = 'RECOVERY'; barCls = 'amber'; }
+      else if (phase === 'waiting_api') { stageBadgeCls = 'badge-amber'; phaseTag = 'WAITING FOR API'; barCls = 'amber'; }
+      else if (phase === 'stalled') { stageBadgeCls = 'badge-red'; phaseTag = 'STALLED'; barCls = 'red'; }
+      else if (phase === 'recovery') { stageBadgeCls = 'badge-amber'; phaseTag = 'RECOVERING'; barCls = 'amber'; }
       else if (phase === 'failed') { stageBadgeCls = 'badge-red'; phaseTag = 'FAILED'; barCls = 'red'; }
-      else if (phase === 'production' || phase === 'distribution') { stageBadgeCls = 'badge-lime'; phaseTag = phase.toUpperCase(); }
+      else if (phase === 'production' || phase === 'distribution') { stageBadgeCls = 'badge-lime'; phaseTag = 'RUNNING'; }
       else if (phase === 'paused') { stageBadgeCls = 'badge-amber'; phaseTag = 'PAUSED'; barCls = 'amber'; }
 
       const rightPctText = phase === 'waiting_schedule'
@@ -1020,9 +1023,10 @@
           ${distPips ? `<div class="phase-row"><span class="phase-label">Dist</span><div class="stage-steps">${distPips}</div></div>` : ''}
 
           <div class="slot-foot">
-            <span>${escHtml(durTxt)} • ${escHtml(s.style || '--')} • Recovery ${escHtml(s.recovery_attempts || 0)}/${escHtml(s.max_recovery_attempts || 2)}</span>
+            <span>${escHtml(durTxt)} • ${escHtml(s.style || '--')} • QC ${escHtml(s.recovery_attempts || 0)}/${escHtml(s.max_recovery_attempts || 2)} • Cycle ${escHtml(s.recovery_cycles || 0)}/${escHtml(s.max_recovery_cycles || 3)}</span>
             <span>${escHtml(ytTxt)}${schedTxt ? ` · ${escHtml(schedTxt)}` : ''}</span>
           </div>
+          ${(s.last_recovery_action && !s.recovery_detail && phase !== 'completed' && phase !== 'waiting_schedule') ? `<div class="subtle-note" style="margin-top:4px; color:var(--amber);">Watchdog: ${escHtml(String(s.last_recovery_action).slice(0, 140))}</div>` : ''}
           ${(s.error && !s.recovery_detail) ? `<div class="alert-box" style="margin-top:8px;">${escHtml(String(s.error).slice(0, 220))}</div>` : ''}
         </div>
       `;
@@ -1044,6 +1048,17 @@
 
         const igMode = (data.instagram_publishing_mode || 'disabled').toUpperCase();
         document.getElementById('igBadge').innerText = `IG: ${igMode}`;
+
+        const wd = data.watchdog || {};
+        const wdEl = document.getElementById('watchdogBadge');
+        if (wdEl) {
+          const wdStatus = String(wd.status || 'HEALTHY').toUpperCase();
+          const lastCheck = wd.last_check_at ? new Date(wd.last_check_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+          const nextCheck = wd.next_check_at ? new Date(wd.next_check_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+          wdEl.innerText = `WATCHDOG: ${wdStatus} (${lastCheck} -> ${nextCheck})`;
+          wdEl.style.borderColor = wdStatus === 'HEALTHY' ? 'var(--lime-border)' : (wdStatus === 'DEGRADED' ? 'rgba(248,113,113,0.4)' : 'rgba(245,158,11,0.4)');
+          wdEl.style.color = wdStatus === 'HEALTHY' ? 'var(--lime)' : (wdStatus === 'DEGRADED' ? 'var(--danger)' : 'var(--amber)');
+        }
 
         const toggleBtn = document.getElementById('toggleBtn');
         toggleBtn.innerText = data.automation_enabled ? 'Automation: ACTIVE' : 'Automation: PAUSED';

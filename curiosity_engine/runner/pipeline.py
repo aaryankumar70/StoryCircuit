@@ -50,6 +50,10 @@ from curiosity_engine.runner.progress_tracker import (
     record_stage_failed,
     record_stage_start,
 )
+from curiosity_engine.runner.watchdog import (
+    acquire_slot_worker_lock,
+    release_slot_worker_lock,
+)
 from curiosity_engine.state.db import db
 
 logger = logging.getLogger("curiosity_engine.pipeline")
@@ -251,47 +255,49 @@ def produce_single_video(
         logger.info(f"Video {video_id} already exists, passed QC, and MP4 verified; preserving existing assets.")
         return existing
 
-    # Preserve existing metadata/uploads when resuming an interrupted or partial record
-    base_record = dict(existing) if existing else {}
-    record: Dict[str, Any] = {
-        **base_record,
-        "video_id": video_id,
-        "slot_index": slot_index,
-        "target_date": target_date,
-        "topic": base_record.get("topic") or topic_info.get("topic"),
-        "category": base_record.get("category") or topic_info.get("category"),
-        "style": base_record.get("style") or topic_info.get("style"),
-        "evidence_type": base_record.get("evidence_type") or topic_info.get("evidence_type", "documented_fact"),
-        "discovery_origin": base_record.get("discovery_origin") or topic_info.get("discovery_origin", "curated_research"),
-        "production_status": "STARTING",
-        "publishing_status": base_record.get("publishing_status") or "PENDING",
-        "recovery_attempts": 0 if force_rebuild else int(base_record.get("recovery_attempts") or 0),
-        "qc_recovery_history": [] if force_rebuild else list(base_record.get("qc_recovery_history") or []),
-        "created_at": base_record.get("created_at") or datetime.now(timezone.utc).isoformat(),
-    }
-    if force_rebuild:
-        record["failed_mp4_sha256"] = None
-    db.save_video_record(video_id, record)
-    if record.get("topic"):
-        record_stage_start(video_id, "selecting_topic", db_client=db)
-        record_stage_complete(video_id, "selecting_topic", db_client=db)
-
-    # Notify Telegram immediately when production begins (never blocks execution)
+    # Enforce exclusive single worker per slot to prevent duplicate concurrent jobs
+    acquire_slot_worker_lock(slot_index, video_id)
     try:
-        from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
-        sched_window = "12:30 PM IST" if int(slot_index) == 1 else "8:30 PM IST"
-        get_telegram_notifier().notify_production_started(
-            video_id=video_id,
-            date_str=target_date,
-            slot_index=slot_index,
-            scheduled_time_ist=sched_window,
-            topic=str(record.get("topic") or topic_info.get("topic") or ""),
-            dedup_tag="rebuild" if force_rebuild else "",
-        )
-    except Exception:
-        pass
+        # Preserve existing metadata/uploads when resuming an interrupted or partial record
+        base_record = dict(existing) if existing else {}
+        record: Dict[str, Any] = {
+            **base_record,
+            "video_id": video_id,
+            "slot_index": slot_index,
+            "target_date": target_date,
+            "topic": base_record.get("topic") or topic_info.get("topic"),
+            "category": base_record.get("category") or topic_info.get("category"),
+            "style": base_record.get("style") or topic_info.get("style"),
+            "evidence_type": base_record.get("evidence_type") or topic_info.get("evidence_type", "documented_fact"),
+            "discovery_origin": base_record.get("discovery_origin") or topic_info.get("discovery_origin", "curated_research"),
+            "production_status": "STARTING",
+            "publishing_status": base_record.get("publishing_status") or "PENDING",
+            "recovery_attempts": 0 if force_rebuild else int(base_record.get("recovery_attempts") or 0),
+            "qc_recovery_history": [] if force_rebuild else list(base_record.get("qc_recovery_history") or []),
+            "created_at": base_record.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        }
+        if force_rebuild:
+            record["failed_mp4_sha256"] = None
+        db.save_video_record(video_id, record)
+        if record.get("topic"):
+            record_stage_start(video_id, "selecting_topic", db_client=db)
+            record_stage_complete(video_id, "selecting_topic", db_client=db)
 
-    try:
+        # Notify Telegram immediately when production begins (never blocks execution)
+        try:
+            from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
+            sched_window = "12:30 PM IST" if int(slot_index) == 1 else "8:30 PM IST"
+            get_telegram_notifier().notify_production_started(
+                video_id=video_id,
+                date_str=target_date,
+                slot_index=slot_index,
+                scheduled_time_ist=sched_window,
+                topic=str(record.get("topic") or topic_info.get("topic") or ""),
+                dedup_tag="rebuild" if force_rebuild else "",
+            )
+        except Exception:
+            pass
+
         # Respect prior exhausted QC recovery limit cleanly instead of re-testing the exact failed file
         current_disk_hash = _compute_file_sha256(output_mp4)
         prior_failed_hash = record.get("failed_mp4_sha256")
@@ -325,20 +331,31 @@ def produce_single_video(
             record["production_status"] = "SCRIPTED"
 
         # 2b. Link-Free YouTube Title, Description & Separate API Tags Generation
-        if not force_rebuild and record.get("youtube_description"):
-            logger.info(f"[{video_id}] Preserving existing YouTube description.")
+        cur_topic_str = str(record.get("topic") or topic_info.get("topic", ""))
+        cached_desc = str(record.get("youtube_description") or "")
+        cached_desc_topic = str((record.get("description_data") or {}).get("topic") or "")
+        desc_topic_matches = (
+            not cached_desc_topic
+            or cached_desc_topic.strip().lower() == cur_topic_str.strip().lower()
+        )
+        from curiosity_engine.content.description_generator import validate_no_external_links
+        if (
+            not force_rebuild
+            and cached_desc
+            and desc_topic_matches
+            and validate_no_external_links(cached_desc)[0]
+        ):
+            logger.info(f"[{video_id}] Preserving verified topic-matched YouTube description.")
             if not record.get("youtube_title"):
-                record["youtube_title"] = generate_youtube_title(
-                    record.get("topic") or "", script_data
-                )
+                record["youtube_title"] = generate_youtube_title(cur_topic_str, script_data)
             if not record.get("youtube_tags"):
                 record["youtube_tags"] = build_youtube_tags(
-                    record.get("topic") or "", record.get("category") or "Science", script_data
+                    cur_topic_str, record.get("category") or "Science", script_data
                 )
         else:
             logger.info(f"[{video_id}] Generating link-free YouTube title, description & search tags...")
             desc_data = description_generator.generate(
-                topic=record.get("topic") or topic_info.get("topic", ""),
+                topic=cur_topic_str,
                 category=record.get("category") or topic_info.get("category", ""),
                 script_data=script_data,
                 sources=record.get("sources", []),
@@ -346,10 +363,10 @@ def produce_single_video(
             )
             record["youtube_description"] = desc_data["full_description"]
             record["youtube_title"] = desc_data.get("recommended_title") or generate_youtube_title(
-                record.get("topic") or "", script_data
+                cur_topic_str, script_data
             )
             record["youtube_tags"] = desc_data.get("youtube_tags") or build_youtube_tags(
-                record.get("topic") or "", record.get("category") or "Science", script_data
+                cur_topic_str, record.get("category") or "Science", script_data
             )
             record["description_data"] = desc_data
         db.save_video_record(video_id, record)
@@ -615,6 +632,8 @@ def produce_single_video(
         record_stage_failed(video_id, fail_at, str(e), db_client=db)
         db.log_error("PRODUCTION_PIPELINE", f"Failed producing {video_id}: {e}", {"slot": slot_index})
         raise
+    finally:
+        release_slot_worker_lock(slot_index, video_id)
 
 
 def run_daily_generation(

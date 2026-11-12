@@ -264,6 +264,154 @@ def validate_script_quality(script_data: Dict[str, Any]) -> Tuple[bool, List[str
     return len(issues) == 0, issues
 
 
+def score_script_quality(script_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Evaluate a narration script across 8 storytelling & retention metrics (0-10 scale)."""
+    lines = list((script_data or {}).get("lines") or [])
+    if not lines:
+        metrics = {
+            "opening_hook_strength": 0.0,
+            "pacing": 0.0,
+            "clarity": 0.0,
+            "curiosity_tension": 0.0,
+            "emotional_engagement": 0.0,
+            "ending_payoff": 0.0,
+            "natural_spoken_rhythm": 0.0,
+            "visual_cut_compatibility": 0.0,
+        }
+        return {"metrics": metrics, "overall_score": 0.0, "weak_areas": list(metrics.keys()), "passed": False}
+
+    texts = [str(ln.get("text", "")).strip() for ln in lines if str(ln.get("text", "")).strip()]
+    word_count = count_spoken_words(lines)
+    first = texts[0] if texts else ""
+    last = texts[-1] if texts else ""
+    first_low = first.lower()
+
+    # 1. Opening hook (0-3s)
+    hook_score = 8.5
+    if first_low.startswith("did you know"):
+        hook_score -= 5.0
+    if len(first.split()) > 26:
+        hook_score -= 2.0
+    if "?" in first or any(w in first_low for w in ("within", "seconds", "nobody", "vanished", "mile", "silent", "impossible", "imagine", "never")):
+        hook_score += 1.0
+    hook_score = max(0.0, min(10.0, hook_score))
+
+    # 2. Pacing (beat distribution + word count fit)
+    beat_lengths = [len(t.split()) for t in texts]
+    avg_beat = sum(beat_lengths) / max(1, len(beat_lengths))
+    pacing = 9.0 if (MIN_WORD_COUNT <= word_count <= MAX_WORD_COUNT and 5 <= len(texts) <= 10) else 6.0
+    if any(bl > 32 for bl in beat_lengths):
+        pacing -= 2.0
+    if avg_beat < 6 or avg_beat > 25:
+        pacing -= 1.0
+    pacing = max(0.0, min(10.0, pacing))
+
+    # 3. Clarity & spoken readability
+    clarity = 8.8
+    if any("http" in t.lower() or "et al." in t.lower() for t in texts):
+        clarity -= 3.0
+    if any(len(t) > 220 for t in texts):
+        clarity -= 2.0
+    clarity = max(0.0, min(10.0, clarity))
+
+    # 4. Curiosity & tension progression
+    joined_low = " ".join(texts).lower()
+    tension_markers = ("but", "yet", "however", "until", "then", "strangely", "except", "turned out", "instead", "without")
+    tension_hits = sum(1 for m in tension_markers if m in joined_low)
+    curiosity_tension = max(0.0, min(10.0, 6.5 + min(3.5, tension_hits * 1.1)))
+
+    # 5. Emotional engagement
+    emo_markers = ("brain", "heart", "surviv", "alone", "lost", "secret", "fear", "shock", "wonder", "miracle", "human", "silent", "deep", "dark")
+    emo_hits = sum(1 for m in emo_markers if m in joined_low)
+    emotional_engagement = max(0.0, min(10.0, 6.2 + min(3.8, emo_hits * 0.9)))
+
+    # 6. Ending payoff
+    ending_payoff = 8.6
+    last_low = last.lower()
+    if len(last.split()) < 6 or any(p in last_low for p in ("subscribe", "like and follow", "part 2")):
+        ending_payoff -= 3.5
+    if any(m in last_low for m in ("because", "proved", "instead", "showed", "remained", "survived", "actually", "means", "never", "still")):
+        ending_payoff += 0.9
+    ending_payoff = max(0.0, min(10.0, ending_payoff))
+
+    # 7. Natural spoken rhythm
+    gaps = [float(ln.get("gap", 0.28)) for ln in lines]
+    rhythm = 9.0 if all(0.15 <= g <= 0.55 for g in gaps) else 6.5
+    if first_low.startswith("did you know") or "furthermore" in joined_low or "moreover" in joined_low:
+        rhythm -= 2.0
+    rhythm = max(0.0, min(10.0, rhythm))
+
+    # 8. Visual cut compatibility
+    vts = [str((ln.get("scene") or {}).get("visual_type") or "") for ln in lines]
+    distinct_vts = len({v for v in vts if v})
+    repeats = sum(1 for i in range(1, len(vts)) if vts[i] and vts[i] == vts[i - 1])
+    visual_fit = 8.8 if distinct_vts >= max(3, len(lines) // 2) else 6.0
+    visual_fit = max(0.0, min(10.0, visual_fit - repeats * 1.5))
+
+    metrics = {
+        "opening_hook_strength": round(hook_score, 2),
+        "pacing": round(pacing, 2),
+        "clarity": round(clarity, 2),
+        "curiosity_tension": round(curiosity_tension, 2),
+        "emotional_engagement": round(emotional_engagement, 2),
+        "ending_payoff": round(ending_payoff, 2),
+        "natural_spoken_rhythm": round(rhythm, 2),
+        "visual_cut_compatibility": round(visual_fit, 2),
+    }
+    overall = round(sum(metrics.values()) / len(metrics), 2)
+    weak_areas = [k for k, v in metrics.items() if v < 6.5]
+    return {
+        "metrics": metrics,
+        "overall_score": overall,
+        "weak_areas": weak_areas,
+        "word_count": word_count,
+        "passed": overall >= 6.8 and not weak_areas,
+    }
+
+
+def improve_script_quality(script_data: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Automatically strengthen weak script hooks, repeated visuals, or robotic phrasing."""
+    updated = copy.deepcopy(script_data)
+    lines = list(updated.get("lines") or [])
+    if not lines:
+        return updated, score_script_quality(updated)
+
+    # Fix generic "Did you know" opener
+    first_txt = str(lines[0].get("text", "")).strip()
+    if first_txt.lower().startswith("did you know"):
+        stripped = re.sub(r"^did you know(?:\s+that)?\s+", "", first_txt, flags=re.IGNORECASE).strip()
+        if stripped:
+            stripped = stripped[0].upper() + stripped[1:]
+            lines[0]["text"] = stripped
+            lines[0]["caps"] = format_auto_caps(stripped)
+
+    # Split overly long single narration beat cleanly for tighter retention cuts (if within ceiling)
+    normalized_lines: List[Dict[str, Any]] = []
+    for ln in lines:
+        txt = _strip_pii_and_links(str(ln.get("text", "")))
+        words = txt.split()
+        if len(words) > 28 and len(lines) < 9:
+            mid = len(words) // 2
+            p1 = " ".join(words[:mid]).rstrip(",;") + "."
+            p2 = " ".join(words[mid:])
+            if p2:
+                p2 = p2[0].upper() + p2[1:]
+            normalized_lines.append({**ln, "text": p1, "caps": format_auto_caps(p1), "gap": 0.24})
+            normalized_lines.append({**ln, "text": p2, "caps": format_auto_caps(p2), "gap": float(ln.get("gap", 0.26))})
+        else:
+            ln_copy = dict(ln)
+            ln_copy["text"] = txt
+            if not ln_copy.get("caps"):
+                ln_copy["caps"] = format_auto_caps(txt)
+            normalized_lines.append(ln_copy)
+
+    updated["lines"] = normalized_lines
+    assign_line_scenes(updated)
+    eval_report = score_script_quality(updated)
+    updated["quality_evaluation"] = eval_report
+    return updated, eval_report
+
+
 def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
     """Generate or retrieve a high-retention storytelling script (25-45s target, <= 60s)."""
     topic = _strip_pii_and_links(str(topic_info.get("topic", "")))
@@ -305,8 +453,9 @@ def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
         script_data["discovery_origin"] = matched_item.get("discovery_origin", "curated_research")
         script_data["scores"] = matched_item.get("scores", topic_info.get("scores", {}))
         assign_line_scenes(script_data)
+        script_data, _q_rep = improve_script_quality(script_data)
         word_count = count_spoken_words(script_data["lines"])
-        logger.info("Using verified curated story script for '%s' (%d words).", matched_item["topic"], word_count)
+        logger.info("Using verified curated story script for '%s' (%d words, score=%.2f).", matched_item["topic"], word_count, _q_rep.get("overall_score", 0.0))
         return script_data
 
     # 2. Generate high-retention original storytelling script via Gemini
@@ -404,11 +553,12 @@ Return valid JSON:
             "lines": lines,
         }
         assign_line_scenes(script_candidate)
+        script_candidate, q_eval = improve_script_quality(script_candidate)
         q_ok, q_issues = validate_script_quality(script_candidate)
-        if q_ok and (is_valid_src or evidence_type in ("unexplained_mystery", "personal_account")):
-            logger.info("Generated high-retention Gemini script for '%s' (%d words).", topic, word_count)
+        if q_ok and q_eval.get("overall_score", 0.0) >= 6.5 and (is_valid_src or evidence_type in ("unexplained_mystery", "personal_account")):
+            logger.info("Generated high-retention Gemini script for '%s' (%d words, score=%.2f).", topic, word_count, q_eval.get("overall_score", 0.0))
             return script_candidate
-        logger.warning("Gemini script failed quality/source check (%s); falling back to curated story.", q_issues)
+        logger.warning("Gemini script failed quality/source check (%s; score=%.2f); falling back to curated story.", q_issues, q_eval.get("overall_score", 0.0))
 
     # 3. Robust curated fallback (pick by matching category/style before default)
     fallback = CURATED_TOPICS[0]

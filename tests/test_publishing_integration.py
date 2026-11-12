@@ -202,8 +202,9 @@ def test_youtube_publisher_error_categorization():
 # -----------------------------------------------------------------------------
 # 5. Instagram Publisher Standardized Endpoints & No-Silent-Mock Rule
 # -----------------------------------------------------------------------------
-def test_instagram_publisher_simulation_mode():
-    sample_video = OUTPUT_DIR / "video_20261109_slot2.mp4"
+def test_instagram_publisher_simulation_mode(tmp_path):
+    sample_video = tmp_path / "video_sample.mp4"
+    sample_video.write_bytes(b"0" * 1024)
     publisher = InstagramPublisher(mode="simulation")
 
     result = publisher.publish_reel(
@@ -216,8 +217,9 @@ def test_instagram_publisher_simulation_mode():
     assert result["media_id"].startswith("ig_sim_")
 
 
-def test_instagram_publisher_live_mode_rejects_missing_credentials():
-    sample_video = OUTPUT_DIR / "video_20261109_slot2.mp4"
+def test_instagram_publisher_live_mode_rejects_missing_credentials(tmp_path):
+    sample_video = tmp_path / "video_sample.mp4"
+    sample_video.write_bytes(b"0" * 1024)
     publisher = InstagramPublisher(
         access_token="",
         account_id="",

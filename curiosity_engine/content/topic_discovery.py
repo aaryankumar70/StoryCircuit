@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from curiosity_engine.config import CONTENT_PILLARS, STYLE_MAPPINGS
@@ -30,6 +31,68 @@ logger = logging.getLogger("curiosity_engine.topic_discovery")
 MIN_COMPOSITE_SCORE = 7.5
 MIN_HOOK_SCORE = 7.0
 MIN_PAYOFF_SCORE = 7.0
+
+_TOPIC_STOPWORDS = {
+    "the", "a", "an", "of", "in", "on", "at", "to", "for", "from", "with", "and", "or",
+    "why", "how", "what", "when", "who", "did", "your", "you", "this", "that", "into",
+    "city", "story", "stories", "real", "secret", "inside", "shorts", "could", "would",
+}
+
+
+def normalize_topic_tokens(topic: str) -> set[str]:
+    """Extract normalized stem-like keyword tokens from a topic for near-duplicate detection."""
+    tokens = set()
+    for raw in re.findall(r"[a-z0-9]+", str(topic or "").lower()):
+        if raw in _TOPIC_STOPWORDS or len(raw) < 3:
+            continue
+        stem = raw.rstrip("s") if len(raw) > 4 else raw
+        tokens.add(stem)
+    return tokens
+
+
+def compute_topic_similarity(topic_a: str, topic_b: str) -> float:
+    """Return Jaccard/overlap similarity in [0, 1] between two topic strings."""
+    ta = normalize_topic_tokens(topic_a)
+    tb = normalize_topic_tokens(topic_b)
+    if not ta or not tb:
+        return 0.0
+    inter = len(ta & tb)
+    if inter == 0:
+        return 0.0
+    union = len(ta | tb)
+    containment = inter / min(len(ta), len(tb))
+    return max(inter / union, containment * 0.85)
+
+
+def is_near_duplicate_topic(
+    topic: str,
+    recent_topics: List[str],
+    threshold: float = 0.50,
+) -> Tuple[bool, Optional[str]]:
+    """Return (True, matched_topic) if topic heavily overlaps an existing/recent topic."""
+    for prev in recent_topics or []:
+        if not prev:
+            continue
+        sim = compute_topic_similarity(topic, prev)
+        if sim >= threshold:
+            return True, str(prev)
+    return False, None
+
+
+def score_topic_details(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    """Return structured 8-dimension editorial evaluation summary for a topic candidate."""
+    scores = candidate.get("scores") or {}
+    return {
+        "novelty_originality": float(scores.get("originality", 8.0)),
+        "hook_potential_0_3s": float(scores.get("hook_strength", scores.get("surprise_factor", 8.0))),
+        "curiosity_gap": float(scores.get("emotional_curiosity", 8.0)),
+        "emotional_appeal": float(scores.get("surprise_factor", 8.0)),
+        "human_relatability": float(scores.get("audience_relevance", 8.0)),
+        "story_structure_potential": float(scores.get("storytelling_potential", 8.0)),
+        "visual_storytelling_fit": float(scores.get("visual_novelty", 8.0)),
+        "factual_plausibility": float(scores.get("factual_reliability", 9.0)),
+        "composite_score": compute_composite_score(scores),
+    }
 
 
 def compute_composite_score(scores: Dict[str, float]) -> float:
@@ -218,9 +281,31 @@ Return JSON:
         cat = c.get("category", "Science")
         c["style"] = c.get("style") or STYLE_MAPPINGS.get(cat, "inside-out")
         c["composite_score"] = compute_composite_score(c["scores"])
+        c["eval_details"] = score_topic_details(c)
         verified_candidates.append(c)
 
     return verified_candidates
+
+
+def _gather_recent_topics(extra_exclude: Optional[set] = None) -> List[str]:
+    """Collect recent topic strings from DB video history + used topics ledger."""
+    recent: List[str] = [str(t) for t in (extra_exclude or set()) if t]
+    try:
+        vids = db.get_all_videos(limit=80)
+        if isinstance(vids, list):
+            for v in vids:
+                if isinstance(v, dict) and v.get("topic"):
+                    recent.append(str(v["topic"]))
+    except Exception:
+        pass
+    try:
+        local_data = getattr(db, "_local_data", None) or {}
+        if isinstance(local_data, dict):
+            for t in (local_data.get("topics") or {}).keys():
+                recent.append(str(t))
+    except Exception:
+        pass
+    return recent
 
 
 def select_daily_topics(
@@ -228,23 +313,24 @@ def select_daily_topics(
     exclude_topics: set | None = None,
     record_usage: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Discover candidate topics, prioritize fresh compelling stories, and select 2 distinct topics."""
+    """Discover candidate topics, filter near-duplicates vs recent uploads, and select 2 distinct stories."""
     candidates = generate_candidate_topics(count=12)
     excluded = {t.strip().lower() for t in (exclude_topics or set()) if t}
+    recent_pool = _gather_recent_topics(exclude_topics)
 
     if excluded:
         filtered = [c for c in candidates if c["topic"].strip().lower() not in excluded]
         if len(filtered) >= 2:
             candidates = filtered
 
-    fresh_candidates = [
-        c for c in candidates
-        if not db.is_topic_recent(c["topic"], days_threshold=90)
-    ]
-    recent_candidates = [
-        c for c in candidates
-        if db.is_topic_recent(c["topic"], days_threshold=90)
-    ]
+    fresh_candidates: List[Dict[str, Any]] = []
+    recent_candidates: List[Dict[str, Any]] = []
+    for c in candidates:
+        dup, _matched = is_near_duplicate_topic(c["topic"], recent_pool, threshold=0.50)
+        if db.is_topic_recent(c["topic"], days_threshold=90) or dup:
+            recent_candidates.append(c)
+        else:
+            fresh_candidates.append(c)
 
     fresh_candidates.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
     recent_candidates.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
@@ -260,8 +346,10 @@ def select_daily_topics(
 
     topic_2 = None
     for cand in ordered_pool[1:]:
+        dup_t1, _ = is_near_duplicate_topic(cand.get("topic", ""), [topic_1.get("topic", "")], threshold=0.50)
         if (
             cand.get("topic") != topic_1.get("topic")
+            and not dup_t1
             and cand.get("category") != topic_1.get("category")
             and cand.get("style") != topic_1.get("style")
         ):
@@ -270,7 +358,8 @@ def select_daily_topics(
 
     if not topic_2:
         for cand in ordered_pool[1:]:
-            if cand.get("topic") != topic_1.get("topic"):
+            dup_t1, _ = is_near_duplicate_topic(cand.get("topic", ""), [topic_1.get("topic", "")], threshold=0.50)
+            if cand.get("topic") != topic_1.get("topic") and not dup_t1:
                 topic_2 = cand
                 break
 

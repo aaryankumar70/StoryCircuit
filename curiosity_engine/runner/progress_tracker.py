@@ -484,8 +484,68 @@ def build_slot_progress_snapshot(
     output_dir: Optional[Path] = None,
     timing: Optional[StageTimingStore] = None,
     now_utc: Optional[datetime] = None,
+    watchdog_slot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build complete compact slot snapshot separating Production from Distribution cleanly."""
+    snapshot = _build_slot_progress_snapshot_core(
+        slot_index=slot_index,
+        video_rec=video_rec,
+        sched_slot_rec=sched_slot_rec,
+        target_time_ist=target_time_ist,
+        automation_enabled=automation_enabled,
+        oauth_paused=oauth_paused,
+        output_dir=output_dir,
+        timing=timing,
+        now_utc=now_utc,
+    )
+    if watchdog_slot:
+        snapshot["recovery_cycles"] = int(watchdog_slot.get("recovery_cycles") or 0)
+        snapshot["max_recovery_cycles"] = int(watchdog_slot.get("max_cycles") or 3)
+        snapshot["last_recovery_action"] = watchdog_slot.get("last_recovery_action")
+        snapshot["last_failure_kind"] = watchdog_slot.get("last_failure_kind")
+        snapshot["permanently_failed"] = bool(watchdog_slot.get("permanently_failed", False))
+        snapshot["stalled"] = bool(watchdog_slot.get("stalled", False))
+
+        terminal_phases = {"completed", "waiting_schedule"}
+        if snapshot.get("phase") not in terminal_phases:
+            if watchdog_slot.get("stalled"):
+                snapshot["phase"] = "stalled"
+                snapshot["stage"] = "Stalled"
+                snapshot["stage_label"] = f"Stalled ({snapshot.get('stage_label') or snapshot.get('stage')})"
+                snapshot["waiting_state"] = watchdog_slot.get("last_error") or "Watchdog detected stall — queuing recovery"
+                snapshot["progress_mode"] = "waiting"
+            elif watchdog_slot.get("last_failure_kind") == "api_outage" and watchdog_slot.get("waiting_state"):
+                snapshot["phase"] = "waiting_api"
+                snapshot["stage"] = "Waiting for API"
+                snapshot["stage_label"] = "Waiting for API"
+                snapshot["waiting_state"] = watchdog_slot.get("waiting_state")
+                snapshot["eta_text"] = str(watchdog_slot.get("waiting_state"))
+                snapshot["progress_mode"] = "waiting"
+            elif watchdog_slot.get("waiting_state") and str(watchdog_slot.get("waiting_state")).startswith("Recovering"):
+                snapshot["phase"] = "recovery"
+                snapshot["waiting_state"] = watchdog_slot.get("waiting_state")
+                snapshot["stage_label"] = str(watchdog_slot.get("waiting_state"))
+            elif watchdog_slot.get("last_failure_kind") == "oauth_paused":
+                snapshot["phase"] = "paused"
+                snapshot["stage"] = "Paused"
+                snapshot["stage_label"] = "Paused (OAuth)"
+                snapshot["waiting_state"] = watchdog_slot.get("waiting_state") or "Paused — waiting for YouTube OAuth"
+                snapshot["progress_mode"] = "waiting"
+    return snapshot
+
+
+def _build_slot_progress_snapshot_core(
+    slot_index: int,
+    video_rec: Optional[Dict[str, Any]],
+    sched_slot_rec: Optional[Dict[str, Any]],
+    target_time_ist: str,
+    automation_enabled: bool = True,
+    oauth_paused: bool = False,
+    output_dir: Optional[Path] = None,
+    timing: Optional[StageTimingStore] = None,
+    now_utc: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Core state resolver for build_slot_progress_snapshot."""
     t_store = timing or timing_store
     now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
 
