@@ -291,7 +291,7 @@ class LocalScheduler:
 
     @staticmethod
     def _is_pid_alive(pid: int) -> bool:
-        """Cross-platform check if process PID is running."""
+        """Cross-platform check if process PID is running and belongs to a Python process."""
         if pid <= 0:
             return False
         if sys.platform == "win32":
@@ -305,8 +305,13 @@ class LocalScheduler:
                 try:
                     exit_code = ctypes.c_ulong()
                     ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
-                    if ok:
-                        return exit_code.value == STILL_ACTIVE
+                    if not ok or exit_code.value != STILL_ACTIVE:
+                        return False
+                    buf = ctypes.create_unicode_buffer(1024)
+                    size = ctypes.c_ulong(1024)
+                    if ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                        exe_name = Path(buf.value).name.lower()
+                        return exe_name in ("python.exe", "pythonw.exe")
                     return True
                 finally:
                     ctypes.windll.kernel32.CloseHandle(handle)
@@ -315,6 +320,9 @@ class LocalScheduler:
         else:
             try:
                 os.kill(pid, 0)
+                comm_path = Path(f"/proc/{pid}/comm")
+                if comm_path.exists():
+                    return "python" in comm_path.read_text().lower()
                 return True
             except OSError:
                 return False

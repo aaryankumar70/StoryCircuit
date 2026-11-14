@@ -235,11 +235,17 @@ def get_dashboard_status() -> Dict[str, Any]:
                 if sched._is_pid_alive(pid):
                     pid_alive = True
                     running_pid = pid
+                else:
+                    # Clean up stale lock from dead or non-python recycled PID
+                    try:
+                        DASHBOARD_LOCK_FILE.unlink(missing_ok=True)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
     port_open = is_port_open(DASHBOARD_HOST, DASHBOARD_PORT)
-    is_running = bool(pid_alive or port_open)
+    is_running = bool(port_open)
     return {
         "is_running": is_running,
         "pid_alive": pid_alive,
@@ -467,6 +473,10 @@ def stop_dashboard() -> Dict[str, Any]:
         }
 
     sched = LocalScheduler()
+    if not sched._is_pid_alive(pid):
+        DASHBOARD_LOCK_FILE.unlink(missing_ok=True)
+        return {"success": True, "message": "Dashboard process was not alive or not Python; cleared lock."}
+
     try:
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, **get_hidden_subprocess_kwargs())
     except Exception:
