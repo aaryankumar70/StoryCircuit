@@ -334,6 +334,12 @@ def produce_single_video(
             record["research_dossier"] = script_data.get("research_dossier")
             record["critic_evaluation"] = script_data.get("critic_evaluation")
             record["validator_result"] = script_data.get("validator_result")
+            record["fallback_id"] = script_data.get("id")
+            if script_data.get("id"):
+                try:
+                    db.record_fallback_used(script_data["id"], target_date, str(record.get("topic") or ""))
+                except Exception:
+                    pass
             record["production_status"] = "SCRIPTED"
 
         # 2b. Link-Free YouTube Title, Description & Separate API Tags Generation

@@ -462,19 +462,14 @@ def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
             matched_item = item
             break
 
-    # If Gemini is not configured, find best category/style match in CURATED_TOPICS
-    if matched_item is None and not gemini_client.is_configured():
-        for item in CURATED_TOPICS:
-            if item["category"].upper() == category.upper() and item.get("style") == style:
-                matched_item = item
-                break
-        if matched_item is None:
-            for item in CURATED_TOPICS:
-                if item["category"].upper() == category.upper():
-                    matched_item = item
-                    break
-        if matched_item is None:
-            matched_item = CURATED_TOPICS[0]
+    # If this topic was explicitly flagged as a curated fallback from discovery
+    if matched_item is None and topic_info.get("source_mode") == "curated_fallback":
+        from curiosity_engine.content.curated_fallback import get_unused_fallback
+        matched_item = get_unused_fallback(category)
+        logger.warning(
+            "Discovery assigned curated fallback; selected unused story '%s' (ID: %s) for category %s.",
+            matched_item["topic"], matched_item.get("id"), category,
+        )
 
     if matched_item is not None:
         script_data = copy.deepcopy(matched_item["script"])
@@ -493,27 +488,54 @@ def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
         script_data["loop_line"] = matched_item.get("loop_line", matched_item["script"]["lines"][-1]["text"])
         assign_line_scenes(script_data)
         word_count = count_spoken_words(script_data["lines"])
+
+        if script_data.get("id"):
+            try:
+                from curiosity_engine.state.db import db
+                from datetime import datetime, timezone
+                db.record_fallback_used(
+                    script_data["id"],
+                    datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    script_data["topic"],
+                )
+            except Exception:
+                pass
+
         logger.info(
-            "Using verified curated story script for '%s' (%d words, category=%s).",
+            "Using verified curated story script for '%s' (%d words, category=%s, ID=%s).",
             matched_item["topic"],
             word_count,
             script_data["category"],
+            script_data.get("id"),
         )
         return script_data
 
-    # Step 2: Full Original Editorial Workflow (Gemini Call 1, 2, 3)
+    # Step 2: Full Original Editorial Workflow (Gemini Call 1, 2, 3 or Outline Engine)
     if not is_valid_cat:
         logger.warning(
-            "Topic '%s' violates editorial policy (%s); falling back to curated catalog.",
+            "Topic '%s' violates editorial policy (%s); falling back to unused curated story.",
             topic,
             cat_reason,
         )
-        fallback = next(
-            (c for c in CURATED_TOPICS if c["category"] == category),
-            CURATED_TOPICS[0],
-        )
+        from curiosity_engine.content.curated_fallback import get_unused_fallback
+        fallback = get_unused_fallback(category)
         fallback_script = copy.deepcopy(fallback["script"])
+        fallback_script["id"] = fallback.get("id")
+        fallback_script["topic"] = fallback.get("topic")
+        fallback_script["category"] = fallback.get("category")
+        fallback_script["style"] = fallback.get("style")
         fallback_script["research_dossier"] = fallback.get("research_dossier", {})
+        if fallback.get("id"):
+            try:
+                from curiosity_engine.state.db import db
+                from datetime import datetime, timezone
+                db.record_fallback_used(
+                    fallback["id"],
+                    datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    fallback["topic"],
+                )
+            except Exception:
+                pass
         return fallback_script
 
     # Build Research Dossier

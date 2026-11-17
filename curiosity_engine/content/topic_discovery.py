@@ -187,25 +187,34 @@ def generate_candidate_topics(
             + "\n"
         )
 
+    recent_topics_preview = _gather_recent_topics()[:15]
+    recent_exclusion_block = ""
+    if recent_topics_preview:
+        recent_exclusion_block = (
+            "\nEXCLUDE PREVIOUSLY COVERED SUBJECTS (DO NOT propose or repeat any of these):\n"
+            + "\n".join(f"- {t}" for t in recent_topics_preview)
+            + "\n"
+        )
+
     prompt = f"""
-You are the head editorial director for CurioLoop, an engaging short-form storytelling studio (25-45s vertical videos).
+You are the head editorial director for CurioLoop, an engaging documentary short-form storytelling studio (42-58s vertical videos).
 Discover exactly {count} compelling, factual, visually rich story candidates across these pillars:
 {', '.join(selected_pillars)}.
 
-Prioritize:
-- Fascinating real-life experiences and human survival stories
-- Unusual historical incidents and strange discoveries
-- Unexplained events with credible evidence (clearly distinguishing documented facts vs hypotheses)
-- Psychological/behavioral phenomena and breakthroughs in science/space/technology
+STRICT EDITORIAL RULES:
+1. Permitted categories ONLY: MYSTERY, HISTORY, SPACE.
+2. Strictly FORBID: biology, human anatomy, medical topics, animal trivia, and generic science trivia lists.
+3. Every candidate MUST be an original, specific, documented real-world event with verified historical or scientific records.
+{recent_exclusion_block}
 {reddit_hint_block}
 Evaluate each candidate from 1-10 on:
 1. "originality": Fresh narrative angle, never a generic trivia cliché.
-2. "hook_strength": Can line 1 stop a viewer in 0-3 seconds WITHOUT "Did you know?"
+2. "hook_strength": Can line 1 stop a viewer in 0-3 seconds WITHOUT "Did you know?" (<= 14 words).
 3. "surprise_factor": Counter-intuitive turn or unexpected detail.
 4. "emotional_curiosity": Stakes, tension, or wonder that keeps viewers watching.
-5. "audience_relevance": Relatable human angle.
+5. "audience_relevance": Relatable human angle or existential cosmic scale.
 6. "visual_novelty": Clear visual sequence potential across cuts.
-7. "storytelling_potential": Supports a 25-45s narrative arc (hook -> tension -> payoff).
+7. "storytelling_potential": Supports a 42-58s narrative arc (hook -> tension -> payoff).
 8. "ending_payoff": Satisfying, memorable resolution (no hollow cliffhangers).
 9. "factual_reliability": STRICT >= 9/10 for documented stories; distinguish evidence from open hypotheses honestly.
 
@@ -216,7 +225,7 @@ Return JSON:
 {{
   "candidates": [
      {{
-        "category": "Survival",
+        "category": "MYSTERY",
         "topic": "...",
         "evidence_type": "historical_incident",
         "discovery_origin": "gemini_research",
@@ -237,8 +246,8 @@ Return JSON:
 }}
 """
     system_instruction = (
-        "You are an editorial story producer for CurioLoop. Reject bland trivia. "
-        "Never fabricate facts, URLs, or pretend unverified accounts are proven scientific fact."
+        "You are an editorial story producer for CurioLoop. Focus strictly on MYSTERY, HISTORY, and SPACE documentaries. "
+        "Reject bland trivia, biology, and health. Never fabricate facts or URLs."
     )
 
     response = gemini_client.generate_json(prompt, system_instruction=system_instruction)
@@ -269,7 +278,13 @@ Return JSON:
         logger.warning(
             "[FALLBACK] Using upgraded curated story catalog (0 paid API calls)."
         )
-        for item in CURATED_TOPICS:
+        used_fallback_ids = db.get_used_fallback_ids()
+        # Sort so UNUSED curated stories are prioritized first!
+        sorted_curated = sorted(
+            CURATED_TOPICS,
+            key=lambda it: 1 if it.get("id") in used_fallback_ids else 0,
+        )
+        for item in sorted_curated:
             candidates.append({
                 "id": item.get("id"),
                 "category": item["category"],
@@ -408,7 +423,11 @@ def select_daily_topics(
     )
 
     if record_usage:
-        db.record_topic(topic_1["topic"], topic_1["category"], date_str)
-        db.record_topic(topic_2["topic"], topic_2["category"], date_str)
+        db.record_topic(topic_1["topic"], topic_1["category"], date_str, fallback_id=topic_1.get("id"))
+        db.record_topic(topic_2["topic"], topic_2["category"], date_str, fallback_id=topic_2.get("id"))
+        if topic_1.get("id"):
+            db.record_fallback_used(topic_1["id"], date_str, topic_1["topic"])
+        if topic_2.get("id"):
+            db.record_fallback_used(topic_2["id"], date_str, topic_2["topic"])
 
     return topic_1, topic_2

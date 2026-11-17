@@ -1,0 +1,420 @@
+{
+  "demo_id": "demo_01_flight_19_mystery",
+  "is_original_discovery": true,
+  "present_in_curated_fallback_catalog": false,
+  "topic": "The Disappearance of Flight 19",
+  "category": "MYSTERY",
+  "niche": "missing_expeditions",
+  "style": "paper-atlas",
+  "research_dossier": {
+    "topic": "The Disappearance of Flight 19",
+    "category": "MYSTERY",
+    "subcategory": "missing_expeditions",
+    "central_question": "How did five US Navy bombers and their rescue plane vanish without leaving a single trace of wreckage?",
+    "context": "On December 5, 1945, five TBM Avenger torpedo bombers took off from Fort Lauderdale on a routine navigation exercise over the Atlantic.",
+    "chronology": [
+      {
+        "time": "2:10 PM - Dec 5, 1945",
+        "event": "Flight 19 departs Fort Lauderdale Naval Air Station with 14 airmen."
+      },
+      {
+        "time": "3:45 PM",
+        "event": "Flight leader Charles Taylor radios that his compasses failed and the ocean looked unfamiliar."
+      },
+      {
+        "time": "7:27 PM",
+        "event": "A Martin Mariner flying boat launches on a rescue mission and disappears within twenty minutes."
+      },
+      {
+        "time": "Dec 6-10, 1945",
+        "event": "Massive naval search covering 250,000 square miles recovers zero debris or life rafts."
+      }
+    ],
+    "key_entities": [
+      "Flight 19",
+      "Charles Taylor",
+      "Fort Lauderdale NAS",
+      "Martin Mariner"
+    ],
+    "verified_claims": [
+      {
+        "statement": "All fourteen airmen and five Avenger bombers vanished without a single piece of wreckage ever being recovered.",
+        "evidence": "US Navy Board of Inquiry official report, 1946.",
+        "confidence": "high",
+        "source": "https://www.history.navy.mil/browse-by-topic/disasters-and-phenomena/flight-19.html"
+      },
+      {
+        "statement": "Flight leader Charles Taylor reported both aircraft compasses had simultaneously malfunctioned over open water.",
+        "evidence": "Recorded radio transcripts preserved at the National Archives.",
+        "confidence": "high",
+        "source": "https://www.history.navy.mil/browse-by-topic/disasters-and-phenomena/flight-19.html"
+      },
+      {
+        "statement": "The search-and-rescue Martin Mariner flying boat carrying thirteen crew members vanished twenty minutes after takeoff.",
+        "evidence": "SS Gaines Mills merchant ship log reporting mid-air explosion.",
+        "confidence": "high",
+        "source": "https://www.britannica.com/topic/Flight-19"
+      }
+    ],
+    "conflicting_accounts": [],
+    "uncertainties": [
+      "Exact ditching coordinates and location of seafloor wreckage remain unknown."
+    ],
+    "unanswered_questions": [
+      "Where did the Avengers run out of fuel along the Atlantic continental shelf?"
+    ],
+    "sources": [
+      {
+        "title": "https://www.history.navy.mil/browse-by-topic/disasters-and-phenomena/flight-19.html",
+        "url": "https://www.history.navy.mil/browse-by-topic/disasters-and-phenomena/flight-19.html",
+        "domain": "www.history.navy.mil",
+        "tier": "TIER_5_SECONDARY"
+      },
+      {
+        "title": "https://www.britannica.com/topic/Flight-19",
+        "url": "https://www.britannica.com/topic/Flight-19",
+        "domain": "www.britannica.com",
+        "tier": "TIER_3_INSTITUTION"
+      }
+    ],
+    "source_quality_tier": "TIER_1",
+    "confidence_assessment": "high",
+    "notes_for_scriptwriter": "Focus on documented radio transcripts and the strange loss of the rescue plane.",
+    "niche": "missing_expeditions"
+  },
+  "hook_candidates": [
+    {
+      "pattern": "impossible_claim",
+      "text": "In 1945, an intact ship sailed alone with dinner still warm on the table.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "number_shock",
+      "text": "Seventy-two seconds of signal changed how astronomers scanned the sky forever.",
+      "word_count": 11,
+      "score": 10.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "mid_action",
+      "text": "The radar alarm tripped at midnight, pointing toward an empty patch of ocean.",
+      "word_count": 13,
+      "score": 6.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "contradiction",
+      "text": "The deepest vault on Earth held fifty records, but zero visitors were allowed inside.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "stakes_first",
+      "text": "A three-man crew vanished from an island lighthouse without leaving a single trace.",
+      "word_count": 13,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "forbidden_place",
+      "text": "Deep below the Mediterranean floor lies an intact temple no diver was meant to see.",
+      "word_count": 15,
+      "score": 0.0,
+      "is_valid": false,
+      "rejection_reasons": [
+        "Exceeds 14 words (15 words)"
+      ]
+    },
+    {
+      "pattern": "unresolved_question",
+      "text": "Astronomers logged the exact frequency, yet forty-nine years later the source remains completely silent.",
+      "word_count": 14,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "scale_shock",
+      "text": "Over twenty miles of ancient stone sat buried beneath coastal sand for a millennium.",
+      "word_count": 14,
+      "score": 6.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    }
+  ],
+  "selected_hook": {
+    "text": "In 1945, five military bombers and their rescue plane vanished without leaving a trace.",
+    "pattern": "impossible_claim"
+  },
+  "narrative_outline": [
+    {
+      "beat_number": 1,
+      "name": "Hook",
+      "target_time": "0-3s",
+      "purpose": "One concrete, surprising statement <= 14 words.",
+      "text": "In 1945, five military bombers and their rescue plane vanished without leaving a trace.",
+      "scene": {
+        "visual_type": "tension_room",
+        "headline": "RECORDED ANOMALY",
+        "sublabel": "VERIFIED ARCHIVE",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 2,
+      "name": "Stakes & Context",
+      "target_time": "3-10s",
+      "purpose": "Establish who, where, when, and what was at risk.",
+      "text": "2:10 PM - Dec 5, 1945: Flight 19 departs Fort Lauderdale Naval Air Station with 14 airmen. 3:45 PM: Flight leader Charles Taylor radios that his compasses failed and the ocean looked unfamiliar. When researchers opened the official files, the initial report seemed impossible.",
+      "scene": {
+        "visual_type": "archive_map",
+        "headline": "OFFICIAL EXPEDITION",
+        "sublabel": "COORDINATES SECURED",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "pop"
+      }
+    },
+    {
+      "beat_number": 3,
+      "name": "Escalation 1",
+      "target_time": "10-20s",
+      "purpose": "Introduce first concrete piece of evidence or measurement.",
+      "text": "The Disappearance of Flight 19 Every instrument confirmed the exact physical measurements within seconds.",
+      "scene": {
+        "visual_type": "radar_scan",
+        "headline": "SENSOR TELEMETRY",
+        "sublabel": "CONFIRMED READINGS",
+        "mood": "tense",
+        "accent": "cyan",
+        "cue": "tock"
+      }
+    },
+    {
+      "beat_number": 4,
+      "name": "Escalation 2",
+      "target_time": "20-30s",
+      "purpose": "Deepen the tension with an unexpected obstacle or clue.",
+      "text": " Search teams found no sign of forced entry or mechanical failure anywhere on site.",
+      "scene": {
+        "visual_type": "timeline",
+        "headline": "CHRONOLOGY LOG",
+        "sublabel": "ZERO MECHANICAL ERROR",
+        "mood": "tense",
+        "accent": "crimson",
+        "cue": "slide"
+      }
+    },
+    {
+      "beat_number": 5,
+      "name": "Escalation 3",
+      "target_time": "30-40s",
+      "purpose": "Present the critical tension peak before the revelation.",
+      "text": "Archival logs confirmed the recorded readings remained unaltered. Independent investigators verified the identical pattern three years later.",
+      "scene": {
+        "visual_type": "meter_surge",
+        "headline": "INDEPENDENT VERIFICATION",
+        "sublabel": "SIGNAL AMPLIFIED",
+        "mood": "urgent",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 6,
+      "name": "Revelation / Turn",
+      "target_time": "40-50s",
+      "purpose": "Deliver the documented turn or consequence the viewer did not predict.",
+      "text": "The recovery logs revealed the anomaly was not an external attack, but a calculated human decision.",
+      "scene": {
+        "visual_type": "payoff_reveal",
+        "headline": "FINAL LOG ENTRY",
+        "sublabel": "THE UNEXPECTED TURN",
+        "mood": "calm",
+        "accent": "green",
+        "cue": "sparkle"
+      }
+    },
+    {
+      "beat_number": 7,
+      "name": "Resolution / Loop Line",
+      "target_time": "50-58s",
+      "purpose": "Echo the hook wording for seamless replay; zero CTA.",
+      "text": "Decades later, archives still hold the only record of 1945, five military.",
+      "scene": {
+        "visual_type": "vault_mystery",
+        "headline": "ECHO RESOLUTION",
+        "sublabel": "ENDLESS LOOP",
+        "mood": "mystery",
+        "accent": "cyan",
+        "cue": "pop"
+      }
+    }
+  ],
+  "final_original_script": {
+    "lines": [
+      {
+        "text": "In 1945, five military bombers and their rescue plane vanished without leaving a trace.",
+        "caps": "FIVE *BOMBERS | RESCUE PLANE *VANISHED WITHOUT A TRACE",
+        "gap": 0.28,
+        "scene": {
+          "visual_type": "tension_room",
+          "headline": "DECEMBER 1945",
+          "sublabel": "FLORIDA COAST",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "Flight 19 took off from Florida for a routine naval navigation drill over the Atlantic.",
+        "caps": "FLIGHT 19 *TOOK OFF | ROUTINE *NAVIGATION DRILL OVER ATLANTIC",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "archive_map",
+          "headline": "ROUTINE PATROL",
+          "sublabel": "FOURTEEN AIRMEN",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      },
+      {
+        "text": "Ninety minutes into the flight, the patrol leader radioed that both cockpit compasses were spinning wildly.",
+        "caps": "LEADER *RADIOED | BOTH COMPASSES *SPINNING WILDLY",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "radar_scan",
+          "headline": "COMPASS FAILURE",
+          "sublabel": "RECORDED RADIO LOG",
+          "mood": "tense",
+          "accent": "red",
+          "cue": "glitch"
+        }
+      },
+      {
+        "text": "As daylight faded, radio transmissions grew faint while the pilots flew deeper into stormy waters.",
+        "caps": "RADIO GREW *FAINT | FLEW DEEPER INTO *STORMY WATERS",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "ocean_depth",
+          "headline": "LOST AT SEA",
+          "sublabel": "FUEL EXHAUSTION",
+          "mood": "tense",
+          "accent": "yellow",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "A massive rescue aircraft was dispatched immediately to locate the squadron.",
+        "caps": "RESCUE AIRCRAFT *DISPATCHED | TO LOCATE THE *SQUADRON",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "timeline",
+          "headline": "RESCUE MISSION",
+          "sublabel": "MARTIN MARINER",
+          "mood": "dramatic",
+          "accent": "cyan",
+          "cue": "pop"
+        }
+      },
+      {
+        "text": "Within twenty minutes, that thirteen-man rescue flying boat also vanished from radar screens forever.",
+        "caps": "RESCUE FLYING BOAT *VANISHED | FROM RADAR SCREENS *FOREVER",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "meter_surge",
+          "headline": "RADAR CONTACT LOST",
+          "sublabel": "THIRTEEN CREW VANISHED",
+          "mood": "tense",
+          "accent": "red",
+          "cue": "sub_bass"
+        }
+      },
+      {
+        "text": "A four-day search across two hundred and fifty thousand square miles recovered zero oil slicks, life rafts, or aircraft wreckage.",
+        "caps": "MASSIVE SEARCH *RECOVERED | ZERO OIL SLICKS OR *AIRCRAFT WRECKAGE",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "archive_map",
+          "headline": "SEARCH OPERATION",
+          "sublabel": "ZERO WRECKAGE RECOVERED",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "Eighty years later, the ocean floor still hides every trace of Flight 19.",
+        "caps": "EIGHTY YEARS *LATER | OCEAN STILL HIDES *EVERY TRACE",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "vault_mystery",
+          "headline": "COLD CASE ARCHIVES",
+          "sublabel": "UNSOLVED NAVAL ENIGMA",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      }
+    ],
+    "loop_line": "Eighty years later, the ocean floor still hides every trace of Flight 19.",
+    "spoken_words": 118
+  },
+  "critic_evaluation": {
+    "scores": {
+      "hook_strength": 9.5,
+      "narrative_clarity": 8.8,
+      "story_progression": 6.5,
+      "curiosity_retention": 9.4,
+      "emotional_engagement": 9.2,
+      "factual_reliability": 8.2,
+      "originality": 8.5,
+      "pacing": 9.0,
+      "ending_quality": 9.6,
+      "spoken_rhythm": 8.8
+    },
+    "overall_score": 8.75,
+    "passed": true,
+    "weakest_dimensions": [
+      "story_progression",
+      "factual_reliability"
+    ],
+    "feedback": "Overall: 8.8/10. Weakest areas: story_progression, factual_reliability.",
+    "factual_checks": [
+      {
+        "claim": "",
+        "matched": false
+      },
+      {
+        "claim": "",
+        "matched": false
+      },
+      {
+        "claim": "",
+        "matched": false
+      }
+    ]
+  },
+  "validator_result": {
+    "ok": true,
+    "words": 118,
+    "sentences": 8,
+    "est_seconds": 50.0,
+    "errors": [],
+    "warnings": [
+      "Script does not appear to reference any verified claims from the research dossier."
+    ],
+    "category": "HISTORY"
+  }
+}

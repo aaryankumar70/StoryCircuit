@@ -494,3 +494,100 @@ class TestEditorialEvaluationSet:
         assert category_counts["MYSTERY"] >= 3, f"Expected >= 3 MYSTERY, got {category_counts['MYSTERY']}"
         assert category_counts["HISTORY"] >= 3, f"Expected >= 3 HISTORY, got {category_counts['HISTORY']}"
         assert category_counts["SPACE"] >= 4, f"Expected >= 4 SPACE, got {category_counts['SPACE']}"
+
+
+# =============================================================================
+# 9. NOVELTY PROTECTION & FALLBACK REPETITION DEFENSE TESTS
+# =============================================================================
+class TestNoveltyAndFallbackProtection:
+    def test_persistent_fallback_tracking(self, tmp_path):
+        from curiosity_engine.state.db import DatabaseClient
+        db_inst = DatabaseClient(custom_file=tmp_path / "test_db.json")
+
+        assert db_inst.is_fallback_used("test_fb_01") is False
+        db_inst.record_fallback_used("test_fb_01", "2026-11-17", "Test Story")
+        assert db_inst.is_fallback_used("test_fb_01") is True
+        assert "test_fb_01" in db_inst.get_used_fallback_ids()
+
+    def test_get_unused_fallback_never_repeats_until_exhausted(self, tmp_path):
+        from curiosity_engine.content.curated_fallback import CURATED_TOPICS, get_unused_fallback
+        from curiosity_engine.state.db import DatabaseClient
+        db_inst = DatabaseClient(custom_file=tmp_path / "test_db.json")
+
+        space_topics = [t for t in CURATED_TOPICS if t["category"] == "SPACE"]
+        total_space = len(space_topics)
+        seen_ids = set()
+
+        for _ in range(total_space):
+            fb = get_unused_fallback("SPACE", db_client=db_inst)
+            fb_id = fb["id"]
+            assert fb_id not in seen_ids, f"Fallback ID {fb_id} was repeated before catalog exhaustion!"
+            seen_ids.add(fb_id)
+            db_inst.record_fallback_used(fb_id, "2026-11-17", fb["topic"])
+
+        assert len(seen_ids) == total_space
+
+    def test_topic_novelty_detects_near_duplicate_rewrites(self, tmp_path):
+        from curiosity_engine.state.db import DatabaseClient
+        db_inst = DatabaseClient(custom_file=tmp_path / "test_db.json")
+
+        db_inst.record_topic(
+            "The Sunken Port of Thonis-Heracleion",
+            "HISTORY",
+            "2026-11-17",
+            aliases=["Heracleion Underwater City"],
+        )
+
+        # 1. Exact match rejected
+        assert db_inst.is_topic_recent("The Sunken Port of Thonis-Heracleion") is True
+
+        # 2. Near-duplicate rewritten title rejected
+        is_novel, reason = db_inst.is_topic_novel("The sunken Egyptian port city of Thonis-Heracleion")
+        assert is_novel is False
+        assert "within 90 days" in reason
+
+        # 3. Alias rejected
+        is_novel_alias, reason_alias = db_inst.is_topic_novel("Heracleion Underwater City")
+        assert is_novel_alias is False
+
+        # 4. Genuinely new topic accepted
+        is_novel_new, reason_new = db_inst.is_topic_novel("The Disappearance of Flight 19 in the Bermuda Triangle")
+        assert is_novel_new is True
+        assert reason_new is None
+
+    def test_original_topic_scriptwriting_creates_bespoke_content_not_curated(self):
+        new_topic_info = {
+            "topic": "The Disappearance of Flight 19 in the Bermuda Triangle",
+            "category": "Mystery",
+            "sources": ["https://www.history.navy.mil/browse-by-topic/disasters-and-phenomena/flight-19.html"],
+        }
+        script = write_video_script(new_topic_info)
+        assert script is not None
+        assert script["category"] == "MYSTERY"
+        # Must retain the original topic title, NOT silently replaced by Mary Celeste
+        assert "Flight 19" in script["topic"] or "Bermuda" in script["topic"]
+        assert script["lines"][0]["text"] != ""
+        # Passes deterministic validator
+        val = validate_script(script["lines"], dossier=script.get("research_dossier"))
+        assert val["ok"] is True
+        assert len(val["errors"]) == 0
+
+    def test_original_story_demo_artifacts_verified(self):
+        demo_dir = os.path.join(os.getcwd(), "output", "original_story_demo")
+        assert os.path.isdir(demo_dir), f"Demo directory missing: {demo_dir}"
+        demo_files = [f for f in os.listdir(demo_dir) if f.startswith("demo_") and f.endswith(".json")]
+        assert len(demo_files) == 3, f"Expected 3 demo files, found {len(demo_files)}"
+
+        for fname in demo_files:
+            fpath = os.path.join(demo_dir, fname)
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            assert data["is_original_discovery"] is True
+            assert data["present_in_curated_fallback_catalog"] is False
+            assert data["category"] in ("MYSTERY", "HISTORY", "SPACE")
+            assert len(data["hook_candidates"]) >= 8
+            assert data["critic_evaluation"]["overall_score"] >= 8.0
+            assert data["validator_result"]["ok"] is True
+            assert len(data["validator_result"]["errors"]) == 0
+            assert 90 <= data["validator_result"]["words"] <= 148

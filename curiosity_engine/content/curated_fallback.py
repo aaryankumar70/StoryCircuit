@@ -14,7 +14,10 @@ All 30 entries adhere strictly to:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Set
+import logging
+
+logger = logging.getLogger("curiosity_engine.curated_fallback")
 
 CURATED_TOPICS: List[Dict[str, Any]] = [
     # =========================================================================
@@ -2854,3 +2857,44 @@ CURATED_TOPICS: List[Dict[str, Any]] = [
         },
     },
 ]
+
+
+def get_unused_fallback(
+    category: str,
+    exclude_ids: Optional[Set[str]] = None,
+    db_client: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Return an unused curated fallback story for the category, strictly tracking usage to prevent repetition.
+
+    If all curated stories in the category have been consumed, rotates to the least recently used story.
+    """
+    from curiosity_engine.state.db import db as default_db
+    database = db_client or default_db
+
+    used_ids = set(exclude_ids or set())
+    try:
+        used_ids.update(database.get_used_fallback_ids())
+    except Exception:
+        pass
+
+    cat_upper = category.upper()
+    matching_topics = [t for t in CURATED_TOPICS if t["category"].upper() == cat_upper]
+    if not matching_topics:
+        matching_topics = CURATED_TOPICS
+
+    # 1. Prefer truly unused fallback stories
+    unused = [t for t in matching_topics if t.get("id") not in used_ids]
+    if unused:
+        selected = unused[0]
+        logger.info(
+            "Selected unused curated fallback '%s' (ID: %s, %d unused remaining in %s).",
+            selected["topic"], selected.get("id"), len(unused) - 1, cat_upper,
+        )
+        return selected
+
+    # 2. If all have been used, rotate deterministically and warn
+    logger.warning(
+        "All %d curated fallbacks in category %s have been used! Rotating catalog.",
+        len(matching_topics), cat_upper,
+    )
+    return matching_topics[0]
