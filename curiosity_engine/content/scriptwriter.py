@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from curiosity_engine.config import (
+    CALIBRATED_WORDS_PER_SECOND,
     MAX_DURATION_SEC,
     MAX_WORD_COUNT,
     MIN_DURATION_SEC,
@@ -30,7 +31,25 @@ from curiosity_engine.config import (
     VOICE_MAP,
 )
 from curiosity_engine.content.curated_fallback import CURATED_TOPICS
+from curiosity_engine.content.editorial_policy import (
+    get_visual_style_for_category,
+    normalize_category_name,
+    validate_editorial_category,
+)
 from curiosity_engine.content.gemini_client import gemini_client
+from curiosity_engine.content.narrative_engine import (
+    build_documentary_outline,
+    generate_draft_script,
+    generate_hook_candidates,
+    select_best_hook,
+)
+from curiosity_engine.content.research_dossier import build_research_dossier
+from curiosity_engine.content.story_critic import (
+    critique_and_rewrite,
+    evaluate_script_critique,
+    repair_script_emergency,
+)
+from curiosity_engine.quality.script_validator import validate_script
 
 logger = logging.getLogger("curiosity_engine.scriptwriter")
 
@@ -413,16 +432,28 @@ def improve_script_quality(script_data: Dict[str, Any]) -> Tuple[Dict[str, Any],
 
 
 def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate or retrieve a high-retention storytelling script (25-45s target, <= 60s)."""
-    topic = _strip_pii_and_links(str(topic_info.get("topic", "")))
-    category = topic_info.get("category", "Science")
-    style = topic_info.get("style", "inside-out")
-    voice = VOICE_MAP.get(style, "am_michael")
-    evidence_type = topic_info.get("evidence_type", "documented_fact")
-    discovery_origin = topic_info.get("discovery_origin", "curated_research")
-    angle_note = _strip_pii_and_links(str(topic_info.get("angle_note", "")))
+    """Generate or retrieve a high-retention storytelling script (42-58s target, <= 60s).
 
-    # 1. Match exact or same-category curated high-retention story when Gemini isn't used
+    Executes the viral shorts editorial workflow:
+      Topic -> Contextual Category Validation -> Research Dossier ->
+      Hook Playbook -> 5-Beat Documentary Outline -> Narrative Draft (Call 1) ->
+      Independent Story Critic & Targeted Rewrite (Call 2) ->
+      Deterministic Validator -> Emergency Repair (Call 3 if needed) ->
+      Verified Script Output (or Curated Fallback on failure).
+    """
+    raw_topic = _strip_pii_and_links(str(topic_info.get("topic", "")))
+    raw_category = str(topic_info.get("category", "") or "MYSTERY")
+
+    # Step 0: Contextual Category Validation
+    is_valid_cat, detected_cat, cat_reason = validate_editorial_category(
+        raw_topic, declared_category=raw_category
+    )
+    category = detected_cat or normalize_category_name(raw_category) or "MYSTERY"
+    style = get_visual_style_for_category(category)
+    voice = VOICE_MAP.get(style, "bm_george" if category == "HISTORY" else "am_michael")
+    topic = raw_topic
+
+    # Step 1: Check if this matches a curated high-retention fallback story
     matched_item = None
     for item in CURATED_TOPICS:
         if item["topic"].lower() == topic.lower() or (
@@ -430,16 +461,20 @@ def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
         ):
             matched_item = item
             break
+
+    # If Gemini is not configured, find best category/style match in CURATED_TOPICS
     if matched_item is None and not gemini_client.is_configured():
         for item in CURATED_TOPICS:
-            if item["category"].lower() == category.lower() and item.get("style") == style:
+            if item["category"].upper() == category.upper() and item.get("style") == style:
                 matched_item = item
                 break
         if matched_item is None:
             for item in CURATED_TOPICS:
-                if item["style"] == style:
+                if item["category"].upper() == category.upper():
                     matched_item = item
                     break
+        if matched_item is None:
+            matched_item = CURATED_TOPICS[0]
 
     if matched_item is not None:
         script_data = copy.deepcopy(matched_item["script"])
@@ -449,135 +484,137 @@ def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
         script_data["topic"] = matched_item["topic"]
         script_data["category"] = matched_item["category"]
         script_data["style"] = matched_item["style"]
-        script_data["evidence_type"] = matched_item.get("evidence_type", "documented_fact")
+        script_data["evidence_type"] = matched_item.get("evidence_type", "historical_incident")
         script_data["discovery_origin"] = matched_item.get("discovery_origin", "curated_research")
         script_data["scores"] = matched_item.get("scores", topic_info.get("scores", {}))
+        script_data["research_dossier"] = matched_item.get("research_dossier", {})
+        script_data["hook"] = matched_item.get("hook", matched_item["script"]["lines"][0]["text"])
+        script_data["hook_pattern"] = matched_item.get("hook_pattern", "impossible_claim")
+        script_data["loop_line"] = matched_item.get("loop_line", matched_item["script"]["lines"][-1]["text"])
         assign_line_scenes(script_data)
-        script_data, _q_rep = improve_script_quality(script_data)
         word_count = count_spoken_words(script_data["lines"])
-        logger.info("Using verified curated story script for '%s' (%d words, score=%.2f).", matched_item["topic"], word_count, _q_rep.get("overall_score", 0.0))
+        logger.info(
+            "Using verified curated story script for '%s' (%d words, category=%s).",
+            matched_item["topic"],
+            word_count,
+            script_data["category"],
+        )
         return script_data
 
-    # 2. Generate high-retention original storytelling script via Gemini
-    evidence_guidance = {
-        "unexplained_mystery": "Frame documented evidence honestly as an unresolved mystery and label hypotheses as hypotheses rather than settled fact.",
-        "personal_account": "Frame clearly as a documented account without asserting unproven supernatural/fictional claims as scientific fact.",
-        "historical_incident": "Anchor to documented dates, archives, or recorded physical evidence.",
-        "scientific_study": "Anchor clearly to observed mechanisms or peer-reviewed research.",
-        "documented_fact": "Present verifiable mechanisms and concrete evidence clearly.",
-    }.get(evidence_type, "Be strictly factual.")
+    # Step 2: Full Original Editorial Workflow (Gemini Call 1, 2, 3)
+    if not is_valid_cat:
+        logger.warning(
+            "Topic '%s' violates editorial policy (%s); falling back to curated catalog.",
+            topic,
+            cat_reason,
+        )
+        fallback = next(
+            (c for c in CURATED_TOPICS if c["category"] == category),
+            CURATED_TOPICS[0],
+        )
+        fallback_script = copy.deepcopy(fallback["script"])
+        fallback_script["research_dossier"] = fallback.get("research_dossier", {})
+        return fallback_script
 
-    extra_context = f"\nBackground context note (transform into original narrative, zero usernames/URLs): {angle_note}" if angle_note else ""
-    visual_choices = ", ".join(VISUAL_TYPES)
-    prompt = f"""
-Write an original short-form storytelling narration script on: "{topic}" (Category: {category}).
-Target length: approximately {int(TARGET_DURATION_MIN_SEC)}-{int(TARGET_DURATION_MAX_SEC)} seconds ({TARGET_WORD_COUNT_MIN}-{TARGET_WORD_COUNT_MAX} spoken words ideal; strictly within {MIN_WORD_COUNT}-{MAX_WORD_COUNT} words, max 60 seconds).
-Storytelling origin: {discovery_origin} | Evidence framing: {evidence_type} ({evidence_guidance}){extra_context}
-
-STORYTELLING & RETENTION RULES:
-1. Opening Hook (0-3s): Line 1 MUST hook immediately with an unusual situation, striking tension, or gripping question. NEVER start with "Did you know?".
-2. Development: Establish the situation quickly, reveal clues progressively, eliminate encyclopedic filler.
-3. Curiosity & Suspense: Introduce an unanswered question or meaningful narrative twist before revealing the answer.
-4. Natural Spoken Cadence: Sound conversational, vivid, and human—never robotic textbook prose.
-5. Ending Payoff: Deliver a crisp, memorable resolution that resolves the curiosity gap without artificial cliffhangers.
-6. Honesty & Privacy: NEVER invent fake facts/dates, NEVER copy posts verbatim, NEVER include URLs, usernames, or personal info.
-7. Visual Scene Matching: Structure into 6 to 9 natural cut lines; pair each line with a matching `scene` visual type from [{visual_choices}] (avoid repeating consecutive `visual_type`!), concise visual `headline` (2-5 words), `sublabel`, `mood` (mystery/tense/urgent/wonder/calm), `accent` (yellow/cyan/crimson/green), and `cue` (whoosh/pop/tock/slide/bubbles/slam/sparkle).
-
-Return valid JSON:
-{{
-  "title": "Curiosity-Sparking Natural Title (not all-caps, no clickbait)",
-  "sources": ["https://..."],
-  "claims": ["Verified factual claim 1", "Verified factual claim 2"],
-  "lines": [
-     {{
-       "text": "Hook sentence...",
-       "caps": "THREE WORD *CAPS | SECOND *CHUNK",
-       "gap": 0.28,
-       "scene": {{
-         "visual_type": "tension_room",
-         "headline": "SHORT VISUAL LABEL",
-         "sublabel": "CONTEXT DETAIL",
-         "mood": "mystery",
-         "accent": "yellow",
-         "cue": "whoosh"
-       }}
-     }}
-  ]
-}}
-"""
-    system_instruction = (
-        f"You are lead story writer for CurioLoop. Target {TARGET_WORD_COUNT_MIN}-{TARGET_WORD_COUNT_MAX} words "
-        f"(strict max {MAX_WORD_COUNT} words for <={int(MAX_DURATION_SEC)}s runtime). Never fabricate claims or leak usernames/URLs."
+    # Build Research Dossier
+    raw_sources = topic_info.get("sources", [])
+    dossier = build_research_dossier(
+        topic=topic,
+        category=category,
+        source_seeds=raw_sources if isinstance(raw_sources, list) else [],
     )
-    response = gemini_client.generate_json(prompt, system_instruction=system_instruction)
 
-    if response and "lines" in response and len(response["lines"]) >= 4:
-        lines = []
-        for raw_ln in response["lines"]:
-            clean_txt = _strip_pii_and_links(str(raw_ln.get("text", "")))
-            if not clean_txt:
-                continue
-            caps = str(raw_ln.get("caps") or "").strip() or format_auto_caps(clean_txt)
-            try:
-                gap = min(0.45, max(0.18, float(raw_ln.get("gap", 0.28))))
-            except (TypeError, ValueError):
-                gap = 0.28
-            lines.append({
-                "text": clean_txt,
-                "caps": caps,
-                "gap": gap,
-                "scene": raw_ln.get("scene"),
-            })
+    # Call 1: Narrative Engine (Hooks, Outline, Initial Draft)
+    hook_candidates = generate_hook_candidates(dossier)
+    selected_hook = select_best_hook(hook_candidates)
+    outline = build_documentary_outline(dossier, selected_hook)
+    draft = generate_draft_script(dossier, selected_hook, outline)
 
-        word_count = count_spoken_words(lines)
-        raw_sources = response.get("sources", []) or topic_info.get("sources", [])
-        is_valid_src, validated_sources = validate_factual_sources(raw_sources)
-        if not validated_sources and topic_info.get("sources"):
-            validated_sources = list(topic_info.get("sources", []))
+    script_candidate = {
+        "title": draft.title,
+        "voice": draft.voice,
+        "speed": 1.0,
+        "lead": 0.40,
+        "outro": 0.75,
+        "gap": 0.26,
+        "topic": topic,
+        "category": draft.category,
+        "niche": draft.niche,
+        "style": draft.style,
+        "hook": draft.hook,
+        "hook_pattern": draft.hook_pattern,
+        "hook_candidates": draft.hook_candidates,
+        "beats": draft.beats,
+        "loop_line": draft.loop_line,
+        "claims": draft.claims,
+        "sources": dossier.get("sources", []),
+        "research_dossier": dossier,
+        "lines": draft.lines,
+        "est_seconds": draft.est_seconds,
+    }
 
-        script_candidate: Dict[str, Any] = {
-            "title": _strip_pii_and_links(str(response.get("title") or topic)),
-            "voice": voice,
-            "speed": 1.0,
-            "lead": 0.40,
-            "outro": 0.75,
-            "gap": 0.28,
-            "topic": topic,
-            "category": category,
-            "style": style,
-            "evidence_type": evidence_type,
-            "discovery_origin": discovery_origin,
-            "scores": topic_info.get("scores", {}),
-            "sources": validated_sources if is_valid_src else list(topic_info.get("sources", [])),
-            "claims": response.get("claims") or topic_info.get("claims") or [topic],
-            "lines": lines,
-        }
+    # Call 2: Independent Story Critic & Targeted Rewrite
+    script_candidate, critic_report = critique_and_rewrite(
+        script_candidate, dossier=dossier
+    )
+    script_candidate["critic_evaluation"] = {
+        "scores": critic_report.scores,
+        "overall_score": critic_report.overall_score,
+        "passed": critic_report.passed,
+        "weakest_dimensions": critic_report.weakest_dimensions,
+        "feedback": critic_report.feedback,
+    }
+
+    # Deterministic Script Validator Gate
+    val_res = validate_script(script_candidate, wps=CALIBRATED_WORDS_PER_SECOND, dossier=dossier)
+    script_candidate["validator_result"] = val_res
+
+    # Call 3: Emergency Repair (only if validator still reports errors)
+    if not val_res["ok"]:
+        logger.warning(
+            "Script failed validator checks (%s). Invoking Call 3 Emergency Repair.",
+            val_res["errors"],
+        )
+        script_candidate = repair_script_emergency(
+            script_candidate, validator_errors=val_res["errors"]
+        )
+        val_res = validate_script(script_candidate, wps=CALIBRATED_WORDS_PER_SECOND, dossier=dossier)
+        script_candidate["validator_result"] = val_res
+
+    # Final Gatekeeper
+    if val_res["ok"]:
         assign_line_scenes(script_candidate)
-        script_candidate, q_eval = improve_script_quality(script_candidate)
-        q_ok, q_issues = validate_script_quality(script_candidate)
-        if q_ok and q_eval.get("overall_score", 0.0) >= 6.5 and (is_valid_src or evidence_type in ("unexplained_mystery", "personal_account")):
-            logger.info("Generated high-retention Gemini script for '%s' (%d words, score=%.2f).", topic, word_count, q_eval.get("overall_score", 0.0))
-            return script_candidate
-        logger.warning("Gemini script failed quality/source check (%s; score=%.2f); falling back to curated story.", q_issues, q_eval.get("overall_score", 0.0))
+        for ln in script_candidate["lines"]:
+            if not ln.get("caps"):
+                ln["caps"] = format_auto_caps(ln["text"])
+        word_count = count_spoken_words(script_candidate["lines"])
+        logger.info(
+            "Successfully validated original script for '%s' (%d words, ~%.1fs, score=%.2f).",
+            topic,
+            word_count,
+            val_res["est_seconds"],
+            critic_report.overall_score,
+        )
+        return script_candidate
 
-    # 3. Robust curated fallback (pick by matching category/style before default)
-    fallback = CURATED_TOPICS[0]
-    for cand in CURATED_TOPICS:
-        if cand["category"].lower() == category.lower() or cand["style"] == style:
-            fallback = cand
-            break
-    script_data = copy.deepcopy(fallback["script"])
-    script_data["id"] = fallback.get("id")
-    script_data["sources"] = list(fallback.get("sources", []))
-    script_data["claims"] = list(fallback.get("claims", []))
-    script_data["topic"] = fallback["topic"]
-    script_data["category"] = fallback["category"]
-    script_data["style"] = fallback["style"]
-    script_data["evidence_type"] = fallback.get("evidence_type", "documented_fact")
-    script_data["discovery_origin"] = fallback.get("discovery_origin", "curated_research")
-    script_data["scores"] = fallback["scores"]
-    assign_line_scenes(script_data)
-    return script_data
+    logger.warning(
+        "Script failed final validator gate (%s); falling back cleanly to curated story.",
+        val_res["errors"],
+    )
+    fallback = next(
+        (c for c in CURATED_TOPICS if c["category"] == category),
+        CURATED_TOPICS[0],
+    )
+    fallback_script = copy.deepcopy(fallback["script"])
+    fallback_script["id"] = fallback.get("id")
+    fallback_script["sources"] = list(fallback.get("sources", []))
+    fallback_script["claims"] = list(fallback.get("claims", []))
+    fallback_script["topic"] = fallback["topic"]
+    fallback_script["category"] = fallback["category"]
+    fallback_script["style"] = fallback["style"]
+    fallback_script["research_dossier"] = fallback.get("research_dossier", {})
+    assign_line_scenes(fallback_script)
+    return fallback_script
 
 
 def revise_script_for_duration(

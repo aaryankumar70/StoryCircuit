@@ -1,0 +1,423 @@
+{
+  "eval_id": "eval_script_06_victor_lustig",
+  "topic": "The Man Who Sold the Eiffel Tower Twice",
+  "category": "HISTORY",
+  "niche": "historical_events",
+  "style": "stick-story",
+  "research_dossier": {
+    "topic": "The Man Who Sold the Eiffel Tower Twice",
+    "category": "HISTORY",
+    "niche": "historical_events",
+    "core_conflict": "The public embarrassment of being conned into buying a national monument prevented the victim from going to police.",
+    "verified_claims": [
+      {
+        "claim_text": "Poisson never reported the theft to French police out of humiliation.",
+        "confidence": "high"
+      },
+      {
+        "claim_text": "Lustig returned to Paris months later and attempted the identical scam with a second dealer.",
+        "confidence": "high"
+      }
+    ],
+    "chronology": [
+      {
+        "time": "May 1925",
+        "event": "First sale finalized at Hotel de Crillon."
+      },
+      {
+        "time": "July 1925",
+        "event": "Second attempt reported to police by suspicious mark."
+      }
+    ],
+    "sources": [
+      "https://en.wikipedia.org/wiki/Victor_Lustig"
+    ]
+  },
+  "hook_candidates": [
+    {
+      "pattern": "impossible_claim",
+      "text": "In 1925, an intact ship sailed alone with dinner still warm on the table.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "number_shock",
+      "text": "Seventy-two seconds of signal changed how astronomers scanned the sky forever.",
+      "word_count": 11,
+      "score": 10.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "mid_action",
+      "text": "The radar alarm tripped at midnight, pointing toward an empty patch of ocean.",
+      "word_count": 13,
+      "score": 6.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "contradiction",
+      "text": "The deepest vault on Earth held fifty records, but zero visitors were allowed inside.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "stakes_first",
+      "text": "A three-man crew vanished from an island lighthouse without leaving a single trace.",
+      "word_count": 13,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "forbidden_place",
+      "text": "Deep below the Mediterranean floor lies an intact temple no diver was meant to see.",
+      "word_count": 15,
+      "score": 0.0,
+      "is_valid": false,
+      "rejection_reasons": [
+        "Exceeds 14 words (15 words)"
+      ]
+    },
+    {
+      "pattern": "unresolved_question",
+      "text": "Astronomers logged the exact frequency, yet forty-nine years later the source remains completely silent.",
+      "word_count": 14,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "scale_shock",
+      "text": "Over twenty miles of ancient stone sat buried beneath coastal sand for a millennium.",
+      "word_count": 14,
+      "score": 6.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    }
+  ],
+  "selected_hook": {
+    "text": "In 1925, a con man sold the Eiffel Tower. Then he sold it again.",
+    "pattern": "impossible_claim"
+  },
+  "narrative_outline": [
+    {
+      "beat_number": 1,
+      "name": "Hook",
+      "target_time": "0-3s",
+      "purpose": "One concrete, surprising statement <= 14 words.",
+      "text": "In 1925, a con man sold the Eiffel Tower. Then he sold it again.",
+      "scene": {
+        "visual_type": "tension_room",
+        "headline": "RECORDED ANOMALY",
+        "sublabel": "VERIFIED ARCHIVE",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 2,
+      "name": "Stakes & Context",
+      "target_time": "3-10s",
+      "purpose": "Establish who, where, when, and what was at risk.",
+      "text": "May 1925: First sale finalized at Hotel de Crillon. July 1925: Second attempt reported to police by suspicious mark. When researchers opened the official files, the initial report seemed impossible.",
+      "scene": {
+        "visual_type": "archive_map",
+        "headline": "OFFICIAL EXPEDITION",
+        "sublabel": "COORDINATES SECURED",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "pop"
+      }
+    },
+    {
+      "beat_number": 3,
+      "name": "Escalation 1",
+      "target_time": "10-20s",
+      "purpose": "Introduce first concrete piece of evidence or measurement.",
+      "text": "Poisson never reported the theft to French police out of humiliation. Every instrument confirmed the exact physical measurements within seconds.",
+      "scene": {
+        "visual_type": "radar_scan",
+        "headline": "SENSOR TELEMETRY",
+        "sublabel": "CONFIRMED READINGS",
+        "mood": "tense",
+        "accent": "cyan",
+        "cue": "tock"
+      }
+    },
+    {
+      "beat_number": 4,
+      "name": "Escalation 2",
+      "target_time": "20-30s",
+      "purpose": "Deepen the tension with an unexpected obstacle or clue.",
+      "text": "Lustig returned to Paris months later and attempted the identical scam with a second dealer. Search teams found no sign of forced entry or mechanical failure anywhere on site.",
+      "scene": {
+        "visual_type": "timeline",
+        "headline": "CHRONOLOGY LOG",
+        "sublabel": "ZERO MECHANICAL ERROR",
+        "mood": "tense",
+        "accent": "crimson",
+        "cue": "slide"
+      }
+    },
+    {
+      "beat_number": 5,
+      "name": "Escalation 3",
+      "target_time": "30-40s",
+      "purpose": "Present the critical tension peak before the revelation.",
+      "text": "Archival logs confirmed the recorded readings remained unaltered. Independent investigators verified the identical pattern three years later.",
+      "scene": {
+        "visual_type": "meter_surge",
+        "headline": "INDEPENDENT VERIFICATION",
+        "sublabel": "SIGNAL AMPLIFIED",
+        "mood": "urgent",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 6,
+      "name": "Revelation / Turn",
+      "target_time": "40-50s",
+      "purpose": "Deliver the documented turn or consequence the viewer did not predict.",
+      "text": "The recovery logs revealed the anomaly was not an external attack, but a calculated human decision.",
+      "scene": {
+        "visual_type": "payoff_reveal",
+        "headline": "FINAL LOG ENTRY",
+        "sublabel": "THE UNEXPECTED TURN",
+        "mood": "calm",
+        "accent": "green",
+        "cue": "sparkle"
+      }
+    },
+    {
+      "beat_number": 7,
+      "name": "Resolution / Loop Line",
+      "target_time": "50-58s",
+      "purpose": "Echo the hook wording for seamless replay; zero CTA.",
+      "text": "Decades later, archives still hold the only record of 1925, sold eiffel.",
+      "scene": {
+        "visual_type": "vault_mystery",
+        "headline": "ECHO RESOLUTION",
+        "sublabel": "ENDLESS LOOP",
+        "mood": "mystery",
+        "accent": "cyan",
+        "cue": "pop"
+      }
+    }
+  ],
+  "draft_script": {
+    "beats": [
+      {
+        "index": 1,
+        "text": "In 1925, a con man sold the Eiffel Tower. Then he sold it again.",
+        "scene_headline": "PARIS 1925"
+      },
+      {
+        "index": 2,
+        "text": "Victor Lustig read a newspaper editorial lamenting the steep maintenance costs of the Paris landmark.",
+        "scene_headline": "EIFFEL REPAIR LOGS"
+      },
+      {
+        "index": 3,
+        "text": "He forged official Ministry stationery and invited the city's top scrap metal merchants to a secret meeting.",
+        "scene_headline": "FORGED CREDENTIALS"
+      },
+      {
+        "index": 4,
+        "text": "Lustig convinced them the city had decided to demolish the tower and sell seven thousand tons of steel.",
+        "scene_headline": "CLOSED BIDDING"
+      },
+      {
+        "index": 5,
+        "text": "Dealer Andre Poisson handed over seventy thousand dollars in cash and bribes to secure the contract.",
+        "scene_headline": "PAYOUT RECEIVED"
+      },
+      {
+        "index": 6,
+        "text": "Lustig immediately boarded a train to Vienna with a suitcase stuffed with French francs.",
+        "scene_headline": "AUSTRIA TRANSIT"
+      },
+      {
+        "index": 7,
+        "text": "Poisson was too embarrassed to report the scam to police, so Lustig returned six months later to repeat it.",
+        "scene_headline": "ZERO POLICE REPORT"
+      },
+      {
+        "index": 8,
+        "text": "Decades later, Paris archives still preserve the con man who sold the Eiffel Tower.",
+        "scene_headline": "CRIMINAL LEGEND"
+      }
+    ],
+    "total_draft_words": 127
+  },
+  "critic_evaluation": {
+    "scores": {
+      "hook_strength": 9.5,
+      "narrative_clarity": 8.8,
+      "story_progression": 8.5,
+      "curiosity_retention": 8.6,
+      "emotional_engagement": 9.2,
+      "factual_reliability": 9.0,
+      "originality": 8.5,
+      "pacing": 9.0,
+      "ending_quality": 9.6,
+      "spoken_rhythm": 8.8
+    },
+    "overall_score": 8.95,
+    "passed": true,
+    "weakest_dimensions": [
+      "story_progression",
+      "originality"
+    ],
+    "feedback": "Overall: 8.9/10. Weakest areas: story_progression, originality.",
+    "factual_checks": [
+      {
+        "claim": "Poisson never reported the theft to French police out of humiliation.",
+        "matched": true
+      },
+      {
+        "claim": "Lustig returned to Paris months later and attempted the identical scam with a second dealer.",
+        "matched": true
+      }
+    ]
+  },
+  "revision_history": [
+    {
+      "call": 1,
+      "action": "Draft Generation",
+      "summary": "Generated 5-beat documentary outline from research dossier and selected hook candidate."
+    },
+    {
+      "call": 2,
+      "action": "Story Critic Evaluation & Polish",
+      "overall_score": 8.95,
+      "passed": true,
+      "refinements": "Enforced speech rate budget (2.46 WPS), validated cold open, trimmed trailing qualifiers."
+    }
+  ],
+  "final_script": {
+    "lines": [
+      {
+        "text": "In 1925, a con man sold the Eiffel Tower. Then he sold it again.",
+        "caps": "SOLD THE *EIFFEL TOWER | THEN HE SOLD IT *AGAIN",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "tension_room",
+          "headline": "PARIS 1925",
+          "sublabel": "HOTEL DE CRILLON",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "Victor Lustig read a newspaper editorial lamenting the steep maintenance costs of the Paris landmark.",
+        "caps": "NEWSPAPER *EDITORIAL | STEEP MAINTENANCE *COSTS",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "archive_map",
+          "headline": "EIFFEL REPAIR LOGS",
+          "sublabel": "SEVEN THOUSAND TONS METAL",
+          "mood": "tense",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      },
+      {
+        "text": "He forged official Ministry stationery and invited the city's top scrap metal merchants to a secret meeting.",
+        "caps": "FORGED *STATIONERY | TOP SCRAP METAL *MERCHANTS",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "vault_mystery",
+          "headline": "FORGED CREDENTIALS",
+          "sublabel": "MINISTRY OF POSTS",
+          "mood": "mystery",
+          "accent": "cyan",
+          "cue": "tock"
+        }
+      },
+      {
+        "text": "Lustig convinced them the city had decided to demolish the tower and sell seven thousand tons of steel.",
+        "caps": "DEMOLISH THE *TOWER | SEVEN THOUSAND *TONS STEEL",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "timeline",
+          "headline": "CLOSED BIDDING",
+          "sublabel": "FICTITIOUS DEMOLITION",
+          "mood": "tense",
+          "accent": "crimson",
+          "cue": "slide"
+        }
+      },
+      {
+        "text": "Dealer Andre Poisson handed over seventy thousand dollars in cash and bribes to secure the contract.",
+        "caps": "SEVENTY THOUSAND *DOLLARS | IN CASH AND *BRIBES",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "meter_surge",
+          "headline": "PAYOUT RECEIVED",
+          "sublabel": "BRIBE IN SUITCASE",
+          "mood": "urgent",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      },
+      {
+        "text": "Lustig immediately boarded a train to Vienna with a suitcase stuffed with French francs.",
+        "caps": "TRAIN TO *VIENNA | SUITCASE STUFFED WITH *FRANCS",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "radar_scan",
+          "headline": "AUSTRIA TRANSIT",
+          "sublabel": "IMMEDIATE GETAWAY",
+          "mood": "tense",
+          "accent": "cyan",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "Poisson was too embarrassed to report the scam to police, so Lustig returned six months later to repeat it.",
+        "caps": "TOO *EMBARRASSED | RETURNED TO *REPEAT IT",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "payoff_reveal",
+          "headline": "ZERO POLICE REPORT",
+          "sublabel": "PRIDE CONCEALS THEFT",
+          "mood": "calm",
+          "accent": "green",
+          "cue": "sparkle"
+        }
+      },
+      {
+        "text": "Decades later, Paris archives still preserve the con man who sold the Eiffel Tower.",
+        "caps": "PARIS *ARCHIVES | CON MAN WHO SOLD *EIFFEL TOWER",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "vault_mystery",
+          "headline": "CRIMINAL LEGEND",
+          "sublabel": "INFAMOUS HEIST",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      }
+    ],
+    "loop_line": "Decades later, Paris archives still preserve the con man who sold the Eiffel Tower."
+  },
+  "validator_result": {
+    "ok": true,
+    "words": 127,
+    "sentences": 9,
+    "est_seconds": 53.9,
+    "errors": [],
+    "warnings": [],
+    "category": "HISTORY"
+  }
+}

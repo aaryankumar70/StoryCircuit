@@ -18,16 +18,18 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from curiosity_engine.content.editorial_policy import (
+    DISCOVERY_KEYWORD_DENYLIST,
+    is_forbidden_content,
+    normalize_category_name,
+)
+
 logger = logging.getLogger("curiosity_engine.reddit_discovery")
 
 CURATED_SUBREDDITS: List[Dict[str, str]] = [
-    {"subreddit": "UnresolvedMysteries", "category": "Unexplained events", "evidence_type": "unexplained_mystery"},
-    {"subreddit": "AskHistorians", "category": "History", "evidence_type": "historical_incident"},
-    {"subreddit": "todayilearned", "category": "Interesting discoveries", "evidence_type": "documented_fact"},
-    {"subreddit": "Damnthatsinteresting", "category": "Science", "evidence_type": "documented_fact"},
-    {"subreddit": "science", "category": "Science", "evidence_type": "scientific_study"},
-    {"subreddit": "space", "category": "Space", "evidence_type": "scientific_study"},
-    {"subreddit": "psychology", "category": "Psychology", "evidence_type": "scientific_study"},
+    {"subreddit": "UnresolvedMysteries", "category": "MYSTERY", "evidence_type": "unexplained_mystery"},
+    {"subreddit": "AskHistorians", "category": "HISTORY", "evidence_type": "historical_incident"},
+    {"subreddit": "space", "category": "SPACE", "evidence_type": "documented_fact"},
 ]
 
 _USERNAME_PATTERN = re.compile(r"(?:/?u/[A-Za-z0-9_-]+|@[A-Za-z0-9_.-]+)", re.IGNORECASE)
@@ -60,6 +62,14 @@ def is_suitable_reddit_post(post: Dict[str, Any]) -> bool:
     if len(title) < 25 or len(title) > 220:
         return False
     low = title.lower()
+    for denied in DISCOVERY_KEYWORD_DENYLIST:
+        if denied.lower() in low:
+            return False
+
+    is_forbid, _ = is_forbidden_content(title)
+    if is_forbid:
+        return False
+
     blocked_terms = (
         "[meta]",
         "megathread",

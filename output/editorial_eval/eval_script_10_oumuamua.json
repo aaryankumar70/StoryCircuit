@@ -1,0 +1,423 @@
+{
+  "eval_id": "eval_script_10_oumuamua",
+  "topic": "The Interstellar Accelerator Oumuamua",
+  "category": "SPACE",
+  "niche": "space_mysteries",
+  "style": "inside-out",
+  "research_dossier": {
+    "topic": "The Interstellar Accelerator Oumuamua",
+    "category": "SPACE",
+    "niche": "space_mysteries",
+    "core_conflict": "An object from another star accelerated away from the Sun without showing gas jets, dust clouds, or solar wind pressure matching typical comets.",
+    "verified_claims": [
+      {
+        "claim_text": "Hyperbolic orbit velocity proved it originated outside our solar system.",
+        "confidence": "high"
+      },
+      {
+        "claim_text": "Spitzer Space Telescope infrared observations placed tight limits on carbon gas emissions.",
+        "confidence": "high"
+      }
+    ],
+    "chronology": [
+      {
+        "time": "September 2017",
+        "event": "Passed closest to the Sun."
+      },
+      {
+        "time": "October 2017",
+        "event": "Identified as first interstellar asteroid/comet."
+      }
+    ],
+    "sources": [
+      "https://en.wikipedia.org/wiki/%CA%BBOumuamua"
+    ]
+  },
+  "hook_candidates": [
+    {
+      "pattern": "impossible_claim",
+      "text": "In 2017, an intact ship sailed alone with dinner still warm on the table.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "number_shock",
+      "text": "Seventy-two seconds of signal changed how astronomers scanned the sky forever.",
+      "word_count": 11,
+      "score": 10.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "mid_action",
+      "text": "The radar alarm tripped at midnight, pointing toward an empty patch of ocean.",
+      "word_count": 13,
+      "score": 6.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "contradiction",
+      "text": "The deepest vault on Earth held fifty records, but zero visitors were allowed inside.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "stakes_first",
+      "text": "A three-man crew vanished from an island lighthouse without leaving a single trace.",
+      "word_count": 13,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "forbidden_place",
+      "text": "Deep below the Mediterranean floor lies an intact temple no diver was meant to see.",
+      "word_count": 15,
+      "score": 0.0,
+      "is_valid": false,
+      "rejection_reasons": [
+        "Exceeds 14 words (15 words)"
+      ]
+    },
+    {
+      "pattern": "unresolved_question",
+      "text": "Astronomers logged the exact frequency, yet forty-nine years later the source remains completely silent.",
+      "word_count": 14,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "scale_shock",
+      "text": "Over twenty miles of ancient stone sat buried beneath coastal sand for a millennium.",
+      "word_count": 14,
+      "score": 6.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    }
+  ],
+  "selected_hook": {
+    "text": "In 2017, astronomers tracked an interstellar visitor speeding up on its way out.",
+    "pattern": "impossible_claim"
+  },
+  "narrative_outline": [
+    {
+      "beat_number": 1,
+      "name": "Hook",
+      "target_time": "0-3s",
+      "purpose": "One concrete, surprising statement <= 14 words.",
+      "text": "In 2017, astronomers tracked an interstellar visitor speeding up on its way out.",
+      "scene": {
+        "visual_type": "tension_room",
+        "headline": "RECORDED ANOMALY",
+        "sublabel": "VERIFIED ARCHIVE",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 2,
+      "name": "Stakes & Context",
+      "target_time": "3-10s",
+      "purpose": "Establish who, where, when, and what was at risk.",
+      "text": "September 2017: Passed closest to the Sun. October 2017: Identified as first interstellar asteroid/comet. When researchers opened the official files, the initial report seemed impossible.",
+      "scene": {
+        "visual_type": "archive_map",
+        "headline": "OFFICIAL EXPEDITION",
+        "sublabel": "COORDINATES SECURED",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "pop"
+      }
+    },
+    {
+      "beat_number": 3,
+      "name": "Escalation 1",
+      "target_time": "10-20s",
+      "purpose": "Introduce first concrete piece of evidence or measurement.",
+      "text": "Hyperbolic orbit velocity proved it originated outside our solar system. Every instrument confirmed the exact physical measurements within seconds.",
+      "scene": {
+        "visual_type": "radar_scan",
+        "headline": "SENSOR TELEMETRY",
+        "sublabel": "CONFIRMED READINGS",
+        "mood": "tense",
+        "accent": "cyan",
+        "cue": "tock"
+      }
+    },
+    {
+      "beat_number": 4,
+      "name": "Escalation 2",
+      "target_time": "20-30s",
+      "purpose": "Deepen the tension with an unexpected obstacle or clue.",
+      "text": "Spitzer Space Telescope infrared observations placed tight limits on carbon gas emissions. Search teams found no sign of forced entry or mechanical failure anywhere on site.",
+      "scene": {
+        "visual_type": "timeline",
+        "headline": "CHRONOLOGY LOG",
+        "sublabel": "ZERO MECHANICAL ERROR",
+        "mood": "tense",
+        "accent": "crimson",
+        "cue": "slide"
+      }
+    },
+    {
+      "beat_number": 5,
+      "name": "Escalation 3",
+      "target_time": "30-40s",
+      "purpose": "Present the critical tension peak before the revelation.",
+      "text": "Archival logs confirmed the recorded readings remained unaltered. Independent investigators verified the identical pattern three years later.",
+      "scene": {
+        "visual_type": "meter_surge",
+        "headline": "INDEPENDENT VERIFICATION",
+        "sublabel": "SIGNAL AMPLIFIED",
+        "mood": "urgent",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 6,
+      "name": "Revelation / Turn",
+      "target_time": "40-50s",
+      "purpose": "Deliver the documented turn or consequence the viewer did not predict.",
+      "text": "The recovery logs revealed the anomaly was not an external attack, but a calculated human decision.",
+      "scene": {
+        "visual_type": "payoff_reveal",
+        "headline": "FINAL LOG ENTRY",
+        "sublabel": "THE UNEXPECTED TURN",
+        "mood": "calm",
+        "accent": "green",
+        "cue": "sparkle"
+      }
+    },
+    {
+      "beat_number": 7,
+      "name": "Resolution / Loop Line",
+      "target_time": "50-58s",
+      "purpose": "Echo the hook wording for seamless replay; zero CTA.",
+      "text": "Decades later, archives still hold the only record of 2017, astronomers tracked.",
+      "scene": {
+        "visual_type": "vault_mystery",
+        "headline": "ECHO RESOLUTION",
+        "sublabel": "ENDLESS LOOP",
+        "mood": "mystery",
+        "accent": "cyan",
+        "cue": "pop"
+      }
+    }
+  ],
+  "draft_script": {
+    "beats": [
+      {
+        "index": 1,
+        "text": "In 2017, astronomers tracked an interstellar visitor speeding up on its way out.",
+        "scene_headline": "PAN-STARRS HAWAII"
+      },
+      {
+        "index": 2,
+        "text": "Designated Oumuamua, the object entered our solar system at nearly sixty thousand miles per hour.",
+        "scene_headline": "HYPERBOLIC VECTOR"
+      },
+      {
+        "index": 3,
+        "text": "Telescopes showed its brightness swung by a factor of ten, revealing an extreme elongated cigar shape.",
+        "scene_headline": "LIGHT CURVE SWING"
+      },
+      {
+        "index": 4,
+        "text": "As it swung past the Sun and headed into deep space, its trajectory deviated from gravitational laws.",
+        "scene_headline": "NON-GRAVITATIONAL PUSH"
+      },
+      {
+        "index": 5,
+        "text": "Comets often accelerate when ice vaporizes into tails, but sensitive cameras detected zero dust or gas.",
+        "scene_headline": "NO COMET TAIL"
+      },
+      {
+        "index": 6,
+        "text": "Harvard astrophysicists suggested solar radiation pressure might be pushing an artificial solar sail.",
+        "scene_headline": "RADIATION PRESSURE"
+      },
+      {
+        "index": 7,
+        "text": "Other researchers proposed trapped hydrogen gas outgassing silently propelled the rocky stranger without visible dust.",
+        "scene_headline": "HYDROGEN OUTGASSING"
+      },
+      {
+        "index": 8,
+        "text": "Years later, deep space probes still look back at that interstellar visitor speeding away.",
+        "scene_headline": "INTERSTELLAR DEPARTURE"
+      }
+    ],
+    "total_draft_words": 119
+  },
+  "critic_evaluation": {
+    "scores": {
+      "hook_strength": 9.5,
+      "narrative_clarity": 8.8,
+      "story_progression": 8.5,
+      "curiosity_retention": 8.6,
+      "emotional_engagement": 9.2,
+      "factual_reliability": 8.2,
+      "originality": 8.5,
+      "pacing": 9.0,
+      "ending_quality": 9.6,
+      "spoken_rhythm": 8.8
+    },
+    "overall_score": 8.87,
+    "passed": true,
+    "weakest_dimensions": [
+      "factual_reliability",
+      "story_progression"
+    ],
+    "feedback": "Overall: 8.9/10. Weakest areas: factual_reliability, story_progression.",
+    "factual_checks": [
+      {
+        "claim": "Hyperbolic orbit velocity proved it originated outside our solar system.",
+        "matched": true
+      },
+      {
+        "claim": "Spitzer Space Telescope infrared observations placed tight limits on carbon gas emissions.",
+        "matched": false
+      }
+    ]
+  },
+  "revision_history": [
+    {
+      "call": 1,
+      "action": "Draft Generation",
+      "summary": "Generated 5-beat documentary outline from research dossier and selected hook candidate."
+    },
+    {
+      "call": 2,
+      "action": "Story Critic Evaluation & Polish",
+      "overall_score": 8.87,
+      "passed": true,
+      "refinements": "Enforced speech rate budget (2.46 WPS), validated cold open, trimmed trailing qualifiers."
+    }
+  ],
+  "final_script": {
+    "lines": [
+      {
+        "text": "In 2017, astronomers tracked an interstellar visitor speeding up on its way out.",
+        "caps": "ASTRONOMERS *TRACKED | INTERSTELLAR VISITOR *SPEEDING UP",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "tension_room",
+          "headline": "PAN-STARRS HAWAII",
+          "sublabel": "OCTOBER 2017",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "Designated Oumuamua, the object entered our solar system at nearly sixty thousand miles per hour.",
+        "caps": "DESIGNATED *OUMUAMUA | SIXTY THOUSAND *MILES PER HOUR",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "archive_map",
+          "headline": "HYPERBOLIC VECTOR",
+          "sublabel": "INTERSTELLAR TRAJECTORY",
+          "mood": "tense",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      },
+      {
+        "text": "Telescopes showed its brightness swung by a factor of ten, revealing an extreme elongated cigar shape.",
+        "caps": "BRIGHTNESS SWUNG BY *TEN | EXTREME ELONGATED *SHAPE",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "timeline",
+          "headline": "LIGHT CURVE SWING",
+          "sublabel": "TUMBLING ROTATION",
+          "mood": "wonder",
+          "accent": "crimson",
+          "cue": "tock"
+        }
+      },
+      {
+        "text": "As it swung past the Sun and headed into deep space, its trajectory deviated from gravitational laws.",
+        "caps": "SWUNG PAST THE *SUN | DEVIATED FROM *GRAVITATIONAL LAWS",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "meter_surge",
+          "headline": "NON-GRAVITATIONAL PUSH",
+          "sublabel": "ANOMALOUS ACCELERATION",
+          "mood": "urgent",
+          "accent": "yellow",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "Comets often accelerate when ice vaporizes into tails, but sensitive cameras detected zero dust or gas.",
+        "caps": "ZERO DUST OR *GAS | SENSITIVE CAMERAS *DETECTED",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "split_compare",
+          "headline": "NO COMET TAIL",
+          "sublabel": "CLEAN OUTFLOW ABSENT",
+          "mood": "mystery",
+          "accent": "cyan",
+          "cue": "slide"
+        }
+      },
+      {
+        "text": "Harvard astrophysicists suggested solar radiation pressure might be pushing an artificial solar sail.",
+        "caps": "HARVARD *ASTROPHYSICISTS | ARTIFICIAL SOLAR *SAIL",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "radar_scan",
+          "headline": "RADIATION PRESSURE",
+          "sublabel": "SOLAR SAIL HYPOTHESIS",
+          "mood": "tense",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      },
+      {
+        "text": "Other researchers proposed trapped hydrogen gas outgassing silently propelled the rocky stranger without visible dust.",
+        "caps": "TRAPPED HYDROGEN *GAS | SILENTLY PROPELLED ROCKY *STRANGER",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "payoff_reveal",
+          "headline": "HYDROGEN OUTGASSING",
+          "sublabel": "STEALTH PROPULSION",
+          "mood": "calm",
+          "accent": "green",
+          "cue": "sparkle"
+        }
+      },
+      {
+        "text": "Years later, deep space probes still look back at that interstellar visitor speeding away.",
+        "caps": "DEEP SPACE PROBES STILL *LOOK BACK | INTERSTELLAR VISITOR *SPEEDING AWAY",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "vault_mystery",
+          "headline": "INTERSTELLAR DEPARTURE",
+          "sublabel": "BEYOND REACH",
+          "mood": "mystery",
+          "accent": "cyan",
+          "cue": "pop"
+        }
+      }
+    ],
+    "loop_line": "Years later, deep space probes still look back at that interstellar visitor speeding away."
+  },
+  "validator_result": {
+    "ok": true,
+    "words": 119,
+    "sentences": 8,
+    "est_seconds": 50.4,
+    "errors": [],
+    "warnings": [],
+    "category": "SPACE"
+  }
+}

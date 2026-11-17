@@ -47,10 +47,15 @@ MIN_DURATION_SEC = 20.0
 MAX_DURATION_SEC = 60.0
 TARGET_DURATION_MIN_SEC = 25.0
 TARGET_DURATION_MAX_SEC = 45.0
+VIRAL_TARGET_DURATION_MIN_SEC = 42.0
+VIRAL_TARGET_DURATION_MAX_SEC = 58.0
+CALIBRATED_WORDS_PER_SECOND = 2.46
 MIN_WORD_COUNT = 48
-MAX_WORD_COUNT = 145
+MAX_WORD_COUNT = 148
 TARGET_WORD_COUNT_MIN = 62
 TARGET_WORD_COUNT_MAX = 115
+VIRAL_WORD_COUNT_MIN = 103
+VIRAL_WORD_COUNT_MAX = 140
 MAX_QC_RECOVERY_ATTEMPTS = 2
 TARGET_FPS = 30
 VIDEO_WIDTH = 1080
@@ -67,40 +72,24 @@ SAFE_ZONE_TOP = 250
 SAFE_ZONE_BOTTOM = 1600
 CAPTION_ZONE_Y = 1400
 
-# Content Pillars
+# Content Pillars (CurioLoop Editorial Policy: Mystery, History, Space)
 CONTENT_PILLARS = [
-    "Science",
-    "Space",
-    "History",
     "Mysteries",
-    "Technology",
-    "AI",
-    "Psychology",
-    "Biology",
-    "Geography",
-    "Nature",
-    "Interesting discoveries",
-    "Survival",
-    "Human behavior",
-    "Unexplained events",
+    "History",
+    "Space",
 ]
 
 # Visual Style Mappings
 STYLE_MAPPINGS = {
-    "Biology": "inside-out",
-    "Psychology": "inside-out",
-    "Human behavior": "inside-out",
-    "Science": "inside-out",
-    "Nature": "inside-out",
-    "History": "paper-atlas",
-    "Geography": "paper-atlas",
-    "Interesting discoveries": "paper-atlas",
+    "MYSTERY": "paper-atlas",
+    "HISTORY": "paper-atlas",
+    "SPACE": "inside-out",
     "Mysteries": "paper-atlas",
+    "History": "paper-atlas",
+    "Space": "inside-out",
     "Unexplained events": "paper-atlas",
-    "Technology": "stick-story",
-    "AI": "stick-story",
-    "Space": "stick-story",
     "Survival": "stick-story",
+    "Interesting discoveries": "paper-atlas",
 }
 
 # Voice Configuration

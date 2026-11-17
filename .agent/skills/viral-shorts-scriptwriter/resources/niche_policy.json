@@ -1,0 +1,41 @@
+{
+  "_comment": "Edit freely. 'strong_deny' terms cause a validation ERROR; 'soft_deny' terms cause a WARNING (they have innocent uses, e.g. 'prison cell').",
+  "allowed_niches": [
+    "strange_history",
+    "cons_and_heists",
+    "mysteries_non_graphic",
+    "business_and_money",
+    "internet_and_pop_culture",
+    "places_and_geography",
+    "human_interest_stories",
+    "workplace_and_relationship_stories",
+    "mythology_and_folklore",
+    "survival_and_disaster_human_stories"
+  ],
+  "denied_niches": [
+    "biology", "anatomy", "medicine_and_health_facts", "neuroscience",
+    "animals_and_nature_facts", "chemistry", "physics", "space_and_astronomy",
+    "general_science_facts", "body_facts"
+  ],
+  "strong_deny": [
+    "biology", "biological", "biologist", "anatomy", "dna", "rna", "genome", "genetic",
+    "gene", "organism", "microbe", "bacteria", "virus", "enzyme", "protein",
+    "evolution", "evolutionary", "neuron", "neuroscience", "neuroscientist",
+    "chemistry", "chemical reaction", "molecule", "physics", "physicist",
+    "quantum", "astronomy", "astronomer", "galaxy", "black hole", "neutron star",
+    "science", "scientific", "scientist", "researchers found", "a study found",
+    "studies show", "according to science", "science says"
+  ],
+  "soft_deny": [
+    "brain", "cells", "species", "atom", "atoms", "planet", "universe",
+    "hormone", "immune", "organ", "muscle", "bones", "heart rate", "energy"
+  ],
+  "discovery_keyword_denylist": [
+    "science", "biology", "neuroscience", "medicine", "health", "anatomy",
+    "genetics", "chemistry", "physics", "astronomy", "space", "nature", "animals", "psychology facts"
+  ],
+  "reddit_subreddits_to_remove_if_present": [
+    "science", "askscience", "biology", "space", "astronomy",
+    "nature", "natureismetal", "neuroscience", "medicine"
+  ]
+}

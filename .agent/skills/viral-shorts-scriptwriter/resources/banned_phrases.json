@@ -1,0 +1,21 @@
+{
+  "_comment": "AI-slop and weak-narration phrases. Matching is case-insensitive.",
+  "banned_openers": [
+    "in this video", "today we", "today i", "welcome back", "have you ever wondered",
+    "did you know", "let's talk about", "let's dive", "get ready", "imagine a world",
+    "picture this", "what if i told you", "hey guys", "so,"
+  ],
+  "banned_phrases": [
+    "delve", "tapestry", "in a world where", "little did", "here's the kicker",
+    "but here's the thing", "here's the thing", "game-changer", "game changer",
+    "let that sink in", "buckle up", "stay tuned", "like and subscribe", "subscribe",
+    "follow for more", "follow for part", "without further ado", "mind-blowing",
+    "mind blowing", "you won't believe", "shocking truth", "at the end of the day",
+    "it's important to note", "in conclusion", "testament to", "navigate the",
+    "the realm of", "intricate", "unveil", "fascinating", "incredible story",
+    "rabbit hole", "plot twist", "but wait", "spoiler alert", "changed everything forever",
+    "the rest is history", "you might be wondering", "it turns out that",
+    "little did they know", "chilling reminder", "serves as a reminder", "a stark reminder"
+  ],
+  "weak_ctas": ["comment below", "let me know in the comments", "what do you think", "share this", "smash"]
+}

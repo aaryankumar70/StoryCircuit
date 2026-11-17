@@ -1,0 +1,431 @@
+{
+  "eval_id": "eval_script_02_voynich_manuscript",
+  "topic": "The Unbreakable Voynich Manuscript",
+  "category": "MYSTERY",
+  "niche": "unsolved_mysteries",
+  "style": "paper-atlas",
+  "research_dossier": {
+    "topic": "The Unbreakable Voynich Manuscript",
+    "category": "MYSTERY",
+    "niche": "unsolved_mysteries",
+    "core_conflict": "A medieval codex displays genuine mathematical language patterns but cannot be translated by modern algorithms.",
+    "verified_claims": [
+      {
+        "claim_text": "Parchment carbon dated to the early fifteenth century.",
+        "confidence": "high"
+      },
+      {
+        "claim_text": "Features drawings of unidentified plants, astronomical diagrams, and bathing figures.",
+        "confidence": "high"
+      },
+      {
+        "claim_text": "World War Two codebreakers broke Enigma but failed on this text.",
+        "confidence": "high"
+      }
+    ],
+    "chronology": [
+      {
+        "time": "1404-1438",
+        "event": "Parchment produced in Central Europe."
+      },
+      {
+        "time": "1912",
+        "event": "Wilfrid Voynich acquired the codex in Italy."
+      }
+    ],
+    "sources": [
+      "https://en.wikipedia.org/wiki/Voynich_manuscript"
+    ]
+  },
+  "hook_candidates": [
+    {
+      "pattern": "impossible_claim",
+      "text": "In 1404, an intact ship sailed alone with dinner still warm on the table.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "number_shock",
+      "text": "Seventy-two seconds of signal changed how astronomers scanned the sky forever.",
+      "word_count": 11,
+      "score": 10.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "mid_action",
+      "text": "The radar alarm tripped at midnight, pointing toward an empty patch of ocean.",
+      "word_count": 13,
+      "score": 6.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "contradiction",
+      "text": "The deepest vault on Earth held fifty records, but zero visitors were allowed inside.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "stakes_first",
+      "text": "A three-man crew vanished from an island lighthouse without leaving a single trace.",
+      "word_count": 13,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "forbidden_place",
+      "text": "Deep below the Mediterranean floor lies an intact temple no diver was meant to see.",
+      "word_count": 15,
+      "score": 0.0,
+      "is_valid": false,
+      "rejection_reasons": [
+        "Exceeds 14 words (15 words)"
+      ]
+    },
+    {
+      "pattern": "unresolved_question",
+      "text": "Astronomers logged the exact frequency, yet forty-nine years later the source remains completely silent.",
+      "word_count": 14,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "scale_shock",
+      "text": "Over twenty miles of ancient stone sat buried beneath coastal sand for a millennium.",
+      "word_count": 14,
+      "score": 6.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    }
+  ],
+  "selected_hook": {
+    "text": "In 1912, an antique book dealer bought a manuscript written in an impossible alphabet.",
+    "pattern": "forbidden_place"
+  },
+  "narrative_outline": [
+    {
+      "beat_number": 1,
+      "name": "Hook",
+      "target_time": "0-3s",
+      "purpose": "One concrete, surprising statement <= 14 words.",
+      "text": "In 1912, an antique book dealer bought a manuscript written in an impossible alphabet.",
+      "scene": {
+        "visual_type": "tension_room",
+        "headline": "RECORDED ANOMALY",
+        "sublabel": "VERIFIED ARCHIVE",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 2,
+      "name": "Stakes & Context",
+      "target_time": "3-10s",
+      "purpose": "Establish who, where, when, and what was at risk.",
+      "text": "1404-1438: Parchment produced in Central Europe. 1912: Wilfrid Voynich acquired the codex in Italy. When researchers opened the official files, the initial report seemed impossible.",
+      "scene": {
+        "visual_type": "archive_map",
+        "headline": "OFFICIAL EXPEDITION",
+        "sublabel": "COORDINATES SECURED",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "pop"
+      }
+    },
+    {
+      "beat_number": 3,
+      "name": "Escalation 1",
+      "target_time": "10-20s",
+      "purpose": "Introduce first concrete piece of evidence or measurement.",
+      "text": "Parchment carbon dated to the early fifteenth century. Every instrument confirmed the exact physical measurements within seconds.",
+      "scene": {
+        "visual_type": "radar_scan",
+        "headline": "SENSOR TELEMETRY",
+        "sublabel": "CONFIRMED READINGS",
+        "mood": "tense",
+        "accent": "cyan",
+        "cue": "tock"
+      }
+    },
+    {
+      "beat_number": 4,
+      "name": "Escalation 2",
+      "target_time": "20-30s",
+      "purpose": "Deepen the tension with an unexpected obstacle or clue.",
+      "text": "Features drawings of unidentified plants, astronomical diagrams, and bathing figures. Search teams found no sign of forced entry or mechanical failure anywhere on site.",
+      "scene": {
+        "visual_type": "timeline",
+        "headline": "CHRONOLOGY LOG",
+        "sublabel": "ZERO MECHANICAL ERROR",
+        "mood": "tense",
+        "accent": "crimson",
+        "cue": "slide"
+      }
+    },
+    {
+      "beat_number": 5,
+      "name": "Escalation 3",
+      "target_time": "30-40s",
+      "purpose": "Present the critical tension peak before the revelation.",
+      "text": "World War Two codebreakers broke Enigma but failed on this text. Independent investigators verified the identical pattern three years later.",
+      "scene": {
+        "visual_type": "meter_surge",
+        "headline": "INDEPENDENT VERIFICATION",
+        "sublabel": "SIGNAL AMPLIFIED",
+        "mood": "urgent",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 6,
+      "name": "Revelation / Turn",
+      "target_time": "40-50s",
+      "purpose": "Deliver the documented turn or consequence the viewer did not predict.",
+      "text": "The recovery logs revealed the anomaly was not an external attack, but a calculated human decision.",
+      "scene": {
+        "visual_type": "payoff_reveal",
+        "headline": "FINAL LOG ENTRY",
+        "sublabel": "THE UNEXPECTED TURN",
+        "mood": "calm",
+        "accent": "green",
+        "cue": "sparkle"
+      }
+    },
+    {
+      "beat_number": 7,
+      "name": "Resolution / Loop Line",
+      "target_time": "50-58s",
+      "purpose": "Echo the hook wording for seamless replay; zero CTA.",
+      "text": "Decades later, archives still hold the only record of 1912, antique book.",
+      "scene": {
+        "visual_type": "vault_mystery",
+        "headline": "ECHO RESOLUTION",
+        "sublabel": "ENDLESS LOOP",
+        "mood": "mystery",
+        "accent": "cyan",
+        "cue": "pop"
+      }
+    }
+  ],
+  "draft_script": {
+    "beats": [
+      {
+        "index": 1,
+        "text": "In 1912, an antique book dealer bought a manuscript written in an impossible alphabet.",
+        "scene_headline": "VILLA MONDRAGONE"
+      },
+      {
+        "index": 2,
+        "text": "Its two hundred and forty pages feature strange botanical illustrations of plants that don't exist.",
+        "scene_headline": "UNKNOWN FLORA"
+      },
+      {
+        "index": 3,
+        "text": "Radiocarbon dating at the University of Arizona confirmed the calfskin parchment was made in the fourteen hundreds.",
+        "scene_headline": "CARBON-14 DATING"
+      },
+      {
+        "index": 4,
+        "text": "During World War Two, the legendary cryptanalysts who cracked Enigma turned their attention to the cipher.",
+        "scene_headline": "BLETCHLEY PARK ATTACK"
+      },
+      {
+        "index": 5,
+        "text": "They failed completely to decode a single sentence.",
+        "scene_headline": "ZERO PLAINTEXT"
+      },
+      {
+        "index": 6,
+        "text": "Statistical tests prove the words follow natural language laws, ruling out random gibberish.",
+        "scene_headline": "ZIPF'S LAW CONFIRMED"
+      },
+      {
+        "index": 7,
+        "text": "The manuscript sits locked inside Yale University's rare book vault.",
+        "scene_headline": "BEINECKE LIBRARY"
+      },
+      {
+        "index": 8,
+        "text": "Centuries later, linguistics supercomputers still cannot translate that impossible alphabet.",
+        "scene_headline": "UNBROKEN RECORD"
+      }
+    ],
+    "total_draft_words": 103
+  },
+  "critic_evaluation": {
+    "scores": {
+      "hook_strength": 9.5,
+      "narrative_clarity": 8.8,
+      "story_progression": 6.5,
+      "curiosity_retention": 9.4,
+      "emotional_engagement": 8.4,
+      "factual_reliability": 8.2,
+      "originality": 8.5,
+      "pacing": 9.0,
+      "ending_quality": 9.6,
+      "spoken_rhythm": 8.8
+    },
+    "overall_score": 8.67,
+    "passed": true,
+    "weakest_dimensions": [
+      "story_progression",
+      "factual_reliability"
+    ],
+    "feedback": "Overall: 8.7/10. Weakest areas: story_progression, factual_reliability.",
+    "factual_checks": [
+      {
+        "claim": "Parchment carbon dated to the early fifteenth century.",
+        "matched": false
+      },
+      {
+        "claim": "Features drawings of unidentified plants, astronomical diagrams, and bathing figures.",
+        "matched": false
+      },
+      {
+        "claim": "World War Two codebreakers broke Enigma but failed on this text.",
+        "matched": true
+      }
+    ]
+  },
+  "revision_history": [
+    {
+      "call": 1,
+      "action": "Draft Generation",
+      "summary": "Generated 5-beat documentary outline from research dossier and selected hook candidate."
+    },
+    {
+      "call": 2,
+      "action": "Story Critic Evaluation & Polish",
+      "overall_score": 8.67,
+      "passed": true,
+      "refinements": "Enforced speech rate budget (2.46 WPS), validated cold open, trimmed trailing qualifiers."
+    }
+  ],
+  "final_script": {
+    "lines": [
+      {
+        "text": "In 1912, an antique book dealer bought a manuscript written in an impossible alphabet.",
+        "caps": "ANTIQUE BOOK *DEALER | WRITTEN IN *IMPOSSIBLE ALPHABET",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "tension_room",
+          "headline": "VILLA MONDRAGONE",
+          "sublabel": "ITALY 1912",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "Its two hundred and forty pages feature strange botanical illustrations of plants that don't exist.",
+        "caps": "BOTANICAL *ILLUSTRATIONS | PLANTS THAT *DON'T EXIST",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "archive_map",
+          "headline": "UNKNOWN FLORA",
+          "sublabel": "IMPOSSIBLE SPECIES",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      },
+      {
+        "text": "Radiocarbon dating at the University of Arizona confirmed the calfskin parchment was made in the fourteen hundreds.",
+        "caps": "RADIOCARBON *DATING | UNIVERSITY OF *ARIZONA",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "timeline",
+          "headline": "CARBON-14 DATING",
+          "sublabel": "1404 TO 1438 ERA",
+          "mood": "wonder",
+          "accent": "cyan",
+          "cue": "tock"
+        }
+      },
+      {
+        "text": "During World War Two, the legendary cryptanalysts who cracked Enigma turned their attention to the cipher.",
+        "caps": "LEGENDARY *CRYPTANALYSTS | CRACKED *ENIGMA",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "radar_scan",
+          "headline": "BLETCHLEY PARK ATTACK",
+          "sublabel": "MATHEMATICAL CRYPTANALYSIS",
+          "mood": "tense",
+          "accent": "crimson",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "They failed completely to decode a single sentence.",
+        "caps": "FAILED *COMPLETELY | TO DECODE SINGLE *SENTENCE",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "split_compare",
+          "headline": "ZERO PLAINTEXT",
+          "sublabel": "SYNTACTIC ENTROPY",
+          "mood": "tense",
+          "accent": "yellow",
+          "cue": "slide"
+        }
+      },
+      {
+        "text": "Statistical tests prove the words follow natural language laws, ruling out random gibberish.",
+        "caps": "STATISTICAL *TESTS | NATURAL LANGUAGE *LAWS",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "meter_surge",
+          "headline": "ZIPF'S LAW CONFIRMED",
+          "sublabel": "NOT RANDOM NOISE",
+          "mood": "urgent",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      },
+      {
+        "text": "The manuscript sits locked inside Yale University's rare book vault.",
+        "caps": "LOCKED INSIDE *VAULT | YALE *UNIVERSITY",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "payoff_reveal",
+          "headline": "BEINECKE LIBRARY",
+          "sublabel": "VAULT CLASSIFICATION MS 408",
+          "mood": "calm",
+          "accent": "green",
+          "cue": "sparkle"
+        }
+      },
+      {
+        "text": "Centuries later, linguistics supercomputers still cannot translate that impossible alphabet.",
+        "caps": "LINGUISTICS *SUPERCOMPUTERS | TRANSLATE THAT *IMPOSSIBLE ALPHABET",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "vault_mystery",
+          "headline": "UNBROKEN RECORD",
+          "sublabel": "MYSTERY PRESERVED",
+          "mood": "mystery",
+          "accent": "cyan",
+          "cue": "pop"
+        }
+      }
+    ],
+    "loop_line": "Centuries later, linguistics supercomputers still cannot translate that impossible alphabet."
+  },
+  "validator_result": {
+    "ok": true,
+    "words": 103,
+    "sentences": 8,
+    "est_seconds": 43.9,
+    "errors": [],
+    "warnings": [],
+    "category": "HISTORY"
+  }
+}

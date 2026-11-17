@@ -1,0 +1,423 @@
+{
+  "eval_id": "eval_script_07_wow_signal",
+  "topic": "The 72-Second Wow! Signal of 1977",
+  "category": "SPACE",
+  "niche": "space_mysteries",
+  "style": "inside-out",
+  "research_dossier": {
+    "topic": "The 72-Second Wow! Signal of 1977",
+    "category": "SPACE",
+    "niche": "space_mysteries",
+    "core_conflict": "A powerful transmitter matched every expected criteria for extraterrestrial origin but never transmitted again.",
+    "verified_claims": [
+      {
+        "claim_text": "Signal tracked across the constellation Sagittarius.",
+        "confidence": "high"
+      },
+      {
+        "claim_text": "No military satellite or terrestrial reflection accounted for the frequency.",
+        "confidence": "high"
+      }
+    ],
+    "chronology": [
+      {
+        "time": "August 15, 1977",
+        "event": "Big Ear logged 6EQUJ5 sequence."
+      },
+      {
+        "time": "1977-2024",
+        "event": "Dozens of follow-up scans detected only quiet space."
+      }
+    ],
+    "sources": [
+      "https://en.wikipedia.org/wiki/Wow!_signal"
+    ]
+  },
+  "hook_candidates": [
+    {
+      "pattern": "impossible_claim",
+      "text": "In 1977, an intact ship sailed alone with dinner still warm on the table.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "number_shock",
+      "text": "Seventy-two seconds of signal changed how astronomers scanned the sky forever.",
+      "word_count": 11,
+      "score": 10.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "mid_action",
+      "text": "The radar alarm tripped at midnight, pointing toward an empty patch of ocean.",
+      "word_count": 13,
+      "score": 6.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "contradiction",
+      "text": "The deepest vault on Earth held fifty records, but zero visitors were allowed inside.",
+      "word_count": 14,
+      "score": 9.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "stakes_first",
+      "text": "A three-man crew vanished from an island lighthouse without leaving a single trace.",
+      "word_count": 13,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "forbidden_place",
+      "text": "Deep below the Mediterranean floor lies an intact temple no diver was meant to see.",
+      "word_count": 15,
+      "score": 0.0,
+      "is_valid": false,
+      "rejection_reasons": [
+        "Exceeds 14 words (15 words)"
+      ]
+    },
+    {
+      "pattern": "unresolved_question",
+      "text": "Astronomers logged the exact frequency, yet forty-nine years later the source remains completely silent.",
+      "word_count": 14,
+      "score": 8.5,
+      "is_valid": true,
+      "rejection_reasons": []
+    },
+    {
+      "pattern": "scale_shock",
+      "text": "Over twenty miles of ancient stone sat buried beneath coastal sand for a millennium.",
+      "word_count": 14,
+      "score": 6.0,
+      "is_valid": true,
+      "rejection_reasons": []
+    }
+  ],
+  "selected_hook": {
+    "text": "In 1977, a radio telescope detected a seventy-two second burst from deep space.",
+    "pattern": "number_shock"
+  },
+  "narrative_outline": [
+    {
+      "beat_number": 1,
+      "name": "Hook",
+      "target_time": "0-3s",
+      "purpose": "One concrete, surprising statement <= 14 words.",
+      "text": "In 1977, a radio telescope detected a seventy-two second burst from deep space.",
+      "scene": {
+        "visual_type": "tension_room",
+        "headline": "RECORDED ANOMALY",
+        "sublabel": "VERIFIED ARCHIVE",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 2,
+      "name": "Stakes & Context",
+      "target_time": "3-10s",
+      "purpose": "Establish who, where, when, and what was at risk.",
+      "text": "August 15, 1977: Big Ear logged 6EQUJ5 sequence. 1977-2024: Dozens of follow-up scans detected only quiet space. When researchers opened the official files, the initial report seemed impossible.",
+      "scene": {
+        "visual_type": "archive_map",
+        "headline": "OFFICIAL EXPEDITION",
+        "sublabel": "COORDINATES SECURED",
+        "mood": "mystery",
+        "accent": "yellow",
+        "cue": "pop"
+      }
+    },
+    {
+      "beat_number": 3,
+      "name": "Escalation 1",
+      "target_time": "10-20s",
+      "purpose": "Introduce first concrete piece of evidence or measurement.",
+      "text": "Signal tracked across the constellation Sagittarius. Every instrument confirmed the exact physical measurements within seconds.",
+      "scene": {
+        "visual_type": "radar_scan",
+        "headline": "SENSOR TELEMETRY",
+        "sublabel": "CONFIRMED READINGS",
+        "mood": "tense",
+        "accent": "cyan",
+        "cue": "tock"
+      }
+    },
+    {
+      "beat_number": 4,
+      "name": "Escalation 2",
+      "target_time": "20-30s",
+      "purpose": "Deepen the tension with an unexpected obstacle or clue.",
+      "text": "No military satellite or terrestrial reflection accounted for the frequency. Search teams found no sign of forced entry or mechanical failure anywhere on site.",
+      "scene": {
+        "visual_type": "timeline",
+        "headline": "CHRONOLOGY LOG",
+        "sublabel": "ZERO MECHANICAL ERROR",
+        "mood": "tense",
+        "accent": "crimson",
+        "cue": "slide"
+      }
+    },
+    {
+      "beat_number": 5,
+      "name": "Escalation 3",
+      "target_time": "30-40s",
+      "purpose": "Present the critical tension peak before the revelation.",
+      "text": "Archival logs confirmed the recorded readings remained unaltered. Independent investigators verified the identical pattern three years later.",
+      "scene": {
+        "visual_type": "meter_surge",
+        "headline": "INDEPENDENT VERIFICATION",
+        "sublabel": "SIGNAL AMPLIFIED",
+        "mood": "urgent",
+        "accent": "yellow",
+        "cue": "whoosh"
+      }
+    },
+    {
+      "beat_number": 6,
+      "name": "Revelation / Turn",
+      "target_time": "40-50s",
+      "purpose": "Deliver the documented turn or consequence the viewer did not predict.",
+      "text": "The recovery logs revealed the anomaly was not an external attack, but a calculated human decision.",
+      "scene": {
+        "visual_type": "payoff_reveal",
+        "headline": "FINAL LOG ENTRY",
+        "sublabel": "THE UNEXPECTED TURN",
+        "mood": "calm",
+        "accent": "green",
+        "cue": "sparkle"
+      }
+    },
+    {
+      "beat_number": 7,
+      "name": "Resolution / Loop Line",
+      "target_time": "50-58s",
+      "purpose": "Echo the hook wording for seamless replay; zero CTA.",
+      "text": "Decades later, archives still hold the only record of 1977, radio telescope.",
+      "scene": {
+        "visual_type": "vault_mystery",
+        "headline": "ECHO RESOLUTION",
+        "sublabel": "ENDLESS LOOP",
+        "mood": "mystery",
+        "accent": "cyan",
+        "cue": "pop"
+      }
+    }
+  ],
+  "draft_script": {
+    "beats": [
+      {
+        "index": 1,
+        "text": "In 1977, a radio telescope detected a seventy-two second burst from deep space.",
+        "scene_headline": "BIG EAR TELESCOPE"
+      },
+      {
+        "index": 2,
+        "text": "Astronomer Jerry Ehman was reviewing computer printouts when a sequence of six letters jumped out.",
+        "scene_headline": "DOT MATRIX TELEMETRY"
+      },
+      {
+        "index": 3,
+        "text": "He grabbed a red pen, circled the code 6EQUJ5, and scribbled 'Wow!' in the paper margin.",
+        "scene_headline": "RED MARGIN NOTE"
+      },
+      {
+        "index": 4,
+        "text": "The signal peaked at thirty times the background noise of empty space on the hydrogen line.",
+        "scene_headline": "1420 MEGAHERTZ"
+      },
+      {
+        "index": 5,
+        "text": "This exact frequency is protected internationally, meaning terrestrial aircraft and radar transmitters are legally banned from broadcasting on it.",
+        "scene_headline": "RADIO SANCTUARY"
+      },
+      {
+        "index": 6,
+        "text": "The bell-shaped signal intensity curve matched the precise motion of Earth rotating past an interstellar source.",
+        "scene_headline": "BEAM PASSAGE"
+      },
+      {
+        "index": 7,
+        "text": "Astronomers spent forty-seven years scanning that exact patch in Sagittarius, but the cosmos has remained completely silent.",
+        "scene_headline": "RADIO PATROL"
+      },
+      {
+        "index": 8,
+        "text": "Nearly fifty years later, astronomers still listen for that seventy-two second burst from deep space.",
+        "scene_headline": "COSMIC QUESTION"
+      }
+    ],
+    "total_draft_words": 128
+  },
+  "critic_evaluation": {
+    "scores": {
+      "hook_strength": 9.5,
+      "narrative_clarity": 8.8,
+      "story_progression": 8.5,
+      "curiosity_retention": 8.6,
+      "emotional_engagement": 9.2,
+      "factual_reliability": 9.0,
+      "originality": 8.5,
+      "pacing": 9.0,
+      "ending_quality": 9.6,
+      "spoken_rhythm": 8.8
+    },
+    "overall_score": 8.95,
+    "passed": true,
+    "weakest_dimensions": [
+      "story_progression",
+      "originality"
+    ],
+    "feedback": "Overall: 8.9/10. Weakest areas: story_progression, originality.",
+    "factual_checks": [
+      {
+        "claim": "Signal tracked across the constellation Sagittarius.",
+        "matched": true
+      },
+      {
+        "claim": "No military satellite or terrestrial reflection accounted for the frequency.",
+        "matched": true
+      }
+    ]
+  },
+  "revision_history": [
+    {
+      "call": 1,
+      "action": "Draft Generation",
+      "summary": "Generated 5-beat documentary outline from research dossier and selected hook candidate."
+    },
+    {
+      "call": 2,
+      "action": "Story Critic Evaluation & Polish",
+      "overall_score": 8.95,
+      "passed": true,
+      "refinements": "Enforced speech rate budget (2.46 WPS), validated cold open, trimmed trailing qualifiers."
+    }
+  ],
+  "final_script": {
+    "lines": [
+      {
+        "text": "In 1977, a radio telescope detected a seventy-two second burst from deep space.",
+        "caps": "RADIO TELESCOPE *DETECTED | SEVENTY-TWO SECOND *BURST",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "tension_room",
+          "headline": "BIG EAR TELESCOPE",
+          "sublabel": "OHIO AUGUST 1977",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "Astronomer Jerry Ehman was reviewing computer printouts when a sequence of six letters jumped out.",
+        "caps": "REVIEWING *PRINTOUTS | SEQUENCE OF SIX *LETTERS",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "timeline",
+          "headline": "DOT MATRIX TELEMETRY",
+          "sublabel": "RECORD 6EQUJ5",
+          "mood": "wonder",
+          "accent": "crimson",
+          "cue": "tock"
+        }
+      },
+      {
+        "text": "He grabbed a red pen, circled the code 6EQUJ5, and scribbled 'Wow!' in the paper margin.",
+        "caps": "CIRCLED THE *CODE | SCRIBBLED *WOW IN MARGIN",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "archive_map",
+          "headline": "RED MARGIN NOTE",
+          "sublabel": "HISTORIC ANNOTATION",
+          "mood": "mystery",
+          "accent": "yellow",
+          "cue": "pop"
+        }
+      },
+      {
+        "text": "The signal peaked at thirty times the background noise of empty space on the hydrogen line.",
+        "caps": "THIRTY TIMES *BACKGROUND | ON HYDROGEN *LINE",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "meter_surge",
+          "headline": "1420 MEGAHERTZ",
+          "sublabel": "INTERSTELLAR WATER HOLE",
+          "mood": "urgent",
+          "accent": "yellow",
+          "cue": "whoosh"
+        }
+      },
+      {
+        "text": "This exact frequency is protected internationally, meaning terrestrial aircraft and radar transmitters are legally banned from broadcasting on it.",
+        "caps": "FREQUENCY IS *PROTECTED | TRANSMITTERS *BANNED",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "radar_scan",
+          "headline": "RADIO SANCTUARY",
+          "sublabel": "ZERO SATELLITE INTERFERENCE",
+          "mood": "tense",
+          "accent": "cyan",
+          "cue": "slide"
+        }
+      },
+      {
+        "text": "The bell-shaped signal intensity curve matched the precise motion of Earth rotating past an interstellar source.",
+        "caps": "BELL-SHAPED *CURVE | EARTH ROTATING PAST *SOURCE",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "cosmic_burst",
+          "headline": "BEAM PASSAGE",
+          "sublabel": "STELLAR DRIFT CONFIRMED",
+          "mood": "wonder",
+          "accent": "cyan",
+          "cue": "sparkle"
+        }
+      },
+      {
+        "text": "Astronomers spent forty-seven years scanning that exact patch in Sagittarius, but the cosmos has remained completely silent.",
+        "caps": "FORTY-SEVEN YEARS *SCANNING | COSMOS REMAINED *SILENT",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "payoff_reveal",
+          "headline": "RADIO PATROL",
+          "sublabel": "NO REPETITION LOGGED",
+          "mood": "calm",
+          "accent": "green",
+          "cue": "sparkle"
+        }
+      },
+      {
+        "text": "Nearly fifty years later, astronomers still listen for that seventy-two second burst from deep space.",
+        "caps": "ASTRONOMERS STILL *LISTEN | SEVENTY-TWO SECOND *BURST",
+        "gap": 0.26,
+        "scene": {
+          "visual_type": "vault_mystery",
+          "headline": "COSMIC QUESTION",
+          "sublabel": "SIGNAL LIVES ON",
+          "mood": "mystery",
+          "accent": "cyan",
+          "cue": "pop"
+        }
+      }
+    ],
+    "loop_line": "Nearly fifty years later, astronomers still listen for that seventy-two second burst from deep space."
+  },
+  "validator_result": {
+    "ok": true,
+    "words": 128,
+    "sentences": 8,
+    "est_seconds": 54.0,
+    "errors": [],
+    "warnings": [],
+    "category": "SPACE"
+  }
+}

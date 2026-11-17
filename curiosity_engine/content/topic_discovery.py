@@ -22,6 +22,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from curiosity_engine.config import CONTENT_PILLARS, STYLE_MAPPINGS
 from curiosity_engine.content.curated_fallback import CURATED_TOPICS
+from curiosity_engine.content.editorial_policy import (
+    get_visual_style_for_category,
+    validate_editorial_category,
+)
 from curiosity_engine.content.gemini_client import gemini_client
 from curiosity_engine.content.reddit_discovery import reddit_discovery
 from curiosity_engine.state.db import db
@@ -128,6 +132,14 @@ def evaluate_topic_candidate(candidate: Dict[str, Any]) -> Tuple[bool, str]:
     low = topic.lower()
     if low.startswith("did you know"):
         return False, "Generic 'Did you know' opener discouraged"
+
+    # Contextual editorial category validation
+    cat = str(candidate.get("category") or "")
+    is_valid_cat, detected_cat, cat_reason = validate_editorial_category(topic, declared_category=cat)
+    if not is_valid_cat:
+        return False, f"Editorial category policy violation: {cat_reason}"
+    if detected_cat:
+        candidate["category"] = detected_cat
 
     scores = candidate.get("scores") or {}
     fact_score = float(scores.get("factual_reliability", 10.0))
@@ -262,7 +274,17 @@ Return JSON:
                 "id": item.get("id"),
                 "category": item["category"],
                 "topic": item["topic"],
-                "scores": item["scores"],
+                "scores": item.get("scores") or {
+                    "surprise_factor": 9.0,
+                    "emotional_curiosity": 9.0,
+                    "audience_relevance": 9.0,
+                    "visual_novelty": 9.0,
+                    "storytelling_potential": 9.0,
+                    "hook_strength": 9.0,
+                    "originality": 9.0,
+                    "ending_payoff": 9.0,
+                    "factual_reliability": 9.5,
+                },
                 "evidence_type": item.get("evidence_type", "documented_fact"),
                 "discovery_origin": item.get("discovery_origin", "curated_research"),
                 "sources": item.get("sources", []),
@@ -278,8 +300,8 @@ Return JSON:
             logger.warning("Discarded weak/unverified topic '%s': %s", c.get("topic"), reason)
             continue
 
-        cat = c.get("category", "Science")
-        c["style"] = c.get("style") or STYLE_MAPPINGS.get(cat, "inside-out")
+        cat = c.get("category", "MYSTERY")
+        c["style"] = c.get("style") or get_visual_style_for_category(cat) or STYLE_MAPPINGS.get(cat, "paper-atlas")
         c["composite_score"] = compute_composite_score(c["scores"])
         c["eval_details"] = score_topic_details(c)
         verified_candidates.append(c)

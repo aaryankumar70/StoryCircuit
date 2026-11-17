@@ -328,6 +328,12 @@ def produce_single_video(
             record["claims"] = script_data.get("claims", [])
             record["evidence_type"] = script_data.get("evidence_type", record.get("evidence_type"))
             record["discovery_origin"] = script_data.get("discovery_origin", record.get("discovery_origin"))
+            record["niche"] = script_data.get("niche")
+            record["hook"] = script_data.get("hook")
+            record["hook_pattern"] = script_data.get("hook_pattern")
+            record["research_dossier"] = script_data.get("research_dossier")
+            record["critic_evaluation"] = script_data.get("critic_evaluation")
+            record["validator_result"] = script_data.get("validator_result")
             record["production_status"] = "SCRIPTED"
 
         # 2b. Link-Free YouTube Title, Description & Separate API Tags Generation
