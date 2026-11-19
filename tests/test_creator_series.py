@@ -383,3 +383,51 @@ def test_dashboard_series_api(temp_db, monkeypatch):
     res_resume = client.post("/api/series/api_test_series/resume")
     assert res_resume.status_code == 200
     assert res_resume.json()["series_status"] == "ACTIVE"
+
+
+# ── Source Fidelity Tests ──
+
+def test_source_fidelity_validator_passes_on_canonical_episodes():
+    from curiosity_engine.creator_series.source_fidelity import source_fidelity_validator
+    from curiosity_engine.creator_series.generate_pilot_deliverables import episodes_data
+
+    texts = [ep["narration"] for ep in episodes_data]
+    res = source_fidelity_validator.validate_series_fidelity(texts)
+    assert res.passed is True
+    assert res.fidelity_score == 10.0
+    assert res.events_covered == 17
+    assert len(res.forbidden_violations) == 0
+    assert len(res.chronology_errors) == 0
+    assert res.ending_preserved is True
+
+
+def test_source_fidelity_validator_detects_hallucinations():
+    from curiosity_engine.creator_series.source_fidelity import source_fidelity_validator
+    from curiosity_engine.creator_series.generate_pilot_deliverables import episodes_data
+
+    texts = [ep["narration"] for ep in episodes_data]
+    corrupted_texts = texts.copy()
+    corrupted_texts[3] = corrupted_texts[3] + " The doctor diagnosed a fatal cognitohazard with 72-hour cardiac cessation."
+    corrupted_texts[4] = corrupted_texts[4] + " Devon suffered a severe psychiatric breakdown."
+
+    res = source_fidelity_validator.validate_series_fidelity(corrupted_texts)
+    assert res.passed is False
+    assert len(res.forbidden_violations) >= 3
+    assert res.fidelity_score < 8.0
+
+
+def test_source_fidelity_validator_detects_altered_ending():
+    from curiosity_engine.creator_series.source_fidelity import source_fidelity_validator
+    from curiosity_engine.creator_series.generate_pilot_deliverables import episodes_data
+
+    texts = [ep["narration"] for ep in episodes_data]
+    corrupted_texts = texts.copy()
+    corrupted_texts[-1] = corrupted_texts[-1].replace(
+        "Dammit, brother, you were right! I wish I'd never heard.",
+        "And then I woke up and realized it was all just a dream."
+    )
+
+    res = source_fidelity_validator.validate_series_fidelity(corrupted_texts)
+    assert res.passed is False
+    assert res.ending_preserved is False
+
