@@ -1,0 +1,175 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://curioloop.local/schemas/episode_storyboard.schema.json",
+  "title": "Cinematic Story Visuals - Episode Storyboard",
+  "description": "Renderer-independent scene-by-scene storyboard for one episode. Every id must resolve against the series visual bible.",
+  "type": "object",
+  "required": ["schema_version", "series_id", "bible_version", "episode_number", "title", "narrative_summary", "profile", "target_duration_seconds", "opening_visual", "closing_visual", "visual_progression", "scenes"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "series_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,63}$"},
+    "bible_version": {"type": "integer", "minimum": 1},
+    "episode_number": {"type": "integer", "minimum": 1},
+    "title": {"type": "string", "minLength": 1},
+    "narrative_summary": {"type": "string", "minLength": 20},
+    "profile": {"type": "string", "enum": ["psychological_horror", "mystery_investigative", "historical", "custom"]},
+    "target_duration_seconds": {"type": "number", "minimum": 15, "maximum": 180},
+    "aspect_ratio": {"type": "string", "enum": ["9:16", "1:1", "16:9"]},
+    "opening_visual": {
+      "type": "object",
+      "required": ["description", "location_id", "variant_id"],
+      "properties": {
+        "description": {"type": "string"},
+        "location_id": {"type": "string"},
+        "variant_id": {"type": "string"},
+        "continues_from_episode": {"type": ["integer", "null"], "minimum": 1},
+        "continuity_link": {"type": "string"}
+      }
+    },
+    "closing_visual": {
+      "type": "object",
+      "required": ["description", "location_id", "variant_id"],
+      "properties": {
+        "description": {"type": "string"},
+        "location_id": {"type": "string"},
+        "variant_id": {"type": "string"},
+        "hands_off_to_next": {"type": "string"}
+      }
+    },
+    "visual_progression": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["phase", "scene_ids", "tension_start", "tension_end", "description"],
+        "properties": {
+          "phase": {"type": "string"},
+          "scene_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "tension_start": {"type": "integer", "minimum": 0, "maximum": 10},
+          "tension_end": {"type": "integer", "minimum": 0, "maximum": 10},
+          "description": {"type": "string"}
+        }
+      }
+    },
+    "important_scenes": {"type": "array", "items": {"type": "string"}},
+    "character_appearances": {"type": "array", "items": {"type": "object", "required": ["character_id", "state_id", "scene_ids"], "properties": {"character_id": {"type": "string"}, "state_id": {"type": "string"}, "scene_ids": {"type": "array", "items": {"type": "string"}}}}},
+    "continuity_notes": {"type": "array", "items": {"type": "string"}},
+    "scenes": {"type": "array", "minItems": 3, "items": {"$ref": "#/definitions/scene"}}
+  },
+  "definitions": {
+    "hex": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+    "scene": {
+      "type": "object",
+      "required": ["scene_id", "narration", "narrative_purpose", "narrative_mode", "visual_description", "characters", "location_id", "variant_id", "shot", "camera_movement", "lighting", "palette", "motion", "tension_level", "transition_out", "continuity_requirements"],
+      "properties": {
+        "scene_id": {"type": "string", "pattern": "^ep[0-9]{2}_s[0-9]{2}$"},
+        "narration": {
+          "type": "object",
+          "required": ["text", "start_s", "end_s"],
+          "properties": {
+            "text": {"type": "string", "minLength": 1},
+            "start_s": {"type": "number", "minimum": 0},
+            "end_s": {"type": "number", "minimum": 0},
+            "timing_source": {"type": "string", "enum": ["estimated", "whisper_alignment", "manual"]}
+          }
+        },
+        "narrative_purpose": {"type": "string", "minLength": 8},
+        "narrative_mode": {"type": "string", "enum": ["present", "flashback", "remembered_narration", "abstract_narration"]},
+        "visual_description": {"type": "string", "minLength": 20},
+        "hidden_or_withheld": {"type": "array", "items": {"type": "string"}},
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["character_id", "state_id", "presence"],
+            "properties": {
+              "character_id": {"type": "string"},
+              "state_id": {"type": "string"},
+              "presence": {"type": "string", "enum": ["on_screen", "partial", "silhouette", "back_to_camera", "implied_offscreen", "remembered"]},
+              "notes": {"type": "string"}
+            }
+          }
+        },
+        "location_id": {"type": "string"},
+        "variant_id": {"type": "string"},
+        "shot": {
+          "type": "object",
+          "required": ["type", "angle", "composition"],
+          "properties": {
+            "type": {"type": "string", "enum": ["extreme_wide", "wide", "establishing", "medium", "medium_close", "close_up", "extreme_close_up", "over_the_shoulder", "pov", "silhouette", "insert"]},
+            "angle": {"type": "string", "enum": ["eye_level", "low", "high", "overhead", "dutch_subtle", "ground_level"]},
+            "lens_feel": {"type": "string", "enum": ["wide", "normal", "long", "macro"]},
+            "composition": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "focus": {"type": "string"}
+          }
+        },
+        "camera_movement": {
+          "type": "object",
+          "required": ["type", "intensity", "rationale"],
+          "properties": {
+            "type": {"type": "string", "enum": ["static", "slow_push_in", "slow_pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "parallax_drift", "rack_focus", "handheld_micro"]},
+            "intensity": {"type": "string", "enum": ["none", "barely_perceptible", "subtle", "moderate", "strong"]},
+            "start_scale": {"type": "number", "minimum": 0.5, "maximum": 3},
+            "end_scale": {"type": "number", "minimum": 0.5, "maximum": 3},
+            "rationale": {"type": "string", "minLength": 6}
+          }
+        },
+        "lighting": {
+          "type": "object",
+          "required": ["style", "key_source", "contrast"],
+          "properties": {
+            "style": {"type": "string", "enum": ["low_key", "high_key", "practical", "rim", "backlit", "volumetric", "silhouette", "ambient", "mixed"]},
+            "key_source": {"type": "string"},
+            "color_temperature": {"type": "string"},
+            "contrast": {"type": "string", "enum": ["low", "medium", "high"]},
+            "shadow_density": {"type": "string", "enum": ["light", "moderate", "deep", "crushed"]},
+            "change_over_scene": {"type": "string"}
+          }
+        },
+        "palette": {"type": "array", "minItems": 3, "maxItems": 6, "items": {"$ref": "#/definitions/hex"}},
+        "motion": {
+          "type": "object",
+          "required": ["layers"],
+          "properties": {
+            "layers": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["layer", "role"],
+                "properties": {
+                  "layer": {"type": "string", "enum": ["background", "midground", "subject", "foreground", "atmosphere", "overlay"]},
+                  "role": {"type": "string"},
+                  "motion": {"type": "string"},
+                  "parallax_factor": {"type": "number", "minimum": 0, "maximum": 2}
+                }
+              }
+            },
+            "environmental": {"type": "array", "items": {"type": "string"}},
+            "stillness_is_intentional": {"type": "boolean"}
+          }
+        },
+        "tension_level": {"type": "integer", "minimum": 0, "maximum": 10},
+        "transition_out": {
+          "type": "object",
+          "required": ["type", "duration_ms", "rationale"],
+          "properties": {
+            "type": {"type": "string", "enum": ["hard_cut", "slow_dissolve", "dip_to_black", "match_cut", "fog_wipe", "focus_pull", "light_shift", "sound_bridge_cut"]},
+            "duration_ms": {"type": "integer", "minimum": 0, "maximum": 3000},
+            "rationale": {"type": "string"}
+          }
+        },
+        "continuity_requirements": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "prompt": {
+          "type": "object",
+          "properties": {
+            "positive": {"type": "string"},
+            "negative": {"type": "string"},
+            "template_used": {"type": "string"}
+          }
+        },
+        "implementation_hints": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

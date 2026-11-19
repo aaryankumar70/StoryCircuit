@@ -1,0 +1,254 @@
+{
+  "schema_version": "1.0",
+  "series_id": "the_bus_story",
+  "bible_version": 1,
+  "episode_number": 2,
+  "title": "The Refusal",
+  "narrative_summary": "The narrator confronts his childhood friend, who heard the story on the bus and still refuses, after decades, to repeat it because he believes telling it would cause the narrator's death.",
+  "profile": "psychological_horror",
+  "target_duration_seconds": 46,
+  "aspect_ratio": "9:16",
+  "opening_visual": {
+    "description": "The empty rural road in overcast light with thin mist near the tree line; the narrator seen from behind in his charcoal overcoat, exactly as episode 1 ended.",
+    "location_id": "loc_bus_route_road",
+    "variant_id": "present_overcast",
+    "continues_from_episode": 1,
+    "continuity_link": "Same road bend, bus-stop post left, tree line right; narrator in the same posture as the final frame of episode 1."
+  },
+  "closing_visual": {
+    "description": "The friend sits motionless at the kitchen table under the single warm lamp, half his face in shadow, while the hallway doorway at the right edge of the frame remains dark.",
+    "location_id": "loc_friend_home",
+    "variant_id": "present_evening_lamp",
+    "hands_off_to_next": "Episode 3 opens on the dark doorway, which becomes the narrow vertical light strip of the overhearing threshold."
+  },
+  "visual_progression": [
+    {"phase": "Return and approach", "scene_ids": ["ep02_s01", "ep02_s02"], "tension_start": 3, "tension_end": 4, "description": "Continuity from episode 1, then an ordered, controlled kitchen that feels slightly too still."},
+    {"phase": "The excluded memory", "scene_ids": ["ep02_s03"], "tension_start": 4, "tension_end": 4, "description": "Softer, lower-contrast flashback that withholds the story and shows only the huddle of listeners."},
+    {"phase": "The refusal tightens", "scene_ids": ["ep02_s04", "ep02_s05", "ep02_s06"], "tension_start": 5, "tension_end": 7, "description": "Frames narrow from a medium close-up to extreme close-up, then release into a wide with the doorway dominating the right side."},
+    {"phase": "Held silence", "scene_ids": ["ep02_s07"], "tension_start": 8, "tension_end": 8, "description": "A near-static final image in which stillness carries the dread."}
+  ],
+  "important_scenes": ["ep02_s03", "ep02_s05", "ep02_s07"],
+  "character_appearances": [
+    {"character_id": "char_narrator", "state_id": "narrator_adult", "scene_ids": ["ep02_s01", "ep02_s02", "ep02_s06"]},
+    {"character_id": "char_friend", "state_id": "friend_adult", "scene_ids": ["ep02_s02", "ep02_s04", "ep02_s05", "ep02_s06", "ep02_s07"]},
+    {"character_id": "char_friend", "state_id": "friend_child", "scene_ids": ["ep02_s03"]},
+    {"character_id": "char_bus_children", "state_id": "bus_children_child", "scene_ids": ["ep02_s03"]}
+  ],
+  "continuity_notes": [
+    "The kitchen doorway is on the right of the table in every kitchen scene.",
+    "The friend's green scarf is the same muted green as the bus seats (#5B6B58 family).",
+    "The narrator's face is never shown.",
+    "The story's content is never visualised."
+  ],
+  "scenes": [
+    {
+      "scene_id": "ep02_s01",
+      "narration": {"text": "I went back to the one person I knew had heard it.", "start_s": 0.0, "end_s": 5.0, "timing_source": "estimated"},
+      "narrative_purpose": "Continue seamlessly from episode 1 and establish the decision to confront the friend.",
+      "narrative_mode": "present",
+      "visual_description": "A wide view of the empty rural road in cold overcast light. The narrator stands small in the lower third, back to camera, looking down the bend. Thin mist hangs near the tree line.",
+      "hidden_or_withheld": ["the narrator's face", "any vehicle"],
+      "characters": [{"character_id": "char_narrator", "state_id": "narrator_adult", "presence": "back_to_camera", "notes": "Same posture as final frame of episode 1."}],
+      "location_id": "loc_bus_route_road",
+      "variant_id": "present_overcast",
+      "shot": {"type": "wide", "angle": "eye_level", "lens_feel": "long", "composition": ["narrator in lower third", "large negative space above", "road bend as leading line"], "focus": "narrator, mist soft"},
+      "camera_movement": {"type": "slow_push_in", "intensity": "barely_perceptible", "start_scale": 1.0, "end_scale": 1.05, "rationale": "Quiet resolve; a slight approach toward the decision."},
+      "lighting": {"style": "ambient", "key_source": "overcast sky", "color_temperature": "cool 6500K", "contrast": "low", "shadow_density": "moderate"},
+      "palette": ["#1B2429", "#3A4A4F", "#6F7F84", "#A9B4B0"],
+      "motion": {
+        "layers": [
+          {"layer": "background", "role": "tree line and sky", "motion": "static", "parallax_factor": 0.1},
+          {"layer": "subject", "role": "narrator silhouette", "motion": "static"},
+          {"layer": "atmosphere", "role": "mist", "motion": "very slow lateral drift", "parallax_factor": 0.3}
+        ],
+        "environmental": ["thin mist drifting left to right"],
+        "stillness_is_intentional": true
+      },
+      "tension_level": 3,
+      "transition_out": {"type": "slow_dissolve", "duration_ms": 1200, "rationale": "Time and distance between the road and the friend's home."},
+      "continuity_requirements": ["Match the final frame of episode 1.", "Bus-stop post at left, tree line at right."],
+      "implementation_hints": ["Mist can be a slow-moving noise layer clipped to the lower half of the frame."]
+    },
+    {
+      "scene_id": "ep02_s02",
+      "narration": {"text": "Marcus never mentioned that day on the bus. Not once, in all those years.", "start_s": 5.0, "end_s": 11.0, "timing_source": "estimated"},
+      "narrative_purpose": "Introduce the friend and the unnatural silence around the bus day.",
+      "narrative_mode": "present",
+      "visual_description": "Wide shot from the kitchen entrance: the friend at the small wooden table under the single lamp, the narrator's shoulder and overcoat edge in the near foreground. The hallway doorway is a dark rectangle on the right.",
+      "hidden_or_withheld": ["the narrator's face"],
+      "characters": [
+        {"character_id": "char_narrator", "state_id": "narrator_adult", "presence": "partial", "notes": "Shoulder and coat edge in foreground only."},
+        {"character_id": "char_friend", "state_id": "friend_adult", "presence": "on_screen", "notes": "Seated, face partly in shadow."}
+      ],
+      "location_id": "loc_friend_home",
+      "variant_id": "present_evening_lamp",
+      "shot": {"type": "over_the_shoulder", "angle": "eye_level", "lens_feel": "normal", "composition": ["foreground framing with the narrator's shoulder", "friend in the lamp island", "dark doorway at right as heavy negative space"], "focus": "friend"},
+      "camera_movement": {"type": "static", "intensity": "none", "rationale": "A held frame establishes the room's controlled stillness."},
+      "lighting": {"style": "practical", "key_source": "hanging lamp above the table", "color_temperature": "warm 3000K practical against cool shadow", "contrast": "high", "shadow_density": "deep"},
+      "palette": ["#0B0F12", "#1B2429", "#3A4A4F", "#C9B27A"],
+      "motion": {
+        "layers": [
+          {"layer": "foreground", "role": "narrator shoulder", "motion": "static"},
+          {"layer": "subject", "role": "friend", "motion": "static"},
+          {"layer": "atmosphere", "role": "faint dust in lamp cone", "motion": "very slow drift"}
+        ],
+        "environmental": ["faint dust particles in the lamp light"],
+        "stillness_is_intentional": true
+      },
+      "tension_level": 4,
+      "transition_out": {"type": "hard_cut", "duration_ms": 0, "rationale": "A clean cut into memory to mark the shift in time."},
+      "continuity_requirements": ["Doorway on the right of the table.", "One warm light source only."]
+    },
+    {
+      "scene_id": "ep02_s03",
+      "narration": {"text": "He was there. He heard every word. I wasn't.", "start_s": 11.0, "end_s": 17.0, "timing_source": "estimated"},
+      "narrative_purpose": "Show the narrator's exclusion from the story without showing the story.",
+      "narrative_mode": "flashback",
+      "visual_description": "Looking down the school bus aisle from the front rows: a nearby seat is empty in the foreground, while several rows back a tight cluster of children is visible only as backs of heads and silhouettes. One child wears a green knitted scarf.",
+      "hidden_or_withheld": ["the story's content", "every child's face", "the narrator child's presence in frame"],
+      "characters": [
+        {"character_id": "char_bus_children", "state_id": "bus_children_child", "presence": "silhouette"},
+        {"character_id": "char_friend", "state_id": "friend_child", "presence": "back_to_camera", "notes": "Identified by green scarf."}
+      ],
+      "location_id": "loc_school_bus",
+      "variant_id": "afternoon_memory",
+      "shot": {"type": "wide", "angle": "eye_level", "lens_feel": "long", "composition": ["empty seat in foreground (motif_empty_seat)", "aisle as leading line", "huddled cluster compressed in the distance"], "focus": "cluster, foreground seat soft"},
+      "camera_movement": {"type": "slow_push_in", "intensity": "barely_perceptible", "start_scale": 1.0, "end_scale": 1.05, "rationale": "Subtle approach toward a group the narrator could not join."},
+      "lighting": {"style": "ambient", "key_source": "low afternoon sun through dusty windows", "color_temperature": "slightly warm-neutral 5000K, desaturated", "contrast": "medium", "shadow_density": "moderate"},
+      "palette": ["#1B2429", "#3A4A4F", "#5B6B58", "#A9B4B0"],
+      "motion": {
+        "layers": [
+          {"layer": "foreground", "role": "empty seat", "motion": "static", "parallax_factor": 1.0},
+          {"layer": "midground", "role": "seat rows", "motion": "static", "parallax_factor": 0.5},
+          {"layer": "subject", "role": "children cluster", "motion": "no motion", "parallax_factor": 0.2},
+          {"layer": "atmosphere", "role": "floating dust in sun shafts", "motion": "slow drift"}
+        ],
+        "environmental": ["dust drifting in window light"],
+        "stillness_is_intentional": true
+      },
+      "tension_level": 4,
+      "transition_out": {"type": "hard_cut", "duration_ms": 0, "rationale": "Return to the present abruptly, as memory ends."},
+      "continuity_requirements": ["Seats are muted green vinyl with taped cracks.", "No children's faces visible.", "Childhood states only; no adult in frame."],
+      "prompt": {
+        "template_used": "psychological_horror_scene",
+        "positive": "View down a school bus aisle from the front, green vinyl seats with taped cracks, an empty seat in soft foreground, several rows back a huddle of children seen only from behind in muted dark jackets, one child in a green knitted scarf, low afternoon sunlight through dusty windows, long soft shadows, desaturated blue-grey and charcoal palette with muted green, subtle film grain, long-lens compression, quiet and still.",
+        "negative": "faces, visible eyes, text, gore, ghosts, monsters, red lighting, bright colours, cartoon style, extra adults"
+      }
+    },
+    {
+      "scene_id": "ep02_s04",
+      "narration": {"text": "I asked him to tell me. He said no.", "start_s": 17.0, "end_s": 24.0, "timing_source": "estimated"},
+      "narrative_purpose": "Show the friend's first refusal with minimal expression.",
+      "narrative_mode": "present",
+      "visual_description": "Medium close-up of the friend at the table, lit from above by the lamp so his eyes sit in shadow; his green scarf is loosely draped. He looks slightly off-camera, not at the narrator.",
+      "hidden_or_withheld": ["the narrator", "any reaction shot"],
+      "characters": [{"character_id": "char_friend", "state_id": "friend_adult", "presence": "on_screen", "notes": "Eyes in shadow, face half lit."}],
+      "location_id": "loc_friend_home",
+      "variant_id": "present_evening_lamp",
+      "shot": {"type": "medium_close", "angle": "eye_level", "lens_feel": "long", "composition": ["friend offset to the left", "dark doorway edge visible at right", "shallow depth with soft background"], "focus": "friend's face"},
+      "camera_movement": {"type": "slow_push_in", "intensity": "barely_perceptible", "start_scale": 1.0, "end_scale": 1.06, "rationale": "Slow tightening to mirror the narrowing conversation."},
+      "lighting": {"style": "low_key", "key_source": "hanging lamp directly above", "color_temperature": "warm 3000K against cool ambient", "contrast": "high", "shadow_density": "deep"},
+      "palette": ["#0B0F12", "#1B2429", "#5B6B58", "#C9B27A"],
+      "motion": {
+        "layers": [
+          {"layer": "subject", "role": "friend", "motion": "static"},
+          {"layer": "background", "role": "out-of-focus kitchen", "motion": "static", "parallax_factor": 0.1},
+          {"layer": "atmosphere", "role": "dust in lamp light", "motion": "very slow drift"}
+        ],
+        "environmental": ["faint dust particles"],
+        "stillness_is_intentional": true
+      },
+      "tension_level": 5,
+      "transition_out": {"type": "hard_cut", "duration_ms": 0, "rationale": "Keeps the rhythm clipped and controlled."},
+      "continuity_requirements": ["Green scarf visible and same shade as bus seats.", "Doorway at right edge."]
+    },
+    {
+      "scene_id": "ep02_s05",
+      "narration": {"text": "He said that if he told me, it would kill me.", "start_s": 24.0, "end_s": 31.0, "timing_source": "estimated"},
+      "narrative_purpose": "Deliver the central statement with maximum restraint; no visual shock.",
+      "narrative_mode": "present",
+      "visual_description": "Extreme close-up of the friend's hands resting on the wooden table, fingers pressed together, one thumb slowly pressing into the knuckle of the other hand. Everything beyond the hands falls into darkness.",
+      "hidden_or_withheld": ["the friend's face", "the narrator"],
+      "characters": [{"character_id": "char_friend", "state_id": "friend_adult", "presence": "partial", "notes": "Hands only."}],
+      "location_id": "loc_friend_home",
+      "variant_id": "present_evening_lamp",
+      "shot": {"type": "extreme_close_up", "angle": "high", "lens_feel": "macro", "composition": ["hands centred on the lit table", "wood grain texture", "pitch-dark surround"], "focus": "hands"},
+      "camera_movement": {"type": "static", "intensity": "none", "rationale": "Stillness gives weight to the line; movement would soften it."},
+      "lighting": {"style": "low_key", "key_source": "hanging lamp directly above the table", "color_temperature": "warm 3000K", "contrast": "high", "shadow_density": "crushed"},
+      "palette": ["#0B0F12", "#1B2429", "#3A4A4F", "#C9B27A"],
+      "motion": {
+        "layers": [
+          {"layer": "subject", "role": "hands", "motion": "slow thumb press and release, 2 cycles"},
+          {"layer": "background", "role": "darkness", "motion": "static"}
+        ],
+        "environmental": [],
+        "stillness_is_intentional": true
+      },
+      "tension_level": 7,
+      "transition_out": {"type": "hard_cut", "duration_ms": 0, "rationale": "Cut on the end of the line without softening it."},
+      "continuity_requirements": ["Same table and wood tone as other kitchen scenes.", "Lamp is the sole warm source."],
+      "prompt": {
+        "template_used": "close_up_shot",
+        "positive": "Extreme close-up of a middle-aged man's hands resting on a worn wooden kitchen table, fingers pressed together, single warm overhead lamp, deep black surround, shallow depth of field, cold ambient fill, muted desaturated colours, fine film grain, tense and still.",
+        "negative": "face, blood, gore, red lighting, bright colours, text, extra hands, cartoon style"
+      }
+    },
+    {
+      "scene_id": "ep02_s06",
+      "narration": {"text": "Decades later, he still won't say it. He would rather I hate him than bury me.", "start_s": 31.0, "end_s": 38.0, "timing_source": "estimated"},
+      "narrative_purpose": "Widen the frame to show distance between the two men and the dark doorway as a looming presence.",
+      "narrative_mode": "present",
+      "visual_description": "A wide shot of the whole kitchen. The friend sits in the lamp's glow at left; the narrator stands near the doorway at right, back to camera, a dark silhouette beside the dark hallway opening.",
+      "hidden_or_withheld": ["the narrator's face", "whatever lies in the hallway"],
+      "characters": [
+        {"character_id": "char_friend", "state_id": "friend_adult", "presence": "on_screen"},
+        {"character_id": "char_narrator", "state_id": "narrator_adult", "presence": "back_to_camera"}
+      ],
+      "location_id": "loc_friend_home",
+      "variant_id": "present_evening_lamp",
+      "shot": {"type": "wide", "angle": "eye_level", "lens_feel": "wide", "composition": ["strong negative space between the two figures", "doorway at right as vertical dark shape", "table as dividing line"], "focus": "deep focus on both"},
+      "camera_movement": {"type": "slow_pull_out", "intensity": "barely_perceptible", "start_scale": 1.06, "end_scale": 1.0, "rationale": "Release into distance; the gap between the men grows."},
+      "lighting": {"style": "practical", "key_source": "hanging lamp above the table", "color_temperature": "warm 3000K practical, cool ambient", "contrast": "high", "shadow_density": "deep"},
+      "palette": ["#0B0F12", "#1B2429", "#3A4A4F", "#C9B27A"],
+      "motion": {
+        "layers": [
+          {"layer": "midground", "role": "friend at table", "motion": "static"},
+          {"layer": "foreground", "role": "narrator near doorway", "motion": "static"},
+          {"layer": "atmosphere", "role": "faint dust in lamp light", "motion": "slow drift"}
+        ],
+        "environmental": ["dust drifting under the lamp"],
+        "stillness_is_intentional": true
+      },
+      "tension_level": 6,
+      "transition_out": {"type": "slow_dissolve", "duration_ms": 900, "rationale": "A softer release before the final held shot."},
+      "continuity_requirements": ["Doorway on the right of the table.", "Narrator face never visible."]
+    },
+    {
+      "scene_id": "ep02_s07",
+      "narration": {"text": "He kept his silence. And I kept wondering what he was keeping from me.", "start_s": 38.0, "end_s": 46.0, "timing_source": "estimated"},
+      "narrative_purpose": "Close the episode on held dread and hand off to the doorway motif of episode 3.",
+      "narrative_mode": "present",
+      "visual_description": "The kitchen from the same angle as the wide, now with only the friend in frame, completely still under the lamp. The dark hallway doorway at right fills a quarter of the frame and nothing moves in it.",
+      "hidden_or_withheld": ["what is inside the doorway", "the narrator (now offscreen)"],
+      "characters": [{"character_id": "char_friend", "state_id": "friend_adult", "presence": "on_screen", "notes": "Motionless, face half shadowed."}],
+      "location_id": "loc_friend_home",
+      "variant_id": "present_evening_lamp",
+      "shot": {"type": "wide", "angle": "eye_level", "lens_feel": "normal", "composition": ["friend left of centre", "dark doorway as heavy right-hand mass", "wide empty space above the table"], "focus": "friend"},
+      "camera_movement": {"type": "static", "intensity": "none", "rationale": "Pure stillness to let the dread settle."},
+      "lighting": {"style": "low_key", "key_source": "hanging lamp above the table", "color_temperature": "warm 3000K, lamp dims very slightly over the scene", "contrast": "high", "shadow_density": "deep", "change_over_scene": "Lamp intensity falls by about 10 percent over the final 4 seconds."},
+      "palette": ["#0B0F12", "#1B2429", "#3A4A4F", "#C9B27A"],
+      "motion": {
+        "layers": [
+          {"layer": "subject", "role": "friend", "motion": "static"},
+          {"layer": "overlay", "role": "lamp dimming", "motion": "slow 10 percent opacity fade"}
+        ],
+        "environmental": [],
+        "stillness_is_intentional": true
+      },
+      "tension_level": 8,
+      "transition_out": {"type": "dip_to_black", "duration_ms": 1500, "rationale": "Ends the episode on silence and darkness."},
+      "continuity_requirements": ["Final frame must match closing_visual.", "Doorway on the right of the table.", "Same lamp and table as earlier scenes."],
+      "implementation_hints": ["Lamp dimming can be a CSS or canvas opacity animation on a warm radial-gradient layer."]
+    }
+  ]
+}

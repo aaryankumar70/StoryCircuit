@@ -1,0 +1,180 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://curioloop.local/schemas/visual_bible.schema.json",
+  "title": "Cinematic Story Visuals - Series Visual Bible",
+  "description": "Renderer-independent, series-level visual bible. Persisted once per series and reused by every episode storyboard.",
+  "type": "object",
+  "required": ["schema_version", "series_id", "title", "profile", "visual_identity", "characters", "locations", "continuity_constraints", "negative_constraints"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "series_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,63}$"},
+    "title": {"type": "string", "minLength": 1},
+    "bible_version": {"type": "integer", "minimum": 1},
+    "profile": {"type": "string", "enum": ["psychological_horror", "mystery_investigative", "historical", "custom"]},
+    "custom_profile_name": {"type": "string"},
+    "source_notes": {"type": "string"},
+    "visual_identity": {"$ref": "#/definitions/visual_identity"},
+    "characters": {"type": "array", "items": {"$ref": "#/definitions/character"}},
+    "locations": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/location"}},
+    "recurring_objects": {"type": "array", "items": {"$ref": "#/definitions/recurring_object"}},
+    "motifs": {"type": "array", "items": {"$ref": "#/definitions/motif"}},
+    "continuity_constraints": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 4}},
+    "negative_constraints": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 4}},
+    "continuity_ledger": {"type": "array", "items": {"$ref": "#/definitions/ledger_entry"}},
+    "implementation_notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "definitions": {
+    "hex": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+    "palette_color": {
+      "type": "object",
+      "required": ["role", "hex"],
+      "properties": {
+        "role": {"type": "string", "enum": ["shadow", "base", "midtone", "highlight", "accent", "practical_light", "atmosphere", "skin", "foliage", "other"]},
+        "hex": {"$ref": "#/definitions/hex"},
+        "usage": {"type": "string"}
+      }
+    },
+    "visual_identity": {
+      "type": "object",
+      "required": ["logline", "mood_keywords", "palette", "lighting_rules", "camera_language"],
+      "properties": {
+        "logline": {"type": "string", "minLength": 10},
+        "mood_keywords": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+        "palette": {
+          "type": "object",
+          "required": ["name", "colors"],
+          "properties": {
+            "name": {"type": "string"},
+            "colors": {"type": "array", "minItems": 4, "items": {"$ref": "#/definitions/palette_color"}},
+            "max_saturation_note": {"type": "string"}
+          }
+        },
+        "lighting_rules": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "camera_language": {
+          "type": "object",
+          "required": ["preferred_shots", "movement_rules", "forbidden"],
+          "properties": {
+            "preferred_shots": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "movement_rules": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "forbidden": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "texture": {
+          "type": "object",
+          "properties": {
+            "film_grain": {"type": "string", "enum": ["none", "subtle", "moderate", "heavy"]},
+            "vignette": {"type": "string", "enum": ["none", "subtle", "moderate"]},
+            "notes": {"type": "string"}
+          }
+        }
+      }
+    },
+    "appearance_state": {
+      "type": "object",
+      "required": ["state_id", "label", "age", "timeline_period", "appearance", "clothing", "reference_description"],
+      "properties": {
+        "state_id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "label": {"type": "string"},
+        "age": {"type": ["integer", "string"]},
+        "timeline_period": {"type": "string"},
+        "appearance": {
+          "type": "object",
+          "required": ["build", "face", "hair"],
+          "properties": {
+            "build": {"type": "string"},
+            "height_impression": {"type": "string"},
+            "face": {"type": "string"},
+            "hair": {"type": "string"},
+            "skin_tone": {"type": "string"},
+            "distinguishing": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "clothing": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "emotional_baseline": {"type": "string"},
+        "reference_description": {"type": "string", "minLength": 20},
+        "locked_traits": {"type": "array", "items": {"type": "string"}},
+        "allowed_changes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "character": {
+      "type": "object",
+      "required": ["character_id", "name", "narrative_role", "presentation", "states"],
+      "properties": {
+        "character_id": {"type": "string", "pattern": "^char_[a-z0-9_]+$"},
+        "name": {"type": "string"},
+        "name_is_placeholder": {"type": "boolean"},
+        "narrative_role": {"type": "string"},
+        "presentation": {"type": "string", "enum": ["on_screen", "mostly_unseen", "silhouette_only", "group", "remembered_only"]},
+        "never_show_face": {"type": "boolean"},
+        "states": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/appearance_state"}}
+      }
+    },
+    "location_variant": {
+      "type": "object",
+      "required": ["variant_id", "time_of_day", "lighting", "weather_or_atmosphere"],
+      "properties": {
+        "variant_id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "timeline_period": {"type": "string"},
+        "time_of_day": {"type": "string"},
+        "lighting": {"type": "string"},
+        "weather_or_atmosphere": {"type": "string"},
+        "palette_hexes": {"type": "array", "items": {"$ref": "#/definitions/hex"}}
+      }
+    },
+    "location": {
+      "type": "object",
+      "required": ["location_id", "name", "description", "architecture_and_layout", "variants", "continuity_locks"],
+      "properties": {
+        "location_id": {"type": "string", "pattern": "^loc_[a-z0-9_]+$"},
+        "name": {"type": "string"},
+        "description": {"type": "string", "minLength": 20},
+        "script_specified": {"type": "boolean"},
+        "architecture_and_layout": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "fixed_elements": {"type": "array", "items": {"type": "string"}},
+        "recurring_objects": {"type": "array", "items": {"type": "string"}},
+        "variants": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/location_variant"}},
+        "continuity_locks": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    },
+    "recurring_object": {
+      "type": "object",
+      "required": ["object_id", "name", "description"],
+      "properties": {
+        "object_id": {"type": "string", "pattern": "^obj_[a-z0-9_]+$"},
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "narrative_significance": {"type": "string"}
+      }
+    },
+    "motif": {
+      "type": "object",
+      "required": ["motif_id", "description", "meaning"],
+      "properties": {
+        "motif_id": {"type": "string", "pattern": "^motif_[a-z0-9_]+$"},
+        "description": {"type": "string"},
+        "meaning": {"type": "string"},
+        "usage_limit": {"type": "string"}
+      }
+    },
+    "ledger_entry": {
+      "type": "object",
+      "required": ["episode_number", "closing_visual_state"],
+      "properties": {
+        "episode_number": {"type": "integer", "minimum": 1},
+        "closing_visual_state": {
+          "type": "object",
+          "required": ["location_id", "variant_id", "description"],
+          "properties": {
+            "location_id": {"type": "string"},
+            "variant_id": {"type": "string"},
+            "description": {"type": "string"},
+            "palette_hexes": {"type": "array", "items": {"$ref": "#/definitions/hex"}},
+            "character_states": {"type": "array", "items": {"type": "object", "required": ["character_id", "state_id"], "properties": {"character_id": {"type": "string"}, "state_id": {"type": "string"}}}}
+          }
+        },
+        "next_opening_state": {"type": "string"},
+        "bible_changes": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

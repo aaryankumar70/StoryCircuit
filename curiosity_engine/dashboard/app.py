@@ -80,6 +80,12 @@ logger = logging.getLogger("curiosity_engine.dashboard")
 
 app = FastAPI(title="Curiosity Engine Studio Dashboard", version="1.1.0")
 
+try:
+    from curiosity_engine.dashboard.series_api import router as series_router
+    app.include_router(series_router)
+except Exception as e:
+    logger.warning(f"Failed to register series_router: {e}")
+
 TEMPLATES_PATH = Path(__file__).parent / "templates"
 
 

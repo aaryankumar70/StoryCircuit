@@ -1,0 +1,275 @@
+{
+  "schema_version": "1.0",
+  "series_id": "the_bus_story",
+  "title": "The Story on the Bus",
+  "bible_version": 1,
+  "profile": "psychological_horror",
+  "source_notes": "Built from the CurioLoop example premise only: a first-person narrator who missed a story told on a school bus; the children who heard it believed it predicted their deaths; his childhood friend refuses to tell him; the narrator finally overhears it and learns the prediction was about him. Names, locations marked script_specified=false, and all physical details are assumptions made for visual coherence and must be replaced by script facts when a real script supplies them.",
+  "visual_identity": {
+    "logline": "An ordinary childhood place is slowly drained of safety by something the audience never hears and never sees; dread comes from what is withheld.",
+    "mood_keywords": ["withheld", "inevitable", "quiet", "cold", "ordinary-made-wrong"],
+    "palette": {
+      "name": "Bus-Window Grey",
+      "colors": [
+        {"role": "shadow", "hex": "#0B0F12", "usage": "Deepest shadow. Never pure black; keep 3-5% detail."},
+        {"role": "base", "hex": "#1B2429", "usage": "Dominant charcoal surface colour for interiors and night exteriors."},
+        {"role": "midtone", "hex": "#3A4A4F", "usage": "Blue-grey midtones for walls, road, sky."},
+        {"role": "atmosphere", "hex": "#6F7F84", "usage": "Fog, condensation and distant depth."},
+        {"role": "highlight", "hex": "#A9B4B0", "usage": "Brightest values: cold bone-grey, never pure white."},
+        {"role": "foliage", "hex": "#5B6B58", "usage": "Muted green for bus vinyl seats and roadside foliage."},
+        {"role": "practical_light", "hex": "#C9B27A", "usage": "Dim tungsten, used ONLY for in-scene lamps. Single warm accent per frame."}
+      ],
+      "max_saturation_note": "Overall saturation 10-25%. Practical light may reach 35% in a small area only. No red grading."
+    },
+    "lighting_rules": [
+      "Motivated light only: windows, a single lamp, headlights, a hallway strip. No unexplained glow.",
+      "Low-key by default; faces are partially lit or turned away; never lit evenly.",
+      "Warm practical light is a single small island in a cold frame; it never fills the room.",
+      "Memory scenes (childhood) are slightly softer and lower in contrast than present-day scenes; present-day scenes are harder-edged."
+    ],
+    "camera_language": {
+      "preferred_shots": ["wide shots with uncomfortable negative space", "back-of-head medium shots", "slow over-the-shoulder shots", "doorway framing", "long-lens compression of the seat rows"],
+      "movement_rules": [
+        "Default is static or a barely perceptible push-in (scale change 0.05 or less).",
+        "Movement speeds up only for realisation beats; stillness for dread beats.",
+        "No handheld shake. Micro-drift allowed in the final overhearing sequence only."
+      ],
+      "forbidden": ["jump-scare zooms", "dutch angles beyond subtle", "face reveals of the unseen narrator", "monster or ghost imagery", "red lighting"]
+    },
+    "texture": {"film_grain": "subtle", "vignette": "subtle", "notes": "Fine analog grain, slight halation on practical lights. No VHS corruption packs; distortion is restrained to one-frame softness shifts at most."}
+  },
+  "characters": [
+    {
+      "character_id": "char_narrator",
+      "name": "Daniel",
+      "name_is_placeholder": true,
+      "narrative_role": "First-person protagonist who missed the story and later learns it was about him.",
+      "presentation": "mostly_unseen",
+      "never_show_face": true,
+      "states": [
+        {
+          "state_id": "narrator_adult",
+          "label": "Narrator, present day",
+          "age": 41,
+          "timeline_period": "present day",
+          "appearance": {
+            "build": "average height, slightly stooped, lean",
+            "height_impression": "about 178 cm",
+            "face": "never shown frontally; if a profile is unavoidable keep it in shadow",
+            "hair": "short dark hair, greying at the temples",
+            "skin_tone": "light-medium",
+            "distinguishing": ["a plain steel wristwatch on the left wrist"]
+          },
+          "clothing": ["charcoal wool overcoat", "dark grey crew-neck sweater"],
+          "emotional_baseline": "controlled, listening, increasingly braced",
+          "reference_description": "A man of about 41, average height and lean, short dark hair greying at the temples, steel wristwatch on his left wrist, wearing a charcoal wool overcoat over a dark grey sweater; shown from behind, in profile shadow, or as a silhouette, never face-on.",
+          "locked_traits": ["greying temples", "left-wrist steel watch", "charcoal overcoat"],
+          "allowed_changes": ["posture becomes more rigid as the story progresses", "overcoat collar up in colder scenes"]
+        },
+        {
+          "state_id": "narrator_child",
+          "label": "Narrator as a child",
+          "age": "about 9",
+          "timeline_period": "childhood, school-bus era",
+          "appearance": {
+            "build": "small, thin",
+            "height_impression": "child height",
+            "face": "never shown frontally",
+            "hair": "short dark hair, slightly uneven",
+            "skin_tone": "light-medium",
+            "distinguishing": ["scuffed knee visible below shorts or trousers"]
+          },
+          "clothing": ["navy hooded jacket", "worn backpack with one strap loose"],
+          "emotional_baseline": "curious, left out",
+          "reference_description": "A thin boy of about nine with short, slightly uneven dark hair, in a navy hooded jacket with a worn backpack hanging from one strap; seen from behind or from a distance, never face-on.",
+          "locked_traits": ["navy hooded jacket", "one loose backpack strap", "short uneven dark hair"],
+          "allowed_changes": ["jacket hood up or down", "backpack held or worn"]
+        }
+      ]
+    },
+    {
+      "character_id": "char_friend",
+      "name": "Marcus",
+      "name_is_placeholder": true,
+      "narrative_role": "Childhood friend who heard the story and refuses to repeat it, believing telling it would cause the narrator's death.",
+      "presentation": "on_screen",
+      "states": [
+        {
+          "state_id": "friend_child",
+          "label": "Friend as a child",
+          "age": "about 9",
+          "timeline_period": "childhood, school-bus era",
+          "appearance": {
+            "build": "slightly stocky",
+            "height_impression": "a little taller than the narrator as a child",
+            "face": "round face, serious expression; face shown only in shadowed medium shots",
+            "hair": "short sandy-brown hair",
+            "skin_tone": "light",
+            "distinguishing": ["a green knitted scarf"]
+          },
+          "clothing": ["green knitted scarf", "grey zip-up jacket"],
+          "emotional_baseline": "watchful, quiet",
+          "reference_description": "A slightly stocky boy of about nine with short sandy-brown hair and a serious round face, wearing a green knitted scarf and a grey zip-up jacket.",
+          "locked_traits": ["green knitted scarf", "sandy-brown hair"],
+          "allowed_changes": ["scarf loosened or tucked"]
+        },
+        {
+          "state_id": "friend_adult",
+          "label": "Friend, present day",
+          "age": 41,
+          "timeline_period": "present day",
+          "appearance": {
+            "build": "solid, heavier than in childhood",
+            "height_impression": "slightly taller than the narrator",
+            "face": "round face now lined, tired eyes; kept in partial shadow",
+            "hair": "sandy-brown hair, receding, short",
+            "skin_tone": "light",
+            "distinguishing": ["a green scarf of the same dark muted green"]
+          },
+          "clothing": ["dark muted-green scarf", "grey wool cardigan"],
+          "emotional_baseline": "guarded, burdened",
+          "reference_description": "A solid man of about 41 with short receding sandy-brown hair, a lined round face with tired eyes kept partly in shadow, wearing a dark muted-green scarf and a grey wool cardigan.",
+          "locked_traits": ["muted-green scarf (echo of childhood scarf)", "sandy-brown receding hair", "round face"],
+          "allowed_changes": ["scarf on or off depending on indoor/outdoor", "more visible fatigue as the story progresses"]
+        }
+      ]
+    },
+    {
+      "character_id": "char_bus_children",
+      "name": "The children on the bus",
+      "name_is_placeholder": false,
+      "narrative_role": "The group who heard the story and later believed it predicted their deaths. Shown only as an anonymous cluster.",
+      "presentation": "group",
+      "never_show_face": true,
+      "states": [
+        {
+          "state_id": "bus_children_child",
+          "label": "Children on the bus",
+          "age": "about 8 to 10",
+          "timeline_period": "childhood, school-bus era",
+          "appearance": {
+            "build": "children, varied",
+            "face": "never individually shown; backs of heads and silhouettes only",
+            "hair": "varied dark and brown tones, no individually defined hairstyles"
+          },
+          "clothing": ["muted, dark-toned jackets and backpacks"],
+          "emotional_baseline": "still, huddled, listening",
+          "reference_description": "A cluster of anonymous school children in muted dark jackets, seen only as backs of heads and silhouettes, huddled close together a few rows back.",
+          "locked_traits": ["no visible faces", "huddled cluster composition"],
+          "allowed_changes": ["number of visible heads (3 to 6)"]
+        }
+      ]
+    }
+  ],
+  "locations": [
+    {
+      "location_id": "loc_school_bus",
+      "name": "School bus interior",
+      "description": "A long, aging school bus interior with rows of green vinyl seats, a narrow aisle, and tall dusty windows. It is the origin of the story and must feel ordinary, slightly worn, and quietly wrong.",
+      "script_specified": false,
+      "architecture_and_layout": ["narrow central aisle running toward the rear", "paired seats on both sides, green vinyl with taped repairs", "tall windows with metal frames, condensation at the lower edge", "driver's seat and large mirror at the front"],
+      "fixed_elements": ["muted-green vinyl seats", "taped seat cracks", "metal window frames", "rubber floor ribbing"],
+      "recurring_objects": ["obj_bus_seats"],
+      "variants": [
+        {"variant_id": "afternoon_memory", "timeline_period": "childhood", "time_of_day": "late afternoon", "lighting": "low, diffused sun through dusty windows; long soft shadows down the aisle", "weather_or_atmosphere": "dry, floating dust, slightly hazy", "palette_hexes": ["#1B2429", "#3A4A4F", "#5B6B58", "#A9B4B0"]},
+        {"variant_id": "dusk_memory", "timeline_period": "childhood", "time_of_day": "dusk", "lighting": "grey blue light from windows, one dim overhead lamp", "weather_or_atmosphere": "fog on the glass, interior slightly cooler", "palette_hexes": ["#0B0F12", "#1B2429", "#6F7F84", "#C9B27A"]}
+      ],
+      "continuity_locks": ["Seat colour is always muted green vinyl.", "Aisle always runs toward the rear with the clustered children several rows back.", "The seat nearest the camera (the narrator's) stays visually empty or partially in frame in memory shots."]
+    },
+    {
+      "location_id": "loc_bus_route_road",
+      "name": "Rural bus route road",
+      "description": "A quiet, two-lane rural road with a gravel shoulder, wet-looking asphalt and a distant tree line, where the bus stops and the narrator waits in childhood and returns in adulthood.",
+      "script_specified": false,
+      "architecture_and_layout": ["two-lane road bending out of frame", "gravel shoulder and drainage ditch", "a bare tree line on one side", "a plain metal bus-stop post without branding"],
+      "fixed_elements": ["bus-stop post on left", "tree line on right", "road bending into distance"],
+      "recurring_objects": [],
+      "variants": [
+        {"variant_id": "childhood_dusk_fog", "timeline_period": "childhood", "time_of_day": "dusk", "lighting": "flat blue-grey ambient light, soft headlamp glow far down the road", "weather_or_atmosphere": "light ground fog, damp air", "palette_hexes": ["#1B2429", "#3A4A4F", "#6F7F84", "#A9B4B0"]},
+        {"variant_id": "present_overcast", "timeline_period": "present day", "time_of_day": "late afternoon", "lighting": "overcast, flat, cold; no sun", "weather_or_atmosphere": "still air, thin mist near the tree line", "palette_hexes": ["#1B2429", "#3A4A4F", "#6F7F84", "#A9B4B0"]}
+      ],
+      "continuity_locks": ["Same road bend, bus-stop post on left, tree line on right in every episode.", "The road is empty of vehicles unless the script requires one."]
+    },
+    {
+      "location_id": "loc_friend_home",
+      "name": "Friend's home, kitchen",
+      "description": "A modest, tidy kitchen with a small wooden table and a single hanging lamp, where the friend's refusal is shown; the room feels still and over-controlled.",
+      "script_specified": false,
+      "architecture_and_layout": ["small rectangular wooden table at centre", "one window over the sink, curtains half drawn", "a doorway to a dark hallway on the right", "a single hanging lamp above the table"],
+      "fixed_elements": ["hanging lamp over table", "doorway on right to hallway", "half-drawn curtains"],
+      "recurring_objects": ["obj_doorway_light"],
+      "variants": [
+        {"variant_id": "present_evening_lamp", "timeline_period": "present day", "time_of_day": "evening", "lighting": "one warm hanging lamp; the rest of the room falls into cool shadow", "weather_or_atmosphere": "still air, faint steam from a cup optional", "palette_hexes": ["#0B0F12", "#1B2429", "#3A4A4F", "#C9B27A"]}
+      ],
+      "continuity_locks": ["The doorway to the hallway is always on the right side of the table.", "Only one warm light source per frame."]
+    },
+    {
+      "location_id": "loc_overhearing_space",
+      "name": "Threshold where the story is overheard",
+      "description": "A dim hallway or doorway threshold from which the narrator hears the story through a partly open door; the audience hears the voice but the story's content is withheld from the visuals.",
+      "script_specified": false,
+      "architecture_and_layout": ["narrow hallway ending at a partly open door", "a thin vertical strip of warm light from the room beyond", "plain walls, a coat hook, bare floor"],
+      "fixed_elements": ["partly open door at end of hallway", "vertical light strip", "bare walls"],
+      "recurring_objects": ["obj_doorway_light"],
+      "variants": [
+        {"variant_id": "present_night", "timeline_period": "present day", "time_of_day": "night", "lighting": "hallway in cold darkness; narrow warm vertical light strip from the door", "weather_or_atmosphere": "still, silent air; faint dust in the light strip", "palette_hexes": ["#0B0F12", "#1B2429", "#6F7F84", "#C9B27A"]}
+      ],
+      "continuity_locks": ["The door is always at the far end of the hallway, partly open, with a vertical light strip.", "The narrator is always seen from behind in this location."]
+    }
+  ],
+  "recurring_objects": [
+    {"object_id": "obj_bus_seats", "name": "Green vinyl bus seats", "description": "Muted-green vinyl seat rows with taped cracks, repeated in memory shots as the visual shorthand for the story's origin.", "narrative_significance": "Anchors every flashback to the bus without showing the story's content."},
+    {"object_id": "obj_doorway_light", "name": "Narrow vertical door light", "description": "A thin vertical band of warm light through a partly open door.", "narrative_significance": "Visual echo that links the friend's kitchen doorway to the final overhearing threshold."}
+  ],
+  "motifs": [
+    {"motif_id": "motif_empty_seat", "description": "A seat in the foreground that nobody occupies.", "meaning": "The narrator's absence from the moment the story was told.", "usage_limit": "At most once per episode, and only in memory scenes."},
+    {"motif_id": "motif_back_of_heads", "description": "A cluster of children seen only from behind.", "meaning": "A shared knowledge the narrator is excluded from.", "usage_limit": "Never show a face; never more than 6 heads."},
+    {"motif_id": "motif_threshold", "description": "Doorways and narrow openings framing the narrator.", "meaning": "Approaching the unavoidable.", "usage_limit": "Increase frequency across episodes; must be present in the final scene."}
+  ],
+  "continuity_constraints": [
+    "The story's content is never visualised; only reactions, spaces and consequences are shown.",
+    "The narrator's face is never shown; all adult shots use back, profile shadow or silhouette.",
+    "Muted-green seats, the friend's green scarf, and foliage share the same desaturated green (#5B6B58 family).",
+    "Warm light (#C9B27A) is always a motivated practical source and never exceeds one source per frame.",
+    "Memory scenes use childhood states only; present scenes use adult states only. Never mix eras in one frame.",
+    "The visual identity may only tighten (more negative space, longer stillness) as tension rises; it may not change palette or grain."
+  ],
+  "negative_constraints": [
+    "No monsters, ghosts, glowing eyes, blood or gore.",
+    "No red colour grading or red emergency lighting.",
+    "No visible text of the story, no readable supernatural symbols.",
+    "No face shown for the narrator.",
+    "No additional characters beyond those listed.",
+    "No bright, saturated or cartoon-like colours."
+  ],
+  "continuity_ledger": [
+    {
+      "episode_number": 1,
+      "closing_visual_state": {
+        "location_id": "loc_bus_route_road",
+        "variant_id": "present_overcast",
+        "description": "The narrator, seen from behind in his charcoal overcoat, stands alone on the empty rural road looking down the bend as thin mist gathers near the tree line.",
+        "palette_hexes": ["#1B2429", "#3A4A4F", "#6F7F84", "#A9B4B0"],
+        "character_states": [{"character_id": "char_narrator", "state_id": "narrator_adult"}]
+      },
+      "next_opening_state": "Same road bend and mist, then a slow dissolve toward the friend's home.",
+      "bible_changes": []
+    },
+    {
+      "episode_number": 2,
+      "closing_visual_state": {
+        "location_id": "loc_friend_home",
+        "variant_id": "present_evening_lamp",
+        "description": "The friend, face half in shadow, sits very still at the kitchen table beneath the single lamp while the hallway doorway at the right of the frame stays dark.",
+        "palette_hexes": ["#0B0F12", "#1B2429", "#3A4A4F", "#C9B27A"],
+        "character_states": [{"character_id": "char_friend", "state_id": "friend_adult"}]
+      },
+      "next_opening_state": "The dark hallway doorway becomes the narrow vertical door light of the overhearing threshold.",
+      "bible_changes": []
+    }
+  ],
+  "implementation_notes": [
+    "Renderer-independent: nothing here assumes an image-generation provider; realise with whatever the repository's renderer supports (CSS gradients, SVG silhouettes, supplied images, canvas layers).",
+    "All unspecified details are assumptions and must be replaced by facts from the actual script when available."
+  ]
+}
