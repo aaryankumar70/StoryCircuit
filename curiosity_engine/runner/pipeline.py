@@ -700,17 +700,29 @@ def run_daily_generation(
             }
         return None
 
-    t1_info = _topic_from_record(v1_record) if (need_s1 and not force_rebuild) else None
-    t2_info = _topic_from_record(v2_record) if (need_s2 and not force_rebuild) else None
+    creator_choice, creator_payload = ("automatic", None)
+    if need_s2:
+        try:
+            from curiosity_engine.creator_series.pipeline_integration import get_slot2_content_choice
+            creator_choice, creator_payload = get_slot2_content_choice()
+        except Exception as e:
+            logger.warning(f"Creator series choice check failed ({e}); falling back to automatic.")
+            creator_choice, creator_payload = ("automatic", None)
 
-    if (need_s1 and not t1_info) or (need_s2 and not t2_info):
+    t1_info = _topic_from_record(v1_record) if (need_s1 and not force_rebuild) else None
+    t2_info = _topic_from_record(v2_record) if (need_s2 and not force_rebuild and creator_choice != "creator_series") else None
+
+    if (need_s1 and not t1_info) or (need_s2 and not t2_info and creator_choice != "creator_series"):
         used_today = set()
         if v1_record and v1_record.get("topic"):
             used_today.add(v1_record["topic"])
         if v2_record and v2_record.get("topic"):
             used_today.add(v2_record["topic"])
 
-        for s_idx, v_id, needs_pick in ((1, video_1_id, need_s1 and not t1_info), (2, video_2_id, need_s2 and not t2_info)):
+        for s_idx, v_id, needs_pick in (
+            (1, video_1_id, need_s1 and not t1_info),
+            (2, video_2_id, need_s2 and not t2_info and creator_choice != "creator_series"),
+        ):
             if needs_pick:
                 if not db.get_video_record(v_id):
                     db.save_video_record(v_id, {
@@ -725,7 +737,7 @@ def run_daily_generation(
         discovered_1, discovered_2 = select_daily_topics(target_date, exclude_topics=used_today)
         if need_s1 and not t1_info:
             t1_info = discovered_1
-        if need_s2 and not t2_info:
+        if need_s2 and not t2_info and creator_choice != "creator_series":
             t2_info = discovered_2 if discovered_2["topic"] != (t1_info or {}).get("topic") else discovered_1
 
     # Produce Video 1 independently if needed
@@ -738,15 +750,26 @@ def run_daily_generation(
             logger.error(f"Slot 1 production failed: {e}. Proceeding independently with remaining slots.")
             v1_record = db.get_video_record(video_1_id)
 
-    # Produce Video 2 independently if needed
-    if need_s2 and t2_info:
-        try:
-            v2_record = produce_single_video(
-                video_2_id, t2_info, slot_index=2, target_date=target_date, force_rebuild=force_rebuild
-            )
-        except Exception as e:
-            logger.error(f"Slot 2 production failed: {e}.")
-            v2_record = db.get_video_record(video_2_id)
+    # Produce Video 2 independently if needed (prioritizes Creator Series if active)
+    if need_s2:
+        if creator_choice == "creator_series" and creator_payload:
+            active_s, next_e = creator_payload
+            try:
+                from curiosity_engine.creator_series.pipeline_integration import produce_creator_series_slot
+                v2_record = produce_creator_series_slot(
+                    video_2_id, active_s, next_e, target_date=target_date, force_rebuild=force_rebuild
+                )
+            except Exception as e:
+                logger.error(f"Slot 2 Creator Series production failed: {e}. Halting sequence advancement.")
+                v2_record = db.get_video_record(video_2_id)
+        elif t2_info:
+            try:
+                v2_record = produce_single_video(
+                    video_2_id, t2_info, slot_index=2, target_date=target_date, force_rebuild=force_rebuild
+                )
+            except Exception as e:
+                logger.error(f"Slot 2 production failed: {e}.")
+                v2_record = db.get_video_record(video_2_id)
 
     logger.info(
         f"Daily generation finished. V1: {bool(v1_record and v1_record.get('qc_passed'))}, "
@@ -1050,7 +1073,29 @@ def run_slot_publishing(
             if record["schedule_confirmed"]:
                 record_stage_complete(video_id, "scheduling_publication", db_client=db)
             yt_uploaded_now = True
+
+            if record.get("is_creator_series"):
+                try:
+                    from curiosity_engine.creator_series.series_db import series_db
+                    series_db.mark_episode_published(
+                        series_id=record.get("series_id"),
+                        episode_id=record.get("episode_id"),
+                        youtube_id=record.get("youtube_upload_id"),
+                        actual_publish_time=record.get("youtube_published_at"),
+                    )
+                except Exception as ex:
+                    logger.error(f"Failed to record creator series publication: {ex}")
         except Exception as yt_err:
+            if record.get("is_creator_series"):
+                try:
+                    from curiosity_engine.creator_series.series_db import series_db
+                    series_db.record_episode_failure(
+                        series_id=record.get("series_id"),
+                        episode_id=record.get("episode_id"),
+                        reason=str(yt_err),
+                    )
+                except Exception:
+                    pass
             record["youtube_status"] = "FAILED"
             record["youtube_error"] = str(yt_err)
             record["publishing_status"] = "PUBLISH_FAILED"

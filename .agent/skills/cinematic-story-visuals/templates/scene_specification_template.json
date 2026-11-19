@@ -1,0 +1,26 @@
+{
+  "_comment": "Copy one scene object into episode_storyboard.scenes. Replace every <placeholder>. Enum values are defined in ../schemas/episode_storyboard.schema.json.",
+  "scene_id": "ep<NN>_s<NN>",
+  "narration": {"text": "<exact narration line(s) covered>", "start_s": 0.0, "end_s": 0.0, "timing_source": "estimated"},
+  "narrative_purpose": "<why this scene exists: what does the viewer learn or feel?>",
+  "narrative_mode": "present",
+  "visual_description": "<one concrete, filmable sentence or two; no adjective stacking>",
+  "hidden_or_withheld": ["<what the frame deliberately does not show>"],
+  "characters": [{"character_id": "char_<id>", "state_id": "<state_id>", "presence": "on_screen", "notes": ""}],
+  "location_id": "loc_<id>",
+  "variant_id": "<variant_id>",
+  "shot": {"type": "wide", "angle": "eye_level", "lens_feel": "normal", "composition": ["<composition device>"], "focus": "<what is sharp>"},
+  "camera_movement": {"type": "static", "intensity": "none", "start_scale": 1.0, "end_scale": 1.0, "rationale": "<why this movement or stillness serves the narration>"},
+  "lighting": {"style": "low_key", "key_source": "<motivated source>", "color_temperature": "<e.g. cool 6500K>", "contrast": "high", "shadow_density": "deep", "change_over_scene": ""},
+  "palette": ["#1B2429", "#3A4A4F", "#6F7F84"],
+  "motion": {
+    "layers": [{"layer": "subject", "role": "<what this layer is>", "motion": "static", "parallax_factor": 0.0}],
+    "environmental": [],
+    "stillness_is_intentional": true
+  },
+  "tension_level": 3,
+  "transition_out": {"type": "hard_cut", "duration_ms": 0, "rationale": "<why this transition>"},
+  "continuity_requirements": ["<what must match previous/next scene or episode>"],
+  "prompt": {"template_used": "<template name from references/prompt_engineering.md>", "positive": "", "negative": ""},
+  "implementation_hints": []
+}
