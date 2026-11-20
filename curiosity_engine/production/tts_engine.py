@@ -76,12 +76,23 @@ def synthesize_narration(project_dir: Path) -> Path:
     from kokoro_onnx import Kokoro
     kokoro = Kokoro(str(onnx_path), str(voices_path))
 
-    voice = script.get("voice", "am_michael")
-    speed = float(script.get("speed", 1.0))
-    lang = "en-gb" if voice.startswith("b") else "en-us"
+    from curiosity_engine.production.narration_director import (
+        get_storytelling_delivery_plan,
+        smooth_storytelling_text,
+    )
 
-    def say(text: str) -> np.ndarray:
-        samples, _ = kokoro.create(text, voice=voice, speed=speed, lang=lang)
+    voice = script.get("voice", "am_michael")
+    base_speed = float(script.get("speed", 1.0))
+    lang = "en-gb" if voice.startswith("b") else "en-us"
+    use_storytelling = bool(script.get("storytelling_delivery", True))
+
+    delivery_plan = get_storytelling_delivery_plan(
+        script["lines"], base_speed=base_speed, enable_storytelling=use_storytelling
+    )
+
+    def say(text: str, custom_speed: Optional[float] = None) -> np.ndarray:
+        s = custom_speed or base_speed
+        samples, _ = kokoro.create(text, voice=voice, speed=s, lang=lang)
         return trim(np.asarray(samples, dtype=np.float64))
 
     # Group lines into whole sentences
@@ -99,12 +110,23 @@ def synthesize_narration(project_dir: Path) -> Path:
     lines_meta: List[Dict[str, Any]] = [None] * len(script["lines"])
 
     for g in groups:
-        sentence_text = " ".join(script["lines"][i]["text"] for i in g)
-        x = say(sentence_text)
+        first_idx = g[0]
+        last_idx = g[-1]
+        plan_item = delivery_plan[first_idx]
+        group_speed = plan_item["speed"]
+        pre_pause = plan_item.get("pre_pause_sec", 0.0)
+
+        # Insert pre-pause breath before major reveal/twist
+        if pre_pause > 0.0:
+            out_chunks.append(np.zeros(int(pre_pause * SR)))
+            t_cursor += pre_pause
+
+        sentence_text = " ".join(smooth_storytelling_text(script["lines"][i]["text"]) for i in g)
+        x = say(sentence_text, custom_speed=group_speed)
         cuts = [0.0]
 
         if len(g) > 1:
-            line_lens = np.array([len(say(script["lines"][i]["text"])) for i in g], dtype=float)
+            line_lens = np.array([len(say(smooth_storytelling_text(script["lines"][i]["text"]), custom_speed=group_speed)) for i in g], dtype=float)
             total_lens = line_lens.sum() if line_lens.sum() > 0 else 1.0
             pauses = silences(x)
             for c in np.cumsum(line_lens)[:-1] / total_lens * len(x) / SR:
@@ -124,9 +146,11 @@ def synthesize_narration(project_dir: Path) -> Path:
                 "text": script["lines"][i]["text"],
                 "start": round(t_cursor + a, 3),
                 "end": round(t_cursor + b, 3),
+                "delivery_mode": delivery_plan[i]["mode"],
+                "speed": delivery_plan[i]["speed"],
             }
 
-        gap_sec = float(script["lines"][g[-1]].get("gap", script.get("gap", 0.32)))
+        gap_sec = float(delivery_plan[last_idx].get("gap_sec") or script["lines"][last_idx].get("gap", script.get("gap", 0.30)))
         out_chunks.append(x)
         out_chunks.append(np.zeros(int(gap_sec * SR)))
         t_cursor += n_sec + gap_sec

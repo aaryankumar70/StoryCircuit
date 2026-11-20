@@ -34,6 +34,8 @@ from curiosity_engine.config import (
     VIDEO_WIDTH,
     get_hidden_subprocess_kwargs,
 )
+from curiosity_engine.content.scriptwriter import score_script_quality
+from curiosity_engine.quality.provenance import validate_story_provenance
 
 logger = logging.getLogger("curiosity_engine.qc")
 
@@ -281,8 +283,82 @@ def verify_video(
         issues.extend(sync_issues)
         failure_categories.append("sync_mismatch")
 
+    # 9. Headless browser visual-check logs validation
+    hard_failures: List[str] = []
+    if candidate_proj_dir and candidate_proj_dir.exists():
+        check_log = candidate_proj_dir / "logs" / "check.log"
+        if check_log.exists():
+            log_txt = check_log.read_text(encoding="utf-8", errors="replace")
+            if "CHECK FAILED" in log_txt or "TypeError:" in log_txt or "EXCEPTION" in log_txt:
+                err_match = re.search(r"(?:ERROR at [^:\n]+:\s+)?(TypeError:[^\n]+)", log_txt)
+                err_desc = err_match.group(1) if err_match else "Runtime exception in browser visual check"
+                issues.append(f"Renderer visual check failure: {err_desc}")
+                failure_categories.append("renderer_exception")
+                hard_failures.append(f"renderer_exception: {err_desc}")
+
+    # 10. Story provenance, content lane, and editorial category verification
+    active_script = script_metadata.get("script") if isinstance(script_metadata.get("script"), dict) else script_metadata
+    prov_ok, prov_issues, prov_meta = validate_story_provenance(script_metadata, active_script, candidate_proj_dir)
+    checks["provenance"] = prov_meta
+    if not prov_ok:
+        issues.extend(prov_issues)
+        failure_categories.append("story_provenance_mismatch")
+        hard_failures.extend(prov_issues)
+
+    # 11. Compute separate 5-dimensional QC sub-scores (0-10 scale)
+    script_eval = score_script_quality(active_script)
+    script_quality_score = float(script_eval.get("overall_score", 0.0))
+
+    story_fidelity_score = 10.0 if prov_ok else max(0.0, 10.0 - 4.0 * len(prov_issues))
+
+    visual_penalty = 0.0
+    if not is_not_black:
+        visual_penalty += 3.5
+    if any("Visual repetition" in s for s in issues):
+        visual_penalty += 2.5
+    if any("Renderer visual check" in s for s in issues):
+        visual_penalty += 5.0
+    visual_quality_score = max(0.0, 10.0 - visual_penalty)
+
+    narration_penalty = 0.0
+    if not sync_ok:
+        narration_penalty += 3.0
+    if i_lufs < TARGET_INTEGRATED_LUFS_MIN or i_lufs > TARGET_INTEGRATED_LUFS_MAX or tp_db > MAX_TRUE_PEAK_DB:
+        narration_penalty += 2.0
+    if not (TARGET_DURATION_MIN_SEC <= duration <= TARGET_DURATION_MAX_SEC):
+        narration_penalty += 1.5
+    narration_quality_score = max(0.0, 10.0 - narration_penalty)
+
+    tech_penalty = 0.0
+    if not video_stream or not audio_stream:
+        tech_penalty += 6.0
+    if v_codec != "h264" or a_codec != "aac":
+        tech_penalty += 3.0
+    if width != VIDEO_WIDTH or height != VIDEO_HEIGHT:
+        tech_penalty += 3.0
+    technical_render_quality_score = max(0.0, 10.0 - tech_penalty)
+
+    overall_score = round(
+        (script_quality_score * 0.20)
+        + (story_fidelity_score * 0.25)
+        + (visual_quality_score * 0.20)
+        + (narration_quality_score * 0.15)
+        + (technical_render_quality_score * 0.20),
+        2,
+    )
+
+    checks["sub_scores"] = {
+        "script_quality": script_quality_score,
+        "story_fidelity": story_fidelity_score,
+        "visual_quality": visual_quality_score,
+        "narration_quality": narration_quality_score,
+        "technical_render_quality": technical_render_quality_score,
+    }
+    checks["overall_score"] = overall_score
+    checks["hard_failures"] = hard_failures
+
     checks["failure_categories"] = list(dict.fromkeys(failure_categories))
-    passed = len(issues) == 0
+    passed = len(issues) == 0 and len(hard_failures) == 0 and overall_score >= 6.0
     checks["passed"] = passed
 
     if passed:

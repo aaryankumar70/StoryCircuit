@@ -27,7 +27,12 @@ function limb(x, y, len1, a1, len2, a2, dir, w) {     // angles in degrees from 
 export function person(o) {
   const h = o.h || 520, d = o.dir || 1, w = h * 0.034, wk = o.walk;
   const hipY = o.y - h * 0.46, shY = o.y - h * 0.77, r = h * 0.105;
-  ctx.save(); if (o.glow) ctx.filter = `drop-shadow(0px 0px ${Math.round(h * 0.014)}px rgba(255,226,170,0.95))`; ctx.translate(o.x, hipY); ctx.rotate(rad((o.lean || 0) * d)); ctx.translate(-o.x, -hipY);
+  ctx.save();
+  if (o.glow) {
+    ctx.shadowColor = 'rgba(255,226,170,0.95)';
+    ctx.shadowBlur = Math.round(h * 0.02);
+  }
+  ctx.translate(o.x, hipY); ctx.rotate(rad((o.lean || 0) * d)); ctx.translate(-o.x, -hipY);
   const sw = wk != null ? Math.sin(wk) : 0;
   const legs = o.legs || { L: [wk != null ? sw * 26 : 6, wk != null ? Math.max(0, -sw) * 30 + 6 : 4], R: [wk != null ? -sw * 26 : -6, wk != null ? Math.max(0, sw) * 30 + 6 : 4] };
   const arms = o.arms || { L: [wk != null ? -sw * 24 : -8, 12], R: [wk != null ? sw * 24 : 10, 16] };
@@ -44,7 +49,7 @@ export function person(o) {
   if (o.cap) { ctx.beginPath(); ctx.arc(hx, hy - r * 0.15, r * 1.04, Math.PI, TAU); ctx.fillStyle = o.cap; ctx.fill(); }
   circle(hx, hy, r, P.ink);
   if (o.cap) { ctx.beginPath(); ctx.arc(hx, hy - r * 0.1, r * 1.03, Math.PI * 1.05, Math.PI * 1.95); ctx.lineWidth = r * 0.32; ctx.strokeStyle = o.cap; ctx.stroke(); rr(hx + d * r * 0.3 - (d < 0 ? r * 0.9 : 0), hy - r * 0.62, r * 0.9, r * 0.2, r * 0.1); ctx.fillStyle = o.cap; ctx.fill(); }
-  ctx.filter = 'none'; face(hx + d * r * 0.22, hy, r, d, o);
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; face(hx + d * r * 0.22, hy, r, d, o);
   ctx.restore();
 }
 function face(fx, fy, r, d, o) {

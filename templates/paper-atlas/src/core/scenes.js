@@ -59,8 +59,20 @@ function drawStoryStage(vt, lt, d, t, sc, idx, total) {
     cut(P_rr(150, 540, 780, 520, 24), P.parch, { shadow: 0.9, edge: 6 });
     K.figure({ x: 540, y: 1030, h: 420, role: 'scholar', dir: 1, arm: 20 });
     K.seal(810, 650, eob(seg(lt, 0.2, 0.5)), '✓');
+  } else if (vt === 'meter_surge') {
+    // Archival astrolabe / calibrated meter dial
+    cut(P_circ(540, cy, 180), '#1A2433', { shadow: 0.8, edge: 5 });
+    ctx.strokeStyle = P.gold; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(540, cy, 150, 0, TAU); ctx.stroke();
+    const p = eo(clamp(lt / Math.max(0.3, d * 0.75)));
+    ctx.save(); ctx.translate(540, cy); ctx.rotate(-Math.PI * 0.7 + p * Math.PI * 1.4);
+    ctx.strokeStyle = P.crimson; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -130); ctx.stroke();
+    circle(0, 0, 16, P.gold);
+    ctx.restore();
+    K.seal(780, cy - 80, eob(seg(lt, 0.2, 0.5)), '!');
   } else {
-    // tension_room / meter_surge archival illustration
+    // tension_room archival illustration: scholar examining artifact
     cut(P_rr(140, 540, 800, 520, 18), '#EFE6CE', { shadow: 0.8, edge: 5 });
     const role = idx % 2 === 0 ? 'guard' : 'scholar';
     K.figure({ x: 540, y: 1020, h: 440, role, dir: idx % 2 === 0 ? 1 : -1, arm: 15 });

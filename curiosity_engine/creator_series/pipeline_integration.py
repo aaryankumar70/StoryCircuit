@@ -141,11 +141,22 @@ def produce_creator_series_slot(
     episode.qc_result = qc_score.to_dict()
     series_db.save_episode(episode)
 
+    from curiosity_engine.quality.provenance import build_production_provenance
+    provenance = build_production_provenance(
+        video_id=video_id,
+        content_lane="creator_series",
+        topic_id=series.series_id,
+        script_data={"id": episode.episode_id, "category": "CreatorSeries", "lines": [{"text": sc.get("narration_excerpt", "")} for sc in storyboard.get("scenes", [])]},
+        original_source_id=series.series_id,
+    )
+
     record_data = {
         "video_id": video_id,
         "slot_index": 2,
         "target_date": target_date,
         "is_creator_series": True,
+        "content_lane": "creator_series",
+        "provenance": provenance,
         "series_id": series.series_id,
         "episode_id": episode.episode_id,
         "episode_num": episode.episode_num,

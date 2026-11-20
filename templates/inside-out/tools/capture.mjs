@@ -138,9 +138,13 @@ else {
             ff.stdin.once('drain', () => { clearTimeout(tm); r(); });
           });
         }
-        if (i % 60 === 0) {
+        if (i % 30 === 0 || i === n - 1) {
           const line = `${i}/${n} frames`;
-          process.stdout.write(process.stdout.isTTY ? `\r${line}` : `${line}\n`);
+          if (process.stdout.isTTY) {
+            process.stdout.write(`\r${line}`);
+          } else {
+            console.log(line);
+          }
         }
       }
       ff.stdin.end();

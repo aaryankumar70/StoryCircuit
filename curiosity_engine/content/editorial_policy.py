@@ -311,6 +311,9 @@ def normalize_category_name(category: Optional[str]) -> Optional[str]:
     return None
 
 
+normalize_category = normalize_category_name
+
+
 def is_forbidden_content(text: str) -> Tuple[bool, Optional[str]]:
     """Contextually detect forbidden biology, anatomy, medical trivia, or generic fact-lists."""
     if not text:

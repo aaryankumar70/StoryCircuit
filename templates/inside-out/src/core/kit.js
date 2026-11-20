@@ -222,15 +222,25 @@ export const ARM = {
   point: { e: [240, -90], h: [205, -300] },    // index finger up (pass finger: angle)
   wave: { e: [250, -120], h: [300, -330] },
   hip: { e: [250, 20], h: [150, 110] },
+  chin: { e: [210, -30], h: [80, -220] },      // thoughtful / chin rest
 };
-export const armPose = (a, b, t) => ({ e: [lerp(a.e[0], b.e[0], t), lerp(a.e[1], b.e[1], t)], h: [lerp(a.h[0], b.h[0], t), lerp(a.h[1], b.h[1], t)] });
+export const armPose = (a, b, t) => {
+  const pA = (a && a.e && a.h) ? a : (ARM.down || { e: [172, 0], h: [176, 138] });
+  const pB = (b && b.e && b.h) ? b : pA;
+  const safeT = Number.isFinite(t) ? t : 0;
+  return {
+    e: [lerp(pA.e[0], pB.e[0], safeT), lerp(pA.e[1], pB.e[1], safeT)],
+    h: [lerp(pA.h[0], pB.h[0], safeT), lerp(pA.h[1], pB.h[1], safeT)],
+  };
+};
 /** mouth position in the man's local coords (for things going in / out of the mouth) */
 export const MOUTH = [0, -272];
 /** points along the food path in local coords: mouth -> throat -> stomach top -> inside stomach */
 export const FOOD_PATH = [[0, -262], [0, -200], [-4, -80], [-12, 58]];
 
 function arm(side, pose, finger, xr) {
-  const sx = side, sh = [140 * sx, -170], e = [pose.e[0] * sx, pose.e[1]], h = [pose.h[0] * sx, pose.h[1]];
+  const p = (pose && pose.e && pose.h) ? pose : (ARM.down || { e: [172, 0], h: [176, 138] });
+  const sx = side, sh = [140 * sx, -170], e = [p.e[0] * sx, p.e[1]], h = [p.h[0] * sx, p.h[1]];
   const ang = Math.atan2(h[1] - e[1], h[0] - e[0]);
   if (xr) {
     line([sh, e], C.cyan, 58); line([e, h], C.cyan, 52);
@@ -324,7 +334,8 @@ export function man(o) {
     rr(6, 180, 40, 440, [0, 0, 0, 30]); ctx.fillStyle = C.pantsShade; ctx.fill();
     rr(-36, -250, 72, 60, 20); ctx.fillStyle = C.skin; ctx.fill();
   }
-  arm(-1, o.armL || ARM.down, null, XR);
+  const la = (o.armL && o.armL.e && o.armL.h) ? o.armL : ARM.down;
+  arm(-1, la, null, XR);
   if (XR) skeletonTorso(o.pulse || 0);
   else {
     torsoPath(); ctx.fillStyle = C.shirt; ctx.fill();
@@ -332,9 +343,9 @@ export function man(o) {
     ctx.beginPath(); ctx.ellipse(0, -214, 46, 26, 0, 0, Math.PI); ctx.fillStyle = C.skin; ctx.fill(); ctx.strokeStyle = C.shirtShade; ctx.lineWidth = 12; ctx.stroke();
   }
   head(o);
-  const ra = o.arm || ARM.down;
+  const ra = (o.arm && o.arm.e && o.arm.h) ? o.arm : ARM.down;
   arm(1, ra, o.finger ?? null, XR);
-  if (o.holding) o.holding(ra.h[0] - 34, ra.h[1] - 14);
+  if (o.holding && ra && ra.h) o.holding(ra.h[0] - 34, ra.h[1] - 14);
   if (o.inside) gum(o.inside[0], o.inside[1], 0.5, o.inside[2] || 0);
   ctx.restore();
 }

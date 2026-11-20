@@ -91,7 +91,7 @@ else {
       console.log(`duration ${dur.toFixed(2)} s`);
       for (const s of await P.ev('OP.shots()')) console.log(`${s.id.padEnd(5)} ${s.at.toFixed(2).padStart(6)} → ${s.end.toFixed(2).padStart(6)}  (${(s.end - s.at).toFixed(2)} s)  ${s.note}`);
       console.log('captions:'); for (const c of await P.ev('OP.captions()')) console.log(`  ${c.s.toFixed(2).padStart(6)}–${c.e.toFixed(2).padEnd(6)} ${c.text}`);
-      let bad = 0; for (let t = 0; t < dur; t += 0.25) { try { await P.ev(`OP.draw(${t})`); } catch (e) { bad++; console.log(`ERROR at ${t.toFixed(2)}: ${e.message.split('\n')[0]}`); } }
+      let bad = 0; for (let t = 0; t < dur; t += 0.25) { if (Math.round(t * 100) % 500 === 0) console.log(`check progress: ${t.toFixed(1)}s / ${dur.toFixed(1)}s`); try { await P.ev(`OP.draw(${t})`); } catch (e) { bad++; console.log(`ERROR at ${t.toFixed(2)}: ${e.message.split('\n')[0]}`); } }
       if (P.logs.length) console.log(P.logs.join('\n'));
       const status = bad || P.logs.length ? 'CHECK FAILED' : 'CHECK OK';
       console.log(status);
@@ -138,9 +138,13 @@ else {
             ff.stdin.once('drain', () => { clearTimeout(tm); r(); });
           });
         }
-        if (i % 60 === 0) {
+        if (i % 30 === 0 || i === n - 1) {
           const line = `${i}/${n} frames`;
-          process.stdout.write(process.stdout.isTTY ? `\r${line}` : `${line}\n`);
+          if (process.stdout.isTTY) {
+            process.stdout.write(`\r${line}`);
+          } else {
+            console.log(line);
+          }
         }
       }
       ff.stdin.end();

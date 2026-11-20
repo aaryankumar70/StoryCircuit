@@ -58,8 +58,20 @@ function drawStoryScene(vt, lt, d, t, sc, idx, total) {
     K.livingRoom({});
     K.person({ x: 500, y: 1160, h: 480, mood: 'happy', look: [0, 0], blink, arms: { L: [-20, 30], R: [130, 60] } });
     K.check(790, 740, eob(seg(lt, 0.2, 0.55)) * 1.15);
+  } else if (vt === 'archive_map' || vt === 'timeline') {
+    K.livingRoom({ night: isNight, lampOn: true });
+    // Vector route / timeline progression across desk
+    const p = eo(clamp(lt / Math.max(0.3, d * 0.75)));
+    ctx.strokeStyle = '#FFD43B'; ctx.lineWidth = 6; ctx.setLineDash([16, 12]);
+    ctx.beginPath(); ctx.moveTo(220, 820); ctx.quadraticCurveTo(540, 680, lerp(220, 860, p), lerp(820, 780, p)); ctx.stroke();
+    ctx.setLineDash([]);
+    for (let nd = 0; nd < 3; nd++) {
+      const nx = 220 + nd * 320, ny = 820 - nd * 20;
+      circle(nx, ny, p >= nd / 2 ? 18 : 12, p >= nd / 2 ? '#FFD43B' : '#556');
+    }
+    K.person({ glow: isNight, x: 380, y: 1160, h: 460, mood: 'determined', look: [0.6, -0.2], blink });
   } else {
-    // archive_map / timeline / tension_room
+    // tension_room
     K.livingRoom({ night: isNight, lampOn: !isNight });
     if (isNight) { ctx.fillStyle = 'rgba(8, 12, 24, 0.45)'; ctx.fillRect(-300, -300, W + 600, H + 600); }
     K.person({ glow: isNight, x: 460, y: 1160, h: 480, mood: mood === 'urgent' ? 'scared' : 'calm', look: [0.4, -0.3], blink });

@@ -27,6 +27,7 @@ from curiosity_engine.content.description_generator import (
     description_generator,
     generate_youtube_title,
 )
+from curiosity_engine.content.editorial_policy import ALLOWED_CATEGORIES, normalize_category
 from curiosity_engine.content.scriptwriter import (
     assign_line_scenes,
     revise_script_for_duration,
@@ -43,6 +44,11 @@ from curiosity_engine.distribution.youtube_publisher import (
 from curiosity_engine.production.director import prepare_project
 from curiosity_engine.production.renderer import render_project_video, validate_rendered_mp4
 from curiosity_engine.quality.qc_gatekeeper import verify_video
+from curiosity_engine.quality.provenance import (
+    build_production_provenance,
+    compute_script_narration_hash,
+    validate_story_provenance,
+)
 from curiosity_engine.runner.progress_tracker import (
     complete_qc_recovery,
     record_stage_checkpoint,
@@ -200,8 +206,8 @@ def _execute_recovery_attempt(
     return updated_script, prep_dir, strategy, action_desc
 
 
-def _has_valid_project_assets(project_dir: Path) -> bool:
-    """Verify whether prepared TTS/alignment project assets are intact for safe render resume."""
+def _has_valid_project_assets(project_dir: Path, expected_script_hash: Optional[str] = None) -> bool:
+    """Verify whether prepared TTS/alignment project assets are intact and match expected script hash."""
     required_files = [
         project_dir / "script.json",
         project_dir / "index.html",
@@ -215,6 +221,10 @@ def _has_valid_project_assets(project_dir: Path) -> bool:
     if (project_dir / "data" / "narration.wav").stat().st_size < 10_000:
         return False
     try:
+        if expected_script_hash:
+            proj_script = json.loads((project_dir / "script.json").read_text(encoding="utf-8"))
+            if compute_script_narration_hash(proj_script) != expected_script_hash:
+                return False
         lines = json.loads((project_dir / "data" / "lines.json").read_text(encoding="utf-8"))
         words = json.loads((project_dir / "data" / "words.json").read_text(encoding="utf-8"))
         return float(lines.get("duration", 0)) > 5.0 and len(words) > 0
@@ -316,11 +326,24 @@ def produce_single_video(
         # 2. Scriptwriting & Source Verification (reuse valid saved script when resuming)
         script_data = None
         record_stage_start(video_id, "writing_script", db_client=db)
-        if not force_rebuild and isinstance(record.get("script"), dict) and record["script"].get("lines"):
-            script_data = record["script"]
+        saved_script = record.get("script")
+        raw_saved_cat = str((saved_script or {}).get("category") or record.get("category") or "")
+        is_saved_script_compliant = (
+            not force_rebuild
+            and isinstance(saved_script, dict)
+            and bool(saved_script.get("lines"))
+            and normalize_category(raw_saved_cat) in ALLOWED_CATEGORIES
+        )
+
+        if is_saved_script_compliant:
+            script_data = saved_script
             assign_line_scenes(script_data)
-            logger.info(f"[{video_id}] Reusing existing verified script for '{record.get('topic')}'.")
+            logger.info(f"[{video_id}] Reusing existing verified compliant script for '{record.get('topic')}'.")
         else:
+            if saved_script and not is_saved_script_compliant:
+                logger.warning(
+                    f"[{video_id}] Existing script category '{raw_saved_cat}' violates editorial policy. Discarding and regenerating."
+                )
             logger.info(f"[{video_id}] Writing storytelling script and verifying internal sources...")
             script_data = write_video_script(topic_info)
             record["script"] = script_data
@@ -341,6 +364,21 @@ def produce_single_video(
                 except Exception:
                     pass
             record["production_status"] = "SCRIPTED"
+
+        # Record and attach authoritative provenance ledger
+        provenance = build_production_provenance(
+            video_id=video_id,
+            content_lane="automatic",
+            topic_id=str(record.get("topic_id") or topic_info.get("id") or video_id),
+            script_data=script_data,
+            original_source_id=script_data.get("id"),
+        )
+        record["provenance"] = provenance
+        record["content_lane"] = "automatic"
+        record["script_hash"] = provenance["script_hash"]
+        record["storyboard_id"] = provenance["storyboard_id"]
+        record["production_run_id"] = provenance["production_run_id"]
+        record["category"] = provenance["category"]
 
         # 2b. Link-Free YouTube Title, Description & Separate API Tags Generation
         cur_topic_str = str(record.get("topic") or topic_info.get("topic", ""))
@@ -402,8 +440,9 @@ def produce_single_video(
             logger.info(f"[{video_id}] Existing MP4 matches previously rejected failed hash; skipping redundant unchanged QC.")
 
         if not rendered_valid and not is_same_failed_file:
-            # 3b. Preparation: TTS and Alignment (resume from valid project assets if intact)
-            if not force_rebuild and _has_valid_project_assets(project_dir):
+            # 3b. Preparation: TTS and Alignment (resume from valid project assets only if matching approved script)
+            cur_script_hash = record.get("script_hash") or compute_script_narration_hash(script_data)
+            if not force_rebuild and _has_valid_project_assets(project_dir, expected_script_hash=cur_script_hash):
                 logger.info(f"[{video_id}] Resuming from valid existing ASSETS_READY project at {project_dir}.")
                 record_stage_complete(video_id, "generating_narration", db_client=db)
                 record["production_status"] = "ASSETS_READY"
@@ -448,7 +487,8 @@ def produce_single_video(
             current_hash = current_disk_hash
         else:
             logger.info(f"[{video_id}] Running Quality Control checks...")
-            qc_report = verify_video(output_mp4, script_data, project_dir=project_dir)
+            qc_metadata = {**record, "script": script_data}
+            qc_report = verify_video(output_mp4, qc_metadata, project_dir=project_dir)
             current_hash = _compute_file_sha256(output_mp4)
 
         record["qc_passed"] = qc_report.passed

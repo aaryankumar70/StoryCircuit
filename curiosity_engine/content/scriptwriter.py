@@ -157,8 +157,10 @@ def _infer_line_scene(
     """Derive a narration-matched non-repetitive visual scene descriptor from line semantics."""
     low = text.lower()
     if idx == 0:
-        default_vt = "cosmic_burst" if any(k in low for k in ("space", "sun", "star", "storm", "plane", "signal")) else (
-            "ocean_depth" if any(k in low for k in ("ocean", "sea", "ship", "arctic", "shark", "water")) else "tension_room"
+        default_vt = "cosmic_burst" if any(k in low for k in ("space", "sun", "star", "storm", "cosmic", "orbit", "galaxy")) else (
+            "ocean_depth" if any(k in low for k in ("ocean", "sea", "ship", "arctic", "shark", "water", "abyss")) else (
+                "archive_map" if any(k in low for k in ("map", "city", "expedition", "tomb", "pyramid", "ruins", "island")) else "tension_room"
+            )
         )
         mood = "mystery"
         accent = "yellow"
@@ -168,54 +170,59 @@ def _infer_line_scene(
         mood = "calm"
         accent = "green"
         cue = "sparkle"
-    elif any(k in low for k in ("map", "city", "egypt", "jungle", "river", "port", "island", "portugal", "mile")):
+    elif any(k in low for k in ("map", "city", "egypt", "jungle", "river", "port", "island", "expedition", "voyage", "tomb", "pyramid", "ruins", "caravan", "fortress")):
         default_vt = "archive_map"
         mood = "mystery"
         accent = "yellow"
         cue = "pop"
-    elif any(k in low for k in ("century", "year", "eighteen", "nineteen", "two thousand", "day", "hour", "decade", "ago", "time")):
+    elif any(k in low for k in ("century", "year", "eighteen", "nineteen", "two thousand", "day", "hour", "decade", "ago", "timeline", "bc", "ad", "ancient", "dynasty")):
         default_vt = "timeline"
         mood = "wonder"
         accent = "crimson"
         cue = "tock"
-    elif any(k in low for k in ("ocean", "sea", "dive", "deep", "ship", "water", "arctic", "shark")):
+    elif any(k in low for k in ("ocean", "sea", "dive", "deep", "ship", "water", "arctic", "shark", "submerged", "abyss")):
         default_vt = "ocean_depth"
         mood = "wonder"
         accent = "cyan"
         cue = "bubbles"
-    elif any(k in low for k in ("scan", "signal", "radio", "radar", "x-ray", "search", "helicopter", "frequency", "ring")):
+    elif any(k in low for k in ("scan", "signal", "radio", "radar", "x-ray", "search", "frequency", "telescope", "light-year", "pulsar", "antenna", "ping")):
         default_vt = "radar_scan"
         mood = "tense"
         accent = "cyan"
         cue = "whoosh"
-    elif any(k in low for k in ("brain", "neuron", "amygdala", "memory", "mind", "gear", "compute")):
+    elif any(k in low for k in ("brain", "neuron", "memory", "mind", "decode", "analysis", "equation", "pattern", "carbon", "sample", "microscope", "cipher")):
         default_vt = "neural_pulse"
         mood = "wonder"
         accent = "cyan"
         cue = "sparkle"
-    elif any(k in low for k in ("gain", "spike", "surge", "volume", "beat", "percent", "times", "power", "current")):
+    elif any(k in low for k in ("gain", "spike", "surge", "volume", "beat", "percent", "power", "current", "explode", "critical", "maximum", "shattered", "danger")):
         default_vt = "meter_surge"
         mood = "urgent"
         accent = "yellow"
         cue = "slide"
-    elif any(k in low for k in ("compare", "instead", "either", "vs", "switched", "same", "neither", "off", "disconnected")):
+    elif any(k in low for k in ("compare", "instead", "either", "vs", "versus", "conflict", "contradiction", "dispute", "rival", "differ", "opposing")):
         default_vt = "split_compare"
         mood = "mystery"
         accent = "cyan"
         cue = "pop"
-    elif any(k in low for k in ("blood", "cell", "stream", "flow", "ripple", "fume")):
-        default_vt = "micro_stream"
-        mood = "tense"
-        accent = "crimson"
-        cue = "bubbles"
-    else:
+    elif any(k in low for k in ("space", "star", "orbit", "galaxy", "black hole", "cosmic", "asteroid", "comet", "nebula", "supernova")):
+        default_vt = "cosmic_burst"
+        mood = "wonder"
+        accent = "yellow"
+        cue = "whoosh"
+    elif any(k in low for k in ("secret", "chamber", "vault", "document", "artifact", "relic", "hidden", "unsolved", "mystery", "enigma", "classified")):
         default_vt = "vault_mystery"
         mood = "tense"
         accent = "yellow"
         cue = "tock"
+    else:
+        default_vt = "tension_room"
+        mood = "tense"
+        accent = "crimson"
+        cue = "tock"
 
     if prev_visual_type == default_vt:
-        cycle = ("radar_scan", "split_compare", "timeline", "neural_pulse", "meter_surge", "tension_room", "vault_mystery")
+        cycle = ("radar_scan", "timeline", "split_compare", "neural_pulse", "meter_surge", "vault_mystery", "archive_map", "tension_room")
         for alt in cycle:
             if alt != prev_visual_type:
                 default_vt = alt
@@ -241,15 +248,35 @@ def assign_line_scenes(script_data: Dict[str, Any]) -> Dict[str, Any]:
     lines = script_data.get("lines") or []
     total = len(lines)
     prev_vt: Optional[str] = None
+    rotation_pool = [
+        "radar_scan", "timeline", "split_compare", "neural_pulse",
+        "meter_surge", "vault_mystery", "archive_map", "tension_room"
+    ]
+
     for idx, line in enumerate(lines):
         scene = line.get("scene")
         if not isinstance(scene, dict) or scene.get("visual_type") not in VISUAL_TYPES:
             scene = _infer_line_scene(str(line.get("text", "")), idx, total, prev_vt)
             line["scene"] = scene
-        elif scene.get("visual_type") == prev_vt and idx not in (0, total - 1):
+        elif scene.get("visual_type") == prev_vt:
             scene = dict(scene)
-            scene["visual_type"] = _infer_line_scene(str(line.get("text", "")), idx, total, prev_vt)["visual_type"]
+            inferred = _infer_line_scene(str(line.get("text", "")), idx, total, prev_vt)
+            new_vt = inferred["visual_type"]
+            if new_vt == prev_vt:
+                for cand in rotation_pool:
+                    if cand != prev_vt:
+                        new_vt = cand
+                        break
+            scene["visual_type"] = new_vt
             line["scene"] = scene
+
+        # Payoff reveal for climax if closing
+        if idx == total - 1 and line["scene"].get("visual_type") == prev_vt:
+            for cand in ["payoff_reveal", "vault_mystery", "timeline"]:
+                if cand != prev_vt:
+                    line["scene"]["visual_type"] = cand
+                    break
+
         prev_vt = line["scene"].get("visual_type")
     return script_data
 

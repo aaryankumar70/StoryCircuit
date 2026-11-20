@@ -142,11 +142,42 @@ function drawVisualArchetype(vt, lt, d, t, accentColor, mood) {
     const burstAmt = eob(seg(lt, 0.15, 0.55));
     K.burst(540, cy, 1.4, burstAmt * 0.7);
     K.man({ x: 540, y: 1030, s: 1.35, mouth: 'smile', eyes: 'n', brow: 0, arm: K.armPose(K.ARM.down, K.ARM.point, clamp(lt * 2)) });
+  } else if (vt === 'vault_mystery') {
+    fillAll('#0A101D');
+    // Secret archival vault: vault door reticle + illuminated relic pedestal
+    const rot = t * 0.4;
+    ctx.save(); ctx.translate(540, cy); ctx.rotate(rot);
+    ctx.strokeStyle = 'rgba(255, 212, 59, 0.22)'; ctx.lineWidth = 4; ctx.setLineDash([16, 14]);
+    ctx.beginPath(); ctx.arc(0, 0, 260, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore();
+    circle(540, cy, 190, '#131F33');
+    ctx.strokeStyle = accentColor; ctx.lineWidth = 6; ctx.stroke();
+    // Document / relic silhouette
+    const pop = eob(seg(lt, 0.12, 0.5));
+    rr(475, cy - 80 * pop, 130, 160 * pop, 12);
+    ctx.fillStyle = '#1D2D47'; ctx.fill();
+    ctx.strokeStyle = C.white; ctx.lineWidth = 3; ctx.stroke();
+    for (let l = 0; l < 4; l++) {
+      line([[495, cy - 40 + l * 28], [585, cy - 40 + l * 28]], 'rgba(255,255,255,0.4)', 4);
+    }
+    K.man({
+      x: 340, y: 1040, s: 1.15,
+      mouth: 'flat', eyes: 'wide', brow: 1,
+      arm: K.armPose(K.ARM.down, K.ARM.mouth, clamp(lt * 1.5)),
+    });
   } else {
-    // tension_room / vault_mystery fallback inside safe zone
-    fillAll(mood === 'urgent' ? '#1E1118' : '#131D2D');
+    // tension_room: high-contrast spotlight cone + examination focus
+    fillAll(mood === 'urgent' ? '#1C0D14' : '#0E1726');
     const pulse = eio(seg(lt, 0, d));
-    circle(540, cy, 240 + pulse * 30, 'rgba(255,255,255,0.04)');
+    // Downward spotlight cone
+    ctx.save();
+    const g = ctx.createRadialGradient(540, 480, 20, 540, 850, 420);
+    g.addColorStop(0, 'rgba(255, 255, 255, 0.18)');
+    g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(540, 460); ctx.lineTo(240, 1080); ctx.lineTo(840, 1080); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    circle(540, cy + 30, 220 + pulse * 25, 'rgba(255,255,255,0.03)');
     ctx.strokeStyle = accentColor; ctx.lineWidth = 6; ctx.stroke();
     K.man({
       x: 540, y: 1020, s: 1.32,
