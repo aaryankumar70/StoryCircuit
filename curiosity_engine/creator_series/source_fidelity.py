@@ -260,6 +260,7 @@ FORBIDDEN_CONCEPTS = [
     (r"\bcollege (?:dive )?bar\b", "Changed local hometown bar to 'college dive bar'."),
     (r"\bdeathbed pact\b", "Distorted Isaiah's brush-off into an invented 'deathbed pact'."),
     (r"\bcurse explanation\b", "Invented general curse lore not in source."),
+    (r"\bleaving her and isaiah\b", "Logical contradiction: Isaiah died of cancer, leaving Maria and Joshua as the last two."),
 ]
 
 

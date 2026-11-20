@@ -11,7 +11,7 @@ function drawStoryStage(vt, lt, d, t, sc, idx, total) {
   K.parchment(idx + 3);
   const cy = 830;
 
-  if (vt === 'archive_map' || vt === 'timeline') {
+  if (vt === 'archive_map') {
     // Aged nautical map lines & crimson expedition route
     ctx.strokeStyle = 'rgba(168, 50, 45, 0.25)'; ctx.lineWidth = 4;
     for (let x = 140; x <= 940; x += 200) {
@@ -25,6 +25,22 @@ function drawStoryStage(vt, lt, d, t, sc, idx, total) {
     ctx.stroke(); ctx.setLineDash([]);
     K.compass(840, 980, 0.55);
     K.seal(250, 660, eob(seg(lt, 0.15, 0.5)), String(idx + 1));
+  } else if (vt === 'timeline') {
+    // Archival chronological milestone ladder on aged parchment
+    const p = eo(clamp(lt / Math.max(0.3, d * 0.8)));
+    line([[540, 520], [540, 1060]], 'rgba(74, 58, 42, 0.35)', 6);
+    line([[540, 520], [540, lerp(520, 1060, p)]], P.crimson, 8);
+    for (let m = 0; m < 3; m++) {
+      const my = lerp(560, 1020, m / 2);
+      const reached = p >= m / 2;
+      const dir = m % 2 === 0 ? -1 : 1;
+      const px = dir === -1 ? 160 : 580;
+      circle(540, my, reached ? 20 : 12, reached ? P.crimson : P.parchDark);
+      if (reached) circle(540, my, 8, P.parch);
+      line([[540 + dir * 14, my], [540 + dir * 36, my]], reached ? P.crimson : 'rgba(74,58,42,0.3)', 4);
+      cut(P_rr(px, my - 34, 340, 68, 12), reached ? P.parchDark : '#DFD4B8', { shadow: 0.6, edge: 4 });
+      line([[px + 24, my], [px + 180, my]], reached ? P.parch : 'rgba(74,58,42,0.4)', 6);
+    }
   } else if (vt === 'ocean_depth' || vt === 'micro_stream') {
     ctx.fillStyle = P.seaDark; ctx.fillRect(-300, 450, W + 600, 760);
     for (let i = 0; i < 4; i++) {

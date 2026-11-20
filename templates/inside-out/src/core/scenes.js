@@ -98,10 +98,16 @@ function drawVisualArchetype(vt, lt, d, t, accentColor, mood) {
       const y = 520 + rnd(i + 12) * 560 + Math.sin(t * 3 + i) * 18;
       circle(x, y, 10 + rnd(i + 3) * 16, i % 3 === 0 ? accentColor : 'rgba(255,255,255,0.45)');
     }
-  } else if (vt === 'archive_map' || vt === 'timeline') {
+  } else if (vt === 'archive_map') {
     fillAll('#101A2B');
-    // Vector timeline / route progression spline
+    // Navigational coordinate grid + vector route progression spline
     const p = eo(clamp(lt / Math.max(0.3, d * 0.75)));
+    for (let gx = 180; gx <= 900; gx += 180) {
+      line([[gx, cy - 240], [gx, cy + 240]], 'rgba(79, 209, 232, 0.12)', 2);
+    }
+    for (let gy = cy - 200; gy <= cy + 200; gy += 100) {
+      line([[140, gy], [940, gy]], 'rgba(79, 209, 232, 0.12)', 2);
+    }
     ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 8;
     ctx.beginPath(); ctx.moveTo(180, cy + 90); ctx.bezierCurveTo(380, cy - 160, 700, cy + 160, 900, cy - 80); ctx.stroke();
     ctx.strokeStyle = accentColor; ctx.lineWidth = 10; ctx.setLineDash([18, 12]);
@@ -115,6 +121,29 @@ function drawVisualArchetype(vt, lt, d, t, accentColor, mood) {
       if (reached) {
         circle(nx, ny, 10, '#0B1524');
       }
+    }
+  } else if (vt === 'timeline') {
+    fillAll('#0E182A');
+    // Chronological milestone ladder: vertical time axis with alternating event cards
+    const p = eo(clamp(lt / Math.max(0.3, d * 0.8)));
+    const axisX = 540;
+    const topY = cy - 230, botY = cy + 230;
+    line([[axisX, topY], [axisX, botY]], 'rgba(255, 255, 255, 0.18)', 6);
+    line([[axisX, topY], [axisX, lerp(topY, botY, p)]], accentColor, 8);
+    for (let m = 0; m < 3; m++) {
+      const my = lerp(topY + 30, botY - 30, m / 2);
+      const reached = p >= m / 2;
+      const cardDir = m % 2 === 0 ? -1 : 1;
+      const cardX = cardDir === -1 ? 160 : 580;
+      const cardW = 360, cardH = 76;
+      circle(axisX, my, reached ? 22 : 14, reached ? accentColor : '#25354D');
+      if (reached) circle(axisX, my, 8, '#0E182A');
+      line([[axisX + cardDir * 16, my], [axisX + cardDir * 38, my]], reached ? accentColor : 'rgba(255,255,255,0.2)', 4);
+      rr(cardX, my - 38, cardW, cardH, 12);
+      ctx.fillStyle = reached ? '#182740' : '#111B2C'; ctx.fill();
+      ctx.strokeStyle = reached ? accentColor : 'rgba(255,255,255,0.12)'; ctx.lineWidth = 3; ctx.stroke();
+      line([[cardX + 24, my - 10], [cardX + 160, my - 10]], reached ? C.white : 'rgba(255,255,255,0.3)', 6);
+      line([[cardX + 24, my + 14], [cardX + 260, my + 14]], reached ? 'rgba(79, 209, 232, 0.8)' : 'rgba(255,255,255,0.15)', 4);
     }
   } else if (vt === 'split_compare') {
     fillAll('#0D1624');

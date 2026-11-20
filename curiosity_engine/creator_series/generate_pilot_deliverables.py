@@ -195,9 +195,9 @@ episodes_data = [
             "A younger woman at her table gasped in disbelief. "
             "Maria leaned forward and insisted: It is all true. Shinji fell into a coma. Devon's stepfather stabbed him. "
             "And Mitsuko died on her wedding day when the cake was smashed into her face and a wooden support dowel went straight through her eye! "
-            "Every single death happened exactly like the driver predicted. Maria whispered that Isaiah had just died of pancreatic cancer at fifty-five, leaving her and Isaiah as the last two."
+            "Every single death happened exactly like the driver predicted. Maria whispered that Isaiah had just died of pancreatic cancer at fifty-five, leaving her and Joshua as the last two."
         ),
-        "cliffhanger": "Maria whispered that Isaiah had just died of pancreatic cancer at fifty-five, leaving her and Isaiah as the last two.",
+        "cliffhanger": "Maria whispered that Isaiah had just died of pancreatic cancer at fifty-five, leaving her and Joshua as the last two.",
         "source_range": "Lines 83-102",
         "actual_audio_duration_sec": 57.82,
         "word_count": 159,

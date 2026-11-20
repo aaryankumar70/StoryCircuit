@@ -245,6 +245,11 @@ def _infer_line_scene(
 
 def assign_line_scenes(script_data: Dict[str, Any]) -> Dict[str, Any]:
     """Ensure every narration line carries a structured, non-repetitive scene descriptor."""
+    # Template Affinity Policy: SPACE topics must never use stick-story
+    cat = normalize_category_name(script_data.get("category", ""))
+    if cat == "SPACE" and script_data.get("style") == "stick-story":
+        script_data["style"] = "inside-out"
+
     lines = script_data.get("lines") or []
     total = len(lines)
     prev_vt: Optional[str] = None
@@ -476,7 +481,10 @@ def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
         raw_topic, declared_category=raw_category
     )
     category = detected_cat or normalize_category_name(raw_category) or "MYSTERY"
-    style = get_visual_style_for_category(category)
+    style = get_visual_style_for_category(category, raw_topic)
+    # Template Affinity Policy: SPACE topics must never use stick-story
+    if category == "SPACE" and style == "stick-story":
+        style = "inside-out"
     voice = VOICE_MAP.get(style, "bm_george" if category == "HISTORY" else "am_michael")
     topic = raw_topic
 

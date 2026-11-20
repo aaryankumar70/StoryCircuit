@@ -407,10 +407,9 @@ def get_visual_style_for_category(category: str, topic_text: str = "") -> str:
     low = (topic_text or "").lower()
 
     if cat == "SPACE":
-        # Space telemetry, anomalies, cosmic bursts -> inside-out or stick-story
-        if any(k in low for k in ("astronaut", "crew", "walk", "survived", "human")):
-            return "stick-story"
-        if any(k in low for k in ("telescope", "map", "1800s", "1900s", "history", "ancient")):
+        # Space telemetry, planetary science, astronomical cataclysms, cosmic bursts -> strictly inside-out
+        # (Historical astronomy / star charts may use paper-atlas; NEVER stick-story domestic living room)
+        if any(k in low for k in ("telescope", "map", "1800s", "1900s", "history", "ancient", "chart")):
             return "paper-atlas"
         return "inside-out"
 
