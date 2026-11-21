@@ -20,6 +20,7 @@ from curiosity_engine.content.editorial_policy import (
     normalize_category_name,
 )
 from curiosity_engine.content.gemini_client import gemini_client
+from curiosity_engine.intelligence.local_model import local_model
 from curiosity_engine.content.research_dossier import ResearchDossier, build_research_dossier
 
 logger = logging.getLogger("curiosity_engine.narrative_engine")
@@ -240,8 +241,14 @@ def generate_hook_candidates(dossier: Any) -> List[HookCandidate]:
         ("scale_shock", f"Over twenty miles of ancient stone sat buried beneath coastal sand for a millennium."),
     ]
 
-    # If Gemini is configured, prompt Gemini for 8 custom hook candidates tailored to the dossier
-    if gemini_client.is_configured():
+    # If local_model or Gemini is configured, prompt for 8 custom hook candidates tailored to the dossier
+    ai_hook_client = None
+    if local_model.is_available():
+        ai_hook_client = local_model
+    elif gemini_client.is_configured():
+        ai_hook_client = gemini_client
+
+    if ai_hook_client:
         prompt = f"""Generate 8 viral YouTube Shorts hook candidates for this verified story dossier.
 Topic: {topic}
 Category: {category}
@@ -262,17 +269,18 @@ Return valid JSON list of objects:
 ]
 """
         try:
-            res = gemini_client.generate_json(prompt, system_instruction="You are an expert Shorts hook writer. Return valid JSON only.")
-            if isinstance(res, list) and len(res) >= 6:
+            res = ai_hook_client.generate_json(prompt, system_instruction="You are an expert Shorts hook writer. Return valid JSON only.")
+            if isinstance(res, list) and len(res) >= 4:
                 custom_cands = []
                 for item in res:
                     pat = item.get("pattern", "impossible_claim")
                     txt = item.get("text", "")
                     if txt:
                         custom_cands.append((pat, txt))
-                if len(custom_cands) >= 6:
+                if len(custom_cands) >= 4:
                     raw_candidates = custom_cands
         except Exception as e:
+            logger.warning("AI hook candidate generation failed (%s): %s", type(ai_hook_client).__name__, e)
             logger.warning("Gemini hook candidate generation failed (%s), using playbook templates.", e)
 
     evaluated = [evaluate_hook_candidate(txt, pat) for pat, txt in raw_candidates]
@@ -428,8 +436,14 @@ def generate_draft_script(
     }
     voice = voice_map.get(style, "am_michael")
 
-    # If Gemini is configured, use Call 1 to draft a tailored high-retention script
-    if gemini_client.is_configured():
+    # If local_model or Gemini is configured, use Call 1 to draft a tailored high-retention script
+    ai_script_client = None
+    if local_model.is_available():
+        ai_script_client = local_model
+    elif gemini_client.is_configured():
+        ai_script_client = gemini_client
+
+    if ai_script_client:
         prompt = f"""You write narration for 42-58 second YouTube Shorts. The viewer scrolls rapidly on a mobile phone.
 Topic: {info["topic"]}
 Category: {category} (Niche: {info["niche"]})
@@ -468,7 +482,7 @@ Return JSON:
 }}
 """
         try:
-            res = gemini_client.generate_json(
+            res = ai_script_client.generate_json(
                 prompt,
                 system_instruction=f"You are the lead viral scriptwriter for CurioLoop. Allowed categories: MYSTERY, HISTORY, SPACE. Word budget: {TARGET_WORD_COUNT_MIN}-{TARGET_WORD_COUNT_MAX} words.",
             )

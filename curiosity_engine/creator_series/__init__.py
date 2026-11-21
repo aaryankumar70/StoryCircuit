@@ -14,6 +14,9 @@ from curiosity_engine.creator_series.continuity import continuity_engine
 from curiosity_engine.creator_series.visual_director import visual_director
 from curiosity_engine.creator_series.renderer_adapter import renderer_adapter
 from curiosity_engine.creator_series.visual_qc import visual_qc
+from curiosity_engine.creator_series.series_scheduler import series_scheduler, SeriesScheduler
+from curiosity_engine.creator_series.queue_manager import queue_manager, ProductionQueueManager
+from curiosity_engine.creator_series.production_planner import production_planner, ProductionPlanner
 
 __all__ = [
     "EpisodeRecord",
@@ -29,4 +32,10 @@ __all__ = [
     "visual_director",
     "renderer_adapter",
     "visual_qc",
+    "series_scheduler",
+    "SeriesScheduler",
+    "queue_manager",
+    "ProductionQueueManager",
+    "production_planner",
+    "ProductionPlanner",
 ]

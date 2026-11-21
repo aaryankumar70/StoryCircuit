@@ -76,23 +76,23 @@ SUBCATEGORY_MAPPING: Dict[str, str] = {
     "documented_bizarre_history": "HISTORY",
     "forgotten_inventions": "HISTORY",
     "heists_and_cons": "HISTORY",
-    # SPACE Subcategories
+    # SPACE Subcategories (Strictly Extraterrestrial, UFO/UAP, and Astrobiology)
     "cosmic_mysteries": "SPACE",
-    "black_holes": "SPACE",
-    "neutron_stars": "SPACE",
-    "exoplanets": "SPACE",
-    "habitable_worlds": "SPACE",
-    "fermi_paradox": "SPACE",
+    "uap_sightings": "SPACE",
+    "ufo_sightings": "SPACE",
+    "extraterrestrial_life": "SPACE",
+    "declassified_uap": "SPACE",
+    "project_blue_book": "SPACE",
+    "alien_encounters": "SPACE",
+    "crash_retrieval_claims": "SPACE",
     "seti": "SPACE",
-    "astronomical_observations": "SPACE",
-    "strange_cosmic_objects": "SPACE",
-    "space_missions": "SPACE",
-    "astronaut_experiences": "SPACE",
-    "planetary_exploration": "SPACE",
-    "cosmology": "SPACE",
-    "galaxies": "SPACE",
-    "future_of_civilization": "SPACE",
-    "deep_space_signals": "SPACE",
+    "technosignatures": "SPACE",
+    "biosignatures": "SPACE",
+    "fermi_paradox": "SPACE",
+    "interstellar_probes": "SPACE",
+    "wow_signal": "SPACE",
+    "astrobiology_anomalies": "SPACE",
+    "radar_visual_encounters": "SPACE",
 }
 
 # Legacy category aliases normalized into the three top-level categories
@@ -181,13 +181,20 @@ HISTORY_MARKERS = [
 ]
 
 SPACE_NARRATIVE_MARKERS = [
-    "astronomer", "telescope", "observatory", "radio signal", "wow signal",
-    "voyager", "apollo", "mariner", "cassini", "kepler", "james webb", "hubble",
-    "exoplanet", "light years", "deep space", "black hole", "neutron star",
-    "event horizon", "solar flare", "supernova", "carrington event",
-    "interstellar", "fermi paradox", "alien signal", "mars rover", "lunar",
-    "cosmic blast", "pulsar", "galaxy", "orbit", "spacecraft", "astronaut",
-    "planetary", "atmosphere of", "outer space", "deep space", "space probe",
+    "uap", "ufo", "extraterrestrial", "alien", "seti", "wow signal",
+    "technosignature", "biosignature", "astrobiology", "fermi paradox",
+    "declassified", "pentagon report", "tic tac", "nimitz", "rendlesham",
+    "radar contact", "unidentified aerial", "flying saucer", "crash retrieval",
+    "radio telescope signal", "anomalous signal", "interstellar object", "oumuamua",
+    "extraterrestrial origin", "alien hypothesis", "drake equation", "exoplanet biosignature",
+]
+
+# Forbidden patterns in SPACE category: generic astronomy, textbook astrophysics, ordinary rockets
+FORBIDDEN_SPACE_PATTERNS = [
+    r"\b(?:black hole collisions?|neutron star merger|supernova remnant)\b",
+    r"\b(?:standard rocket launch|falcon 9|spacex launch schedule|artemis rocket)\b",
+    r"\b(?:textbook astronomy|general planetary facts|size of jupiter|rings of saturn trivia)\b",
+    r"\b(?:astrophysics equations?|standard cosmology timeline|stellar evolution)\b",
 ]
 
 # ---------------------------------------------------------------------------
@@ -370,8 +377,9 @@ def validate_editorial_category(
 
     # Step 3: Align with declared category if compatible
     if normalized_decl == "SPACE":
-        if space_score >= 1 or any(k in low for k in ("space", "cosmic", "star", "orbit", "planet", "telescope", "light year", "universe", "mission", "nasa", "esa")):
-            return True, "SPACE", ""
+        for pat in FORBIDDEN_SPACE_PATTERNS:
+            if re.search(pat, low):
+                return False, "", f"Generic astronomy/astrophysics forbidden for SPACE: must focus strictly on extraterrestrial life/UAP"
         return True, "SPACE", ""
 
     if normalized_decl == "HISTORY":

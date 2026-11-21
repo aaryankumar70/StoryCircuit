@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="100%" height="100%">
+  <!-- Grumman TBM Avenger Torpedo Bomber Silhouette -->
+  <path d="M50 210 Q200 190 380 180 Q520 170 720 185 Q780 190 790 200 Q780 215 700 225 L650 230 L730 290 L710 295 L620 235 L450 240 L380 340 L340 340 L390 242 Q250 245 120 250 L60 270 L50 260 L80 235 L50 210 Z" fill="#040608"/>
+  <!-- Cockpit Greenhouse Glazing Highlight -->
+  <path d="M280 185 Q340 160 410 178 Z" fill="#22d4d8" opacity="0.3"/>
+</svg>

@@ -1,0 +1,37 @@
+{
+  "presets": {
+    "slow_suspense_push_in": {
+      "easing_type": "CINEMATIC_DRIFT",
+      "fov_degrees": 42.0,
+      "depth_of_field": {
+        "enabled": true,
+        "focus_distance": 320.0,
+        "aperture_f_stop": 2.4,
+        "bokeh_blur": 0.75
+      },
+      "delta_z": -180.0
+    },
+    "macro_evidence_rack_focus": {
+      "easing_type": "CUBIC_IN_OUT",
+      "fov_degrees": 35.0,
+      "depth_of_field": {
+        "enabled": true,
+        "focus_distance": 140.0,
+        "aperture_f_stop": 1.8,
+        "bokeh_blur": 1.2
+      },
+      "delta_z": -40.0
+    },
+    "lateral_investigation_dolly": {
+      "easing_type": "CINEMATIC_DRIFT",
+      "fov_degrees": 48.0,
+      "depth_of_field": {
+        "enabled": true,
+        "focus_distance": 400.0,
+        "aperture_f_stop": 2.8,
+        "bokeh_blur": 0.5
+      },
+      "delta_x": 120.0
+    }
+  }
+}

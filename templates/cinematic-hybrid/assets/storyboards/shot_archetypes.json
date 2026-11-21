@@ -1,0 +1,29 @@
+{
+  "shot_archetypes": [
+    {
+      "type": "ESTABLISHING",
+      "fov": 50,
+      "description": "Wide panoramic setting introducing geography, era, and atmosphere."
+    },
+    {
+      "type": "ENVIRONMENTAL",
+      "fov": 45,
+      "description": "Mid-distance shot tracking characters or moving vehicles through space."
+    },
+    {
+      "type": "OBJECT_MACRO",
+      "fov": 30,
+      "description": "Extreme close-up on physical instrument, document, or forensic clue."
+    },
+    {
+      "type": "EVIDENCE_CALLOUT",
+      "fov": 38,
+      "description": "Split or focused frame highlighting declassified text or radar trace."
+    },
+    {
+      "type": "DRAMATIC_REVEAL",
+      "fov": 40,
+      "description": "Dynamic camera push-in resolving central visual question of the beat."
+    }
+  ]
+}

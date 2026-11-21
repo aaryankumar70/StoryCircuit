@@ -147,37 +147,85 @@ def allocate_slot_publication_time(
     tz: Optional[ZoneInfo] = None,
     min_lead_minutes: int = 15,
     max_per_day: int = MAX_DAILY_VIDEOS,
+    target_date: Optional[Union[str, date]] = None,
+    candidate_video_id: Optional[str] = None,
+    allow_same_day_alternate: bool = False,
 ) -> datetime:
-    """Find the earliest future IST slot datetime respecting the max daily publication limit
-    and preserving each slot's canonical publication hour (12:30 IST for Slot 1, 20:30 IST for Slot 2).
+    """Find the earliest valid IST slot datetime respecting daily publication limits
+    and preserving canonical slot hours (12:30 IST / 20:30 IST) without multi-day drift.
+
+    Provides explicit diagnostic logging of slot allocation decisions, IST/UTC translations,
+    and reasons for any day advancement.
     """
     if tz is None:
         tz = IST
 
-    target_str = slot1_time_str if slot_index == 1 else slot2_time_str
-    s_h, s_m = [int(p) for p in target_str.split(":")]
-    slot_hhmm = f"{s_h:02d}:{s_m:02d}"
     lead = timedelta(minutes=min_lead_minutes)
     local_now = now_dt.astimezone(tz)
-    base_date = local_now.date()
-    occupied = occupied_by_date or {}
+    
+    if target_date:
+        if isinstance(target_date, str):
+            base_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+        else:
+            base_date = target_date
+    else:
+        base_date = local_now.date()
+
+    occupied = {k: set(v) for k, v in (occupied_by_date or {}).items()}
+
+    # Check primary target slot
+    primary_time_str = slot1_time_str if slot_index == 1 else slot2_time_str
+    p_h, p_m = [int(p) for p in primary_time_str.split(":")]
+    primary_hhmm = f"{p_h:02d}:{p_m:02d}"
+
+    # Alternate slot on the same day if primary slot has passed today
+    alt_slot_idx = 2 if slot_index == 1 else 1
+    alt_time_str = slot2_time_str if slot_index == 1 else slot1_time_str
+    a_h, a_m = [int(p) for p in alt_time_str.split(":")]
+    alt_hhmm = f"{a_h:02d}:{a_m:02d}"
 
     for day_offset in range(0, 30):
         day = base_date + timedelta(days=day_offset)
-        candidate = datetime(day.year, day.month, day.day, s_h, s_m, 0, tzinfo=tz)
-        if candidate < (local_now + lead):
-            continue
         date_key = day.strftime("%Y-%m-%d")
         day_slots = occupied.get(date_key, set())
-        if len(day_slots) >= max_per_day:
-            continue
-        if slot_hhmm in day_slots:
-            continue
-        return candidate
 
-    # Fallback (should never trigger within 30 days)
+        # If day is already at daily capacity, skip to next day
+        if len(day_slots) >= max_per_day:
+            logger.debug(
+                "allocate_slot_publication_time: Date %s at daily limit (%d/%d slots occupied: %s); checking next day",
+                date_key, len(day_slots), max_per_day, day_slots
+            )
+            continue
+
+        # Try primary slot
+        candidate_primary = datetime(day.year, day.month, day.day, p_h, p_m, 0, tzinfo=tz)
+        if candidate_primary >= (local_now + lead) and primary_hhmm not in day_slots:
+            utc_iso = candidate_primary.astimezone(timezone.utc).isoformat()
+            logger.info(
+                "allocate_slot_publication_time: Video '%s' Slot %d allocated %s %s IST (%s UTC) [offset=%d days]",
+                candidate_video_id or "auto", slot_index, date_key, primary_hhmm, utc_iso, day_offset
+            )
+            return candidate_primary
+
+        # If primary slot passed for today (offset=0) and same-day alternate is allowed:
+        if day_offset == 0 and allow_same_day_alternate:
+            candidate_alt = datetime(day.year, day.month, day.day, a_h, a_m, 0, tzinfo=tz)
+            if candidate_alt >= (local_now + lead) and alt_hhmm not in day_slots and len(day_slots) < max_per_day:
+                utc_iso = candidate_alt.astimezone(timezone.utc).isoformat()
+                logger.info(
+                    "allocate_slot_publication_time: Video '%s' primary slot %s passed today; allocated same-day alternate %s %s IST (%s UTC)",
+                    candidate_video_id or "auto", primary_hhmm, date_key, alt_hhmm, utc_iso
+                )
+                return candidate_alt
+
+    # Fallback to standard canonical time calculation
     t1, t2 = calculate_publication_times(now_dt, slot1_time_str, slot2_time_str, tz, min_lead_minutes)
-    return t1 if slot_index == 1 else t2
+    chosen = t1 if slot_index == 1 else t2
+    logger.warning(
+        "allocate_slot_publication_time: Reached 30-day window fallback for Slot %d; returning %s",
+        slot_index, chosen.strftime("%Y-%m-%d %H:%M IST")
+    )
+    return chosen
 
 
 class SchedulerLockError(Exception):
@@ -977,6 +1025,13 @@ class LocalScheduler:
 
         logger.info(f"=== Starting Daily Automation for Date: {today_str} (force_rebuild={force_rebuild}) ===")
 
+        # CRITICAL: Preserve Automatic Studio's 2 daily autonomous videos (09:00 IST and 19:00 IST)
+        try:
+            from curiosity_engine.creator_series.queue_manager import queue_manager
+            queue_manager.ensure_automatic_studio_reserved(today_str)
+        except Exception as q_exc:
+            logger.warning(f"Could not register Automatic Studio queue reservations ({q_exc}).")
+
         if not self.is_automation_enabled() and not force_rebuild:
             logger.info("Daily automation is currently PAUSED. Skipping batch run.")
             return automation_state.get_daily_record(today_str)
@@ -1295,6 +1350,19 @@ class LocalScheduler:
     # -------------------------------------------------------------------------
     # Catch-Up & Daemon Execution
     # -------------------------------------------------------------------------
+    def ensure_automatic_studio_preserved(self, target_date: Optional[str] = None) -> bool:
+        """Guarantee that Automatic Studio's 2 daily autonomous videos (09:00 IST & 19:00 IST)
+        are never disabled, cancelled, or displaced by Creator Series or other jobs.
+        """
+        date_str = target_date or self.now_ist().strftime("%Y-%m-%d")
+        try:
+            from curiosity_engine.creator_series.queue_manager import queue_manager
+            queue_manager.ensure_automatic_studio_reserved(date_str)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to verify Automatic Studio reservation for {date_str}: {e}")
+            return False
+
     def run_catchup_check(self) -> List[Dict[str, Any]]:
         """Evaluate missed jobs for today upon scheduler startup."""
         now = self.now_ist()

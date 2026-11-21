@@ -1,0 +1,48 @@
+/* CurioLoop 2.0 - Cinematic Typography Styles */
+
+.curioloop-title {
+    font-family: 'Cinzel', 'Trajan Pro', 'Georgia', serif;
+    font-size: clamp(2rem, 5vw, 4.5rem);
+    font-weight: 700;
+    color: #f7f3e8;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    text-shadow: 0 4px 24px rgba(0, 0, 0, 0.85);
+    margin: 0;
+    padding: 0;
+}
+
+.curioloop-subtitle {
+    font-family: 'Cinzel', serif;
+    font-size: clamp(1rem, 2.5vw, 1.8rem);
+    color: #d4af37;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    opacity: 0.92;
+}
+
+.curioloop-caption {
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: clamp(1.2rem, 3.2vw, 2.2rem);
+    font-weight: 600;
+    color: #ffffff;
+    line-height: 1.35;
+    text-align: center;
+    background: rgba(8, 12, 18, 0.72);
+    padding: 10px 22px;
+    border-radius: 6px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.curioloop-evidence-tag {
+    font-family: 'Courier New', monospace;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #ffaa22;
+    background: rgba(20, 28, 38, 0.9);
+    border-left: 4px solid #ffaa22;
+    padding: 6px 14px;
+    letter-spacing: 0.08em;
+    display: inline-block;
+}

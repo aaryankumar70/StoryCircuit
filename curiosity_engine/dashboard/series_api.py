@@ -6,9 +6,11 @@ story analysis, episode segmentation, scheduling, and QC inspection.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from curiosity_engine.creator_series.models import (
@@ -19,7 +21,14 @@ from curiosity_engine.creator_series.models import (
     SeriesStatus,
     VisualProfileType,
 )
+from curiosity_engine.creator_series.creator_studio_engine import CreatorStudioEngine
+from curiosity_engine.creator_series.production_planner import (
+    production_planner,
+    estimate_duration_seconds,
+)
+from curiosity_engine.creator_series.queue_manager import queue_manager
 from curiosity_engine.creator_series.series_db import series_db
+from curiosity_engine.creator_series.series_scheduler import series_scheduler
 from curiosity_engine.creator_series.story_adapter import story_adapter
 from curiosity_engine.creator_series.visual_director import visual_director
 from curiosity_engine.creator_series.visual_qc import visual_qc
@@ -60,6 +69,106 @@ class ScheduleSeriesRequest(BaseModel):
     slot: int = Field(2, ge=1, le=2)
 
 
+class SchedulePreviewRequest(BaseModel):
+    series_id: Optional[str] = None
+    episode_count: Optional[int] = None
+    schedule_type: Optional[str] = "A"  # 'A', 'B', 'C'
+    start_date: Optional[str] = None
+    start_time: Optional[str] = None
+    timezone: Optional[str] = "Asia/Kolkata"
+    cadence: Optional[str] = "daily"  # 'daily', 'alternate', 'custom'
+    custom_slots: Optional[List[str]] = None
+    custom_days: Optional[List[str]] = None
+    interval_days: Optional[int] = 1
+
+
+class ScheduleCommitRequest(BaseModel):
+    schedule_type: Optional[str] = "A"
+    start_date: Optional[str] = None
+    start_time: Optional[str] = None
+    timezone: Optional[str] = "Asia/Kolkata"
+    cadence: Optional[str] = "daily"
+    custom_slots: Optional[List[str]] = None
+    custom_days: Optional[List[str]] = None
+
+
+class ImportStoryRequest(BaseModel):
+    text: Optional[str] = None
+    filename: Optional[str] = "story.txt"
+    author: Optional[str] = "Anonymous"
+    source_url: Optional[str] = None
+    permission_status: Optional[str] = "UNVERIFIED_EVALUATION_ONLY"
+    attribution: Optional[str] = None
+
+
+class IngestPasteRequest(BaseModel):
+    raw_text: str = Field(..., min_length=1)
+    title: Optional[str] = None
+    author: Optional[str] = "Anonymous"
+    source_url: Optional[str] = None
+    permission_status: Optional[str] = "UNVERIFIED_EVALUATION_ONLY"
+    attribution: Optional[str] = None
+
+
+class IngestRedditRequest(BaseModel):
+    url: str = Field(..., min_length=10)
+    permission_status: Optional[str] = "UNVERIFIED_EVALUATION_ONLY"
+
+
+class AnalyzeStoryRequest(BaseModel):
+    raw_text: Optional[str] = None
+    series_id: Optional[str] = None
+    title: Optional[str] = None
+    use_local_ai: Optional[bool] = True
+
+
+class StoryBreakdownRequest(BaseModel):
+    series_id: Optional[str] = None
+    title: str = "Creator Series"
+    raw_text: str = Field(..., min_length=20)
+    duration_preset: str = Field("1m", description="1m (60s), 1.5m (90s), 3m (180s), or custom")
+    custom_seconds: Optional[float] = 60.0
+    author: Optional[str] = "Anonymous"
+    source_url: Optional[str] = None
+    permission_status: Optional[str] = "UNVERIFIED_EVALUATION_ONLY"
+    attribution: Optional[str] = None
+
+
+class RecommendPlansRequest(BaseModel):
+    series_id: Optional[str] = None
+    raw_text: Optional[str] = None
+    analysis: Optional[Dict[str, Any]] = None
+    title: Optional[str] = "Creator Story"
+    custom_seconds: Optional[float] = None
+
+
+class GenerateBreakdownRequest(BaseModel):
+    series_id: Optional[str] = None
+    title: Optional[str] = "Creator Series"
+    raw_text: Optional[str] = None
+    selected_plan: Optional[Dict[str, Any]] = None
+    duration_preset: Optional[str] = "1m"
+    custom_seconds: Optional[float] = None
+    rights_status: Optional[str] = "UNVERIFIED_EVALUATION_ONLY"
+    author: Optional[str] = "Anonymous"
+    source_url: Optional[str] = None
+
+
+class SingleEpisodeEditRequest(BaseModel):
+    title: Optional[str] = None
+    adapted_narration: Optional[str] = None
+    text: Optional[str] = None
+    hook: Optional[str] = None
+    cliffhanger: Optional[str] = None
+    visual_notes: Optional[str] = None
+
+
+class ApproveStoryboardRequest(BaseModel):
+    approved: bool = True
+    reviewer: Optional[str] = "Creator"
+    notes: Optional[str] = None
+
+
 @router.post("/create", status_code=status.HTTP_201_CREATED)
 def create_series(req: CreateSeriesRequest) -> Dict[str, Any]:
     """Create a new Creator Series in DRAFT state."""
@@ -83,6 +192,279 @@ def create_series(req: CreateSeriesRequest) -> Dict[str, Any]:
     )
     series_db.save_series(series)
     return {"status": "success", "series": series.to_dict()}
+
+
+@router.post("/import")
+def import_story_document(req: ImportStoryRequest) -> Dict[str, Any]:
+    """Ingest a story document (TXT, Markdown, raw text), analyze narrative structure and rights."""
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="Story text cannot be empty.")
+
+    ingested = CreatorStudioEngine.ingest_document(req.text, filename=req.filename or "story.txt")
+    clean_text = ingested["raw_text"] if isinstance(ingested, dict) else str(ingested)
+    analysis = CreatorStudioEngine.analyze_story(clean_text)
+    return {
+        "status": "success",
+        "clean_text": clean_text,
+        "word_count": len(clean_text.split()),
+        "analysis": analysis,
+        "rights": {
+            "author": req.author or "Anonymous",
+            "source_url": req.source_url,
+            "permission_status": req.permission_status,
+            "attribution": req.attribution,
+        },
+    }
+
+
+@router.post("/ingest/upload")
+async def ingest_upload(
+    file: UploadFile = File(...),
+    author: Optional[str] = Form("Anonymous"),
+    source_url: Optional[str] = Form(None),
+    permission_status: Optional[str] = Form("UNVERIFIED_EVALUATION_ONLY"),
+    attribution: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    """Multipart upload entry point for .txt, .md, and .docx documents."""
+    filename = file.filename or "uploaded_story.txt"
+    ext = Path(filename).suffix.lower()
+    if ext not in [".txt", ".md", ".markdown", ".docx"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file extension '{ext}'. Only .txt, .md, and .docx files are supported.",
+        )
+
+    content_bytes = await file.read()
+    if not content_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+
+    rights_data = {
+        "source_type": "FILE_UPLOAD",
+        "author": author or "Anonymous",
+        "source_url": source_url or "",
+        "rights_status": permission_status or "UNVERIFIED_EVALUATION_ONLY",
+        "permission_verified": permission_status in ["VERIFIED", "LICENSED", "OWNED"],
+        "attribution_statement": attribution or f"Story by {author or 'Creator'}",
+    }
+
+    try:
+        result = CreatorStudioEngine.ingest_document(
+            file_path_or_text=content_bytes,
+            filename=filename,
+            source_rights=rights_data,
+            save_upload=True,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except Exception as e:
+        logger.error("Failed to parse uploaded document %s: %s", filename, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process file: {e}",
+        )
+
+    return {
+        "status": "success",
+        "title": result["title"],
+        "raw_text": result["raw_text"],
+        "word_count": result["word_count"],
+        "estimated_spoken_duration_sec": result["estimated_spoken_duration_sec"],
+        "average_wpm": result["average_wpm"],
+        "file_type": result["file_type"],
+        "original_filename": result["original_filename"],
+        "preserved_path": result["preserved_path"],
+        "rights": result["rights"],
+    }
+
+
+@router.post("/ingest/paste")
+def ingest_paste(req: IngestPasteRequest) -> Dict[str, Any]:
+    """Long-form editing workspace entry point with word count and duration estimation."""
+    if not req.raw_text or not req.raw_text.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pasted text cannot be empty.")
+
+    rights_data = {
+        "source_type": "PASTE",
+        "author": req.author or "Anonymous",
+        "source_url": req.source_url or "",
+        "rights_status": req.permission_status or "UNVERIFIED_EVALUATION_ONLY",
+        "permission_verified": req.permission_status in ["VERIFIED", "LICENSED", "OWNED"],
+        "attribution_statement": req.attribution or f"Story by {req.author or 'Creator'}",
+    }
+
+    try:
+        result = CreatorStudioEngine.ingest_paste(
+            raw_text=req.raw_text,
+            title=req.title,
+            source_rights=rights_data,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+
+    return {
+        "status": "success",
+        "title": result["title"],
+        "raw_text": result["raw_text"],
+        "word_count": result["word_count"],
+        "estimated_spoken_duration_sec": result["estimated_spoken_duration_sec"],
+        "average_wpm": result["average_wpm"],
+        "rights": result["rights"],
+    }
+
+
+@router.post("/ingest/reddit")
+def ingest_reddit(req: IngestRedditRequest) -> Dict[str, Any]:
+    """Fetch public Reddit post via official JSON API, validating against deleted/removed/404."""
+    rights_data = {
+        "rights_status": req.permission_status or "UNVERIFIED_EVALUATION_ONLY",
+    }
+    try:
+        result = CreatorStudioEngine.ingest_reddit(url=req.url, source_rights=rights_data)
+        return {
+            "status": "success",
+            "title": result["title"],
+            "raw_text": result["raw_text"],
+            "word_count": result["word_count"],
+            "estimated_spoken_duration_sec": result["estimated_spoken_duration_sec"],
+            "average_wpm": result["average_wpm"],
+            "author": result["author"],
+            "subreddit": result["subreddit"],
+            "permalink": result["permalink"],
+            "score": result["score"],
+            "num_comments": result["num_comments"],
+            "over_18": result["over_18"],
+            "rights": result["rights"],
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except Exception as e:
+        logger.error("Reddit ingestion failed for URL %s: %s", req.url, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch Reddit post: {e}")
+
+
+@router.post("/analyze")
+def analyze_story_endpoint(req: AnalyzeStoryRequest) -> Dict[str, Any]:
+    """Accepts raw text or series_id and returns deep narrative analysis without episode splitting."""
+    text_to_analyze = req.raw_text
+    story_title = req.title
+
+    if not text_to_analyze and req.series_id:
+        series = series_db.get_series(req.series_id)
+        if not series:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Series with ID '{req.series_id}' not found.",
+            )
+        text_to_analyze = series.full_script
+        if not story_title:
+            story_title = series.title
+
+    if not text_to_analyze or not text_to_analyze.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either 'raw_text' or a valid 'series_id' containing story script must be provided.",
+        )
+
+    try:
+        analysis = CreatorStudioEngine.analyze_story(
+            raw_text_or_dict=text_to_analyze,
+            title=story_title,
+            use_local_ai=req.use_local_ai if req.use_local_ai is not None else True,
+        )
+    except Exception as e:
+        logger.error("Story analysis failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Intelligent story analysis failed: {e}",
+        )
+
+    return {
+        "status": "success",
+        "title": analysis.get("title", story_title or "Creator Series"),
+        "genre": analysis.get("genre", "Psychological Horror"),
+        "word_count": analysis.get("word_count", len(text_to_analyze.split())),
+        "estimated_spoken_duration_sec": analysis.get("estimated_spoken_duration_sec", 0.0),
+        "analysis": analysis,
+    }
+
+
+@router.post("/breakdown")
+def generate_series_breakdown(req: StoryBreakdownRequest) -> Dict[str, Any]:
+    """Segment long-form story into organic episodes at sentence boundaries and persist to SeriesDatabase."""
+    preset_durations = {
+        "1m": 60.0,
+        "1.5m": 90.0,
+        "3m": 180.0,
+    }
+    target_sec = preset_durations.get(req.duration_preset, req.custom_seconds or 60.0)
+
+    rights_data = {
+        "author": req.author or "Anonymous",
+        "source_url": req.source_url,
+        "permission_status": req.permission_status or "UNVERIFIED_EVALUATION_ONLY",
+        "attribution": req.attribution,
+    }
+
+    breakdown = CreatorStudioEngine.segment_into_episodes(
+        raw_text=req.raw_text,
+        target_duration_sec=target_sec,
+        series_title=req.title,
+        rights_data=rights_data,
+    )
+
+    series_id = req.series_id or f"series_{int(datetime.now().timestamp())}"
+    episodes_data = breakdown.get("episodes", [])
+    ep_records: List[EpisodeRecord] = []
+    ep_ids: List[str] = []
+
+    for ep in episodes_data:
+        ep_num = ep.get("episode_index", 1)
+        ep_id = f"{series_id}_ep{ep_num:02d}"
+        ep_rec = EpisodeRecord(
+            episode_id=ep_id,
+            series_id=series_id,
+            episode_num=ep_num,
+            title=ep.get("title", f"Episode {ep_num}"),
+            adapted_narration=ep.get("narration", ""),
+            source_segment=ep.get("narration", ""),
+            hook=ep.get("opening_hook", ""),
+            cliffhanger=ep.get("cliffhanger", ""),
+            estimated_duration=float(ep.get("estimated_duration_sec", target_sec)),
+            status=EpisodeStatus.ADAPTED,
+        )
+        series_db.save_episode(ep_rec)
+        ep_records.append(ep_rec)
+        ep_ids.append(ep_id)
+
+    rights_status = RightsStatus.UNVERIFIED_EVALUATION_ONLY
+    if req.permission_status in ["VERIFIED", "LICENSED"]:
+        rights_status = RightsStatus.LICENSED
+    elif req.permission_status == "PUBLIC_DOMAIN":
+        rights_status = RightsStatus.PUBLIC_DOMAIN
+    elif req.permission_status == "OWNED":
+        rights_status = RightsStatus.OWNED
+
+    series = SeriesRecord(
+        series_id=series_id,
+        title=req.title,
+        full_script=req.raw_text,
+        creator_info={"name": req.author, "source": req.source_url},
+        content_type="creator_story",
+        visual_profile="psychological_horror",
+        rights_status=rights_status,
+        target_duration=target_sec,
+        planned_episodes=len(ep_records),
+        episode_ids=ep_ids,
+        status=SeriesStatus.READY,
+    )
+    series_db.save_series(series)
+
+    return {
+        "status": "success",
+        "series": series.to_dict(),
+        "breakdown": breakdown,
+        "episodes": [e.to_dict() for e in ep_records],
+    }
 
 
 @router.get("")
@@ -163,6 +545,12 @@ def edit_episode_script(series_id: str, req: EditEpisodeRequest) -> Dict[str, An
     if req.adapted_narration:
         ep.adapted_narration = req.adapted_narration
         ep.estimated_duration = story_adapter.estimate_narration_duration(req.adapted_narration)
+        # Enforce cascading invalidation
+        ep.status = EpisodeStatus.STALE_INVALIDATED
+        ep.rendered_video_path = None
+        ep.audio_path = None
+        ep.visual_storyboard_path = None
+        ep.qc_result = None
     if req.hook:
         ep.hook = req.hook
     if req.cliffhanger:
@@ -230,13 +618,17 @@ def activate_series(series_id: str) -> Dict[str, Any]:
 
 @router.post("/{series_id}/pause")
 def pause_series(series_id: str) -> Dict[str, Any]:
-    """Pause series to yield Slot 2 back to automatic Lane A content."""
+    """Pause series to yield execution while preserving Automatic Studio."""
     series = series_db.get_series(series_id)
     if not series:
         raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
-    series.status = SeriesStatus.PAUSED
-    series_db.save_series(series)
-    return {"status": "success", "series_status": series.status}
+    res = queue_manager.pause_series(series_id, s_db=series_db)
+    return {
+        "status": "success",
+        "series_status": res["series_status"],
+        "series_id": series_id,
+        "paused_jobs": res.get("paused_jobs", 0),
+    }
 
 
 @router.post("/{series_id}/resume")
@@ -247,9 +639,37 @@ def resume_series(series_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
     if series.status != SeriesStatus.PAUSED:
         raise HTTPException(status_code=400, detail=f"Series is '{series.status}', not PAUSED.")
-    series.status = SeriesStatus.ACTIVE
-    series_db.save_series(series)
-    return {"status": "success", "series_status": series.status}
+    res = queue_manager.resume_series(series_id, s_db=series_db)
+    return {
+        "status": "success",
+        "series_status": res["series_status"],
+        "series_id": series_id,
+        "resumed_jobs": res.get("resumed_jobs", 0),
+    }
+
+
+@router.post("/{series_id}/cancel")
+def cancel_series(series_id: str) -> Dict[str, Any]:
+    """Cancel series execution and dequeue all pending episodes."""
+    series = series_db.get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
+    res = queue_manager.cancel_series(series_id, s_db=series_db)
+    return {
+        "status": "success",
+        "series_status": res["series_status"],
+        "series_id": series_id,
+        "cancelled_jobs": res.get("cancelled_jobs", 0),
+    }
+
+
+@router.get("/{series_id}/queue-status")
+def get_series_queue_status(series_id: str) -> Dict[str, Any]:
+    """Return production lifecycle statuses across all episodes in the series."""
+    try:
+        return queue_manager.get_series_queue_status(series_id, s_db=series_db)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/{series_id}/complete")
@@ -261,3 +681,188 @@ def complete_series_manually(series_id: str) -> Dict[str, Any]:
     series.status = SeriesStatus.COMPLETED
     series_db.save_series(series)
     return {"status": "success", "series_status": series.status}
+    return {"status": "success", "series_status": series.status}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Step 3: Production-Plan Recommendations
+# ──────────────────────────────────────────────────────────────────────────
+
+@router.post("/recommend-plans")
+def recommend_production_plans(req: RecommendPlansRequest) -> Dict[str, Any]:
+    """Generates 2-3 dynamic production plans based on natural narrative stopping points with trade-off analysis."""
+    raw_text = req.raw_text
+    title = req.title or "Creator Story"
+
+    if not raw_text and req.series_id:
+        series = series_db.get_series(req.series_id)
+        if not series:
+            raise HTTPException(status_code=404, detail=f"Series '{req.series_id}' not found.")
+        raw_text = series.full_script
+        title = series.title
+
+    if not raw_text or not raw_text.strip():
+        raise HTTPException(status_code=400, detail="Either 'raw_text' or valid 'series_id' must be provided.")
+
+    plans = production_planner.generate_production_plans(
+        raw_text=raw_text,
+        title=title,
+        analysis=req.analysis,
+        custom_seconds=req.custom_seconds,
+    )
+
+    return {
+        "status": "success",
+        "story_title": title,
+        "total_words": len(raw_text.split()),
+        "estimated_total_duration_sec": estimate_duration_seconds(raw_text),
+        "recommended_plans": plans,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Step 4: Episode Breakdown & Three.js Storyboard Generation
+# ──────────────────────────────────────────────────────────────────────────
+
+@router.post("/generate-breakdown")
+def generate_breakdown(req: GenerateBreakdownRequest) -> Dict[str, Any]:
+    """Accepts selected plan and generates episode scripts and Three.js visual scene storyboards."""
+    raw_text = req.raw_text
+    title = req.title or "Creator Series"
+
+    if not raw_text and req.series_id:
+        series = series_db.get_series(req.series_id)
+        if series:
+            raw_text = series.full_script
+            if not req.title or req.title == "Creator Series":
+                title = series.title
+
+    if not raw_text or not raw_text.strip():
+        raise HTTPException(status_code=400, detail="Either 'raw_text' or valid 'series_id' must be provided.")
+
+    series_rec, ep_records = production_planner.generate_episode_breakdown_and_storyboards(
+        raw_text=raw_text,
+        series_id=req.series_id,
+        title=title,
+        selected_plan=req.selected_plan,
+        duration_preset=req.duration_preset or "1m",
+        custom_seconds=req.custom_seconds,
+        rights_status=req.rights_status or "UNVERIFIED_EVALUATION_ONLY",
+        author=req.author or "Anonymous",
+        source_url=req.source_url,
+    )
+
+    return {
+        "status": "success",
+        "series": series_rec.to_dict(),
+        "episodes": [ep.to_dict() for ep in ep_records],
+        "total_episodes": len(ep_records),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Step 4: Granular Episode Editing with Cascading Invalidation
+# ──────────────────────────────────────────────────────────────────────────
+
+@router.put("/episodes/{episode_id}")
+@router.post("/episodes/{episode_id}")
+def edit_single_episode(episode_id: str, req: SingleEpisodeEditRequest) -> Dict[str, Any]:
+    """Granular edit of a single episode with cascading invalidation (STALE_INVALIDATED).
+    Untouched episodes in the series remain completely unaffected.
+    """
+    try:
+        narration = req.adapted_narration or req.text
+        ep = production_planner.edit_single_episode_with_invalidation(
+            episode_id=episode_id,
+            title=req.title,
+            adapted_narration=narration,
+            hook=req.hook,
+            cliffhanger=req.cliffhanger,
+            visual_notes=req.visual_notes,
+        )
+        return {
+            "status": "success",
+            "message": f"Episode '{episode_id}' updated and marked STALE_INVALIDATED.",
+            "episode": ep.to_dict(),
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Episode '{episode_id}' not found.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Step 4: Visual Storyboard Approval Gate
+# ──────────────────────────────────────────────────────────────────────────
+
+@router.post("/episodes/{episode_id}/approve")
+def approve_episode_storyboard(episode_id: str, req: Optional[ApproveStoryboardRequest] = None) -> Dict[str, Any]:
+    """Sets visual storyboard approval status on a single episode."""
+    r = req or ApproveStoryboardRequest()
+    try:
+        ep = production_planner.set_storyboard_approval(
+            episode_id=episode_id,
+            approved=r.approved,
+            reviewer=r.reviewer or "Creator",
+            notes=r.notes,
+        )
+        return {
+            "status": "success",
+            "episode_id": episode_id,
+            "is_approved": ep.is_approved,
+            "episode_status": ep.status.value,
+            "episode": ep.to_dict(),
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Episode '{episode_id}' not found.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Step 5: Scheduling Planner
+# ──────────────────────────────────────────────────────────────────────────
+
+@router.post("/schedule/preview")
+def preview_series_schedule(req: SchedulePreviewRequest) -> Dict[str, Any]:
+    """Generate calendar release preview and estimated completion date."""
+    try:
+        preview = series_scheduler.generate_calendar_preview(
+            series_id=req.series_id,
+            episode_count=req.episode_count,
+            schedule_type=req.schedule_type or "A",
+            start_date=req.start_date,
+            start_time=req.start_time,
+            timezone_name=req.timezone or "Asia/Kolkata",
+            cadence=req.cadence or "daily",
+            custom_slots=req.custom_slots,
+            custom_days=req.custom_days,
+            interval_days=req.interval_days or 1,
+            s_db=series_db,
+        )
+        return preview
+    except Exception as e:
+        logger.error(f"Schedule preview generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Schedule preview failed: {e}")
+
+
+@router.post("/{series_id}/schedule/commit")
+def commit_series_schedule(series_id: str, req: ScheduleCommitRequest) -> Dict[str, Any]:
+    """Lock in publication schedule and enqueue episodes into sequential queue."""
+    series = series_db.get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
+    try:
+        config_payload = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+        res = series_scheduler.commit_series_schedule(
+            series_id=series_id,
+            schedule_config=config_payload,
+            s_db=series_db,
+        )
+        enqueued = queue_manager.enqueue_series(series_id, s_db=series_db)
+        res["enqueued_jobs"] = len(enqueued)
+        res["queue_status"] = queue_manager.get_series_queue_status(series_id, s_db=series_db)
+        return res
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Schedule commit failed for series '{series_id}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to commit schedule: {e}")
+
+

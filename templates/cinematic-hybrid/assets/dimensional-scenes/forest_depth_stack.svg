@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="100%" height="100%">
+  <defs>
+    <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#05070e"/>
+      <stop offset="60%" stop-color="#0e1726"/>
+      <stop offset="100%" stop-color="#1b2a47"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#skyGrad)"/>
+  <!-- Distant mountain silhouette -->
+  <path d="M0 680 L240 610 L520 650 L840 580 L1200 640 L1600 590 L1920 630 L1920 1080 L0 1080 Z" fill="#080e18" opacity="0.8"/>
+  <!-- Midground Pine Canopy -->
+  <path d="M0 760 Q200 710 400 740 T800 720 T1200 750 T1600 730 T1920 750 L1920 1080 L0 1080 Z" fill="#050910" opacity="0.95"/>
+</svg>

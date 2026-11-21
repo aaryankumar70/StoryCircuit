@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="100%" height="100%">
+  <!-- Outer 9:16 Frame -->
+  <rect width="1080" height="1920" fill="none" stroke="#444" stroke-width="4"/>
+  <!-- 80% Safe Zone Inner Boundary -->
+  <rect x="108" y="192" width="864" height="1536" fill="none" stroke="#22d4d8" stroke-width="3" stroke-dasharray="12 6"/>
+  <text x="120" y="230" fill="#22d4d8" font-family="sans-serif" font-size="24">80% CORE CONTENT SAFE ZONE</text>
+  <!-- YouTube Shorts / TikTok UI Obstruction Masks -->
+  <!-- Top Account Bar Area -->
+  <rect x="0" y="0" width="1080" height="180" fill="#ff0000" opacity="0.15"/>
+  <text x="540" y="100" text-anchor="middle" fill="#ff4444" font-family="sans-serif" font-size="28">TOP HEADER & SEARCH (UNSAFE)</text>
+  <!-- Right-hand Interaction Column (Like, Share, Sound) -->
+  <rect x="920" y="900" width="160" height="720" fill="#ff0000" opacity="0.2"/>
+  <text x="1000" y="1250" text-anchor="middle" fill="#ff4444" font-family="sans-serif" font-size="22" transform="rotate(-90 1000 1250)">ENGAGEMENT BUTTONS (UNSAFE)</text>
+  <!-- Bottom Caption & Audio Attribution Area -->
+  <rect x="0" y="1620" width="1080" height="300" fill="#ff0000" opacity="0.25"/>
+  <text x="540" y="1780" text-anchor="middle" fill="#ff4444" font-family="sans-serif" font-size="28">TITLE, HANDLE & AUDIO BAR (UNSAFE)</text>
+</svg>

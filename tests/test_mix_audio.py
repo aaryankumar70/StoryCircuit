@@ -6,9 +6,7 @@ import numpy as np
 import pytest
 
 TEMPLATES = [
-    Path("templates/inside-out/tools/mix.py"),
-    Path("templates/paper-atlas/tools/mix.py"),
-    Path("templates/stick-story/tools/mix.py"),
+    Path("templates/narrative-engine/tools/mix.py"),
 ]
 
 

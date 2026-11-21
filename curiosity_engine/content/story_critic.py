@@ -36,8 +36,18 @@ from curiosity_engine.content.editorial_policy import (
     is_forbidden_content,
 )
 from curiosity_engine.content.gemini_client import gemini_client
+from curiosity_engine.intelligence.local_model import local_model
 
 logger = logging.getLogger("curiosity_engine.story_critic")
+
+def _resolve_ai_client(client: Optional[Any] = None) -> Optional[Any]:
+    if client:
+        return client
+    if local_model.is_available():
+        return local_model
+    if gemini_client.is_configured():
+        return gemini_client
+    return None
 
 CRITIC_DIMENSIONS = (
     "hook_strength",
@@ -217,8 +227,8 @@ def evaluate_script_critique(
     dossier: Any,
     client: Optional[Any] = None,
 ) -> CriticReport:
-    """Evaluate a storytelling script using Gemini Call 2 if available, or deterministic evaluator."""
-    c = client or gemini_client
+    """Evaluate a storytelling script using local model / Gemini Call 2 if available, or deterministic evaluator."""
+    c = _resolve_ai_client(client)
     if not c or not c.is_configured():
         return _deterministic_critique(script_data, dossier)
 
@@ -311,7 +321,7 @@ def critique_and_rewrite(
 
     logger.info("Script did not meet critic thresholds (overall=%.2f, passed=%s). Executing targeted rewrite.", report.overall_score, report.passed)
 
-    c = client or gemini_client
+    c = _resolve_ai_client(client)
     if not c or not c.is_configured():
         # Deterministic targeted rewrite
         repaired = _deterministic_rewrite(script_data, report.weakest_dimensions, validator_errors)
@@ -463,7 +473,7 @@ def repair_script_emergency(
         return script_data
 
     logger.info("Executing Call 3 Emergency Repair for %d validator errors.", len(validator_errors))
-    c = client or gemini_client
+    c = _resolve_ai_client(client)
     if not c or not c.is_configured():
         return _deterministic_rewrite(script_data, [], validator_errors)
 

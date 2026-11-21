@@ -1,0 +1,11 @@
+{
+  "palette_id": "PALETTE-EXTRATERRESTRIAL-CANONICAL",
+  "colors": {
+    "deep_cosmos_obsidian": "#030408",
+    "night_sky_violet": "#0b0c1e",
+    "radio_waterfall_cyan": "#00f0ff",
+    "radar_cathode_green": "#1af55d",
+    "pulsar_ionization_magenta": "#e028b0",
+    "unresolved_telemetry_amber": "#ffbe3b"
+  }
+}

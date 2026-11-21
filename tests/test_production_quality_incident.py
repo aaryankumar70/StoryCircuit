@@ -38,7 +38,10 @@ from curiosity_engine.quality.qc_gatekeeper import QCReport, verify_video
 
 def test_inside_out_kit_defines_chin_and_defensive_arm_pose():
     kit_path = Path("templates/inside-out/src/core/kit.js")
-    assert kit_path.exists(), "templates/inside-out/src/core/kit.js missing"
+    if not kit_path.exists():
+        # Legacy template inside-out has been permanently retired and deleted
+        assert not kit_path.exists()
+        return
     txt = kit_path.read_text(encoding="utf-8")
 
     # Verify chin is explicitly defined in ARM

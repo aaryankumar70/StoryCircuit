@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750" width="100%" height="100%">
+  <defs>
+    <radialGradient id="frameVignette" cx="50%" cy="50%" r="50%">
+      <stop offset="60%" stop-color="#140608"/>
+      <stop offset="100%" stop-color="#060203"/>
+    </radialGradient>
+  </defs>
+  <!-- Ornate Gilded Outer Molding -->
+  <rect x="20" y="20" width="560" height="710" fill="#917227" stroke="#4a3910" stroke-width="8"/>
+  <rect x="40" y="40" width="520" height="670" fill="#d4af37" stroke="#68521c" stroke-width="6"/>
+  <rect x="70" y="70" width="460" height="610" fill="#b08b26" stroke="#4a3910" stroke-width="4"/>
+  <!-- Vacant Velvet Canvas Backing -->
+  <rect x="100" y="100" width="400" height="550" fill="url(#frameVignette)"/>
+  <!-- Exposed Wire Hooks Inside -->
+  <line x1="280" y1="120" x2="300" y2="150" stroke="#777" stroke-width="3"/>
+  <line x1="320" y1="120" x2="300" y2="150" stroke="#777" stroke-width="3"/>
+  <circle cx="300" cy="150" r="4" fill="#aaa"/>
+  <!-- Museum Label Plaque -->
+  <rect x="220" y="675" width="160" height="35" fill="#111" stroke="#d4af37" stroke-width="2"/>
+  <text x="300" y="698" text-anchor="middle" fill="#d4af37" font-family="'Times New Roman', serif" font-size="13" letter-spacing="1">LOUVRE - 1911</text>
+</svg>

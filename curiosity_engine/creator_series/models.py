@@ -19,22 +19,94 @@ class SeriesStatus(str, Enum):
     READY = "READY"
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
+    CANCELLED = "CANCELLED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
 
 class EpisodeStatus(str, Enum):
+    # Step 6 Production Lifecycle statuses
+    PLANNED = "PLANNED"
+    SCRIPT_READY = "SCRIPT_READY"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    IN_PRODUCTION = "IN_PRODUCTION"
+    QC_FAILED = "QC_FAILED"
+    READY_FOR_PUBLISHING = "READY_FOR_PUBLISHING"
+    SCHEDULED = "SCHEDULED"
+    PUBLISHED = "PUBLISHED"
+
+    # Additional pipeline and backward-compatible states
     DRAFT = "DRAFT"
     ADAPTED = "ADAPTED"
     STORYBOARDED = "STORYBOARDED"
     AUDIO_READY = "AUDIO_READY"
     RENDERED = "RENDERED"
     QC_PASSED = "QC_PASSED"
-    QC_FAILED = "QC_FAILED"
     READY = "READY"
-    SCHEDULED = "SCHEDULED"
-    PUBLISHED = "PUBLISHED"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    STALE_INVALIDATED = "STALE_INVALIDATED"
+
+
+EPISODE_STATUS_DISPLAY_MAP: Dict[EpisodeStatus, str] = {
+    EpisodeStatus.PLANNED: "Planned",
+    EpisodeStatus.DRAFT: "Planned",
+    EpisodeStatus.SCRIPT_READY: "Script ready",
+    EpisodeStatus.ADAPTED: "Script ready",
+    EpisodeStatus.AWAITING_APPROVAL: "Awaiting approval",
+    EpisodeStatus.STORYBOARDED: "Awaiting approval",
+    EpisodeStatus.IN_PRODUCTION: "In production",
+    EpisodeStatus.AUDIO_READY: "In production",
+    EpisodeStatus.RENDERED: "In production",
+    EpisodeStatus.QC_FAILED: "QC failed",
+    EpisodeStatus.FAILED: "QC failed",
+    EpisodeStatus.READY_FOR_PUBLISHING: "Ready for publishing",
+    EpisodeStatus.QC_PASSED: "Ready for publishing",
+    EpisodeStatus.READY: "Ready for publishing",
+    EpisodeStatus.SCHEDULED: "Scheduled",
+    EpisodeStatus.PUBLISHED: "Published",
+    EpisodeStatus.CANCELLED: "Cancelled",
+    EpisodeStatus.STALE_INVALIDATED: "Planned",
+}
+
+
+def normalize_episode_status(val: Any) -> EpisodeStatus:
+    """Normalize any string or enum value to valid EpisodeStatus enum."""
+    if isinstance(val, EpisodeStatus):
+        return val
+    s = str(val or "").strip().upper().replace(" ", "_")
+    alias_map = {
+        "PLANNED": EpisodeStatus.PLANNED,
+        "DRAFT": EpisodeStatus.DRAFT,
+        "SCRIPT_READY": EpisodeStatus.SCRIPT_READY,
+        "ADAPTED": EpisodeStatus.ADAPTED,
+        "AWAITING_APPROVAL": EpisodeStatus.AWAITING_APPROVAL,
+        "STORYBOARDED": EpisodeStatus.STORYBOARDED,
+        "IN_PRODUCTION": EpisodeStatus.IN_PRODUCTION,
+        "AUDIO_READY": EpisodeStatus.AUDIO_READY,
+        "RENDERED": EpisodeStatus.RENDERED,
+        "QC_FAILED": EpisodeStatus.QC_FAILED,
+        "FAILED": EpisodeStatus.FAILED,
+        "READY_FOR_PUBLISHING": EpisodeStatus.READY_FOR_PUBLISHING,
+        "QC_PASSED": EpisodeStatus.QC_PASSED,
+        "READY": EpisodeStatus.READY,
+        "SCHEDULED": EpisodeStatus.SCHEDULED,
+        "PUBLISHED": EpisodeStatus.PUBLISHED,
+        "CANCELLED": EpisodeStatus.CANCELLED,
+        "STALE_INVALIDATED": EpisodeStatus.STALE_INVALIDATED,
+    }
+    return alias_map.get(s, EpisodeStatus.PLANNED)
+
+
+def normalize_series_status(val: Any) -> SeriesStatus:
+    """Normalize any string or enum value to valid SeriesStatus enum."""
+    if isinstance(val, SeriesStatus):
+        return val
+    s = str(val or "").strip().upper().replace(" ", "_")
+    try:
+        return SeriesStatus(s)
+    except ValueError:
+        return SeriesStatus.DRAFT
 
 
 class VisualProfileType(str, Enum):
@@ -89,8 +161,8 @@ class SeriesRecord:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SeriesRecord":
         copied = dict(data)
-        if "status" in copied and isinstance(copied["status"], str):
-            copied["status"] = SeriesStatus(copied["status"])
+        if "status" in copied:
+            copied["status"] = normalize_series_status(copied["status"])
         if "rights_status" in copied and isinstance(copied["rights_status"], str):
             copied["rights_status"] = RightsStatus(copied["rights_status"])
         # filter unexpected keys
@@ -124,17 +196,27 @@ class EpisodeRecord:
     qc_result: Optional[Dict[str, Any]] = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    is_approved: bool = False
+    approval_date: Optional[str] = None
+    version: int = 1
+    storyboard: Optional[Dict[str, Any]] = None
+
+    @property
+    def lifecycle_status(self) -> str:
+        status_enum = self.status if isinstance(self.status, EpisodeStatus) else normalize_episode_status(self.status)
+        return EPISODE_STATUS_DISPLAY_MAP.get(status_enum, str(status_enum.value))
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["status"] = self.status.value if isinstance(self.status, EpisodeStatus) else str(self.status)
+        d["lifecycle_status"] = self.lifecycle_status
         return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "EpisodeRecord":
         copied = dict(data)
-        if "status" in copied and isinstance(copied["status"], str):
-            copied["status"] = EpisodeStatus(copied["status"])
+        if "status" in copied:
+            copied["status"] = normalize_episode_status(copied["status"])
         valid_fields = {f for f in cls.__dataclass_fields__}
         filtered = {k: v for k, v in copied.items() if k in valid_fields}
         return cls(**filtered)

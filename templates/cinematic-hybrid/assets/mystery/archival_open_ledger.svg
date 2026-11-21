@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <defs>
+    <linearGradient id="parchment" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#e2d2b5"/>
+      <stop offset="48%" stop-color="#fff8ed"/>
+      <stop offset="50%" stop-color="#b8a688"/>
+      <stop offset="52%" stop-color="#fff8ed"/>
+      <stop offset="100%" stop-color="#e2d2b5"/>
+    </linearGradient>
+    <linearGradient id="brassKey" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="50%" stop-color="#ca8a04"/>
+      <stop offset="100%" stop-color="#713f12"/>
+    </linearGradient>
+  </defs>
+  <!-- Dark Wood Desk Surface -->
+  <rect x="80" y="160" width="920" height="760" fill="#1a140f" rx="12" stroke="#0a0806" stroke-width="8"/>
+  
+  <!-- Open Leather Bound Journal -->
+  <rect x="180" y="240" width="720" height="520" fill="#3e271a" rx="14" stroke="#23150d" stroke-width="6"/>
+  <!-- Two Vellum Folio Pages -->
+  <rect x="200" y="260" width="680" height="480" fill="url(#parchment)" rx="6"/>
+  
+  <!-- Left Page: Historical Faded Entries -->
+  <g opacity="0.45" stroke="#451a03" stroke-width="3" stroke-linecap="round">
+    <line x1="240" y1="320" x2="480" y2="320"/>
+    <line x1="240" y1="360" x2="460" y2="360"/>
+    <line x1="240" y1="400" x2="490" y2="400"/>
+    <line x1="240" y1="440" x2="430" y2="440"/>
+    <line x1="240" y1="480" x2="470" y2="480"/>
+  </g>
+
+  <!-- Right Page: Fresh Black Ink Incident Entry -->
+  <text x="560" y="340" font-family="'Courier New', monospace" font-size="28" font-weight="900" fill="#09090b">ENTRY: 21-NOV</text>
+  <path d="M 560 380 Q 640 375 740 380 Q 800 385 840 380" fill="none" stroke="#09090b" stroke-width="5" stroke-linecap="round"/>
+  <path d="M 560 430 Q 620 425 720 430 Q 780 435 820 430" fill="none" stroke="#09090b" stroke-width="4" stroke-linecap="round"/>
+  <text x="560" y="500" font-family="Georgia, serif" font-size="34" font-weight="bold" fill="#09090b" font-style="italic">Officer Miller</text>
+  <circle cx="780" cy="495" r="5" fill="#09090b"/>
+
+  <!-- Recovered Wet Brass River Key (Right Fore-Stage) -->
+  <g transform="translate(620, 560) rotate(24)">
+    <circle cx="60" cy="60" r="38" fill="none" stroke="url(#brassKey)" stroke-width="16"/>
+    <rect x="85" y="52" width="110" height="18" fill="url(#brassKey)" rx="4"/>
+    <!-- Key Bit Teeth -->
+    <rect x="165" y="70" width="14" height="28" fill="url(#brassKey)"/>
+    <rect x="185" y="70" width="10" height="20" fill="url(#brassKey)"/>
+  </g>
+</svg>

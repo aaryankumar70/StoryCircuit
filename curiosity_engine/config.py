@@ -81,22 +81,23 @@ CONTENT_PILLARS = [
 
 # Visual Style Mappings
 STYLE_MAPPINGS = {
-    "MYSTERY": "paper-atlas",
-    "HISTORY": "paper-atlas",
-    "SPACE": "inside-out",
-    "Mysteries": "paper-atlas",
-    "History": "paper-atlas",
-    "Space": "inside-out",
-    "Unexplained events": "paper-atlas",
-    "Survival": "stick-story",
-    "Interesting discoveries": "paper-atlas",
+    "MYSTERY": "cinematic-hybrid",
+    "HISTORY": "cinematic-hybrid",
+    "SPACE": "cinematic-hybrid",
+    "Mysteries": "cinematic-hybrid",
+    "History": "cinematic-hybrid",
+    "Space": "cinematic-hybrid",
+    "Unexplained events": "cinematic-hybrid",
+    "Survival": "cinematic-hybrid",
+    "Interesting discoveries": "cinematic-hybrid",
 }
 
-# Voice Configuration
+# Voice Configuration (Kokoro ONNX 82M)
 VOICE_MAP = {
-    "inside-out": "am_michael",   # US male, steady explainer
-    "paper-atlas": "bm_george",   # UK male, documentary
-    "stick-story": "am_puck",     # US male, lively & engaging
+    "cinematic-hybrid": "bm_george",   # Deep, warm, resonant, authoritative documentary narrator
+    "inside-out": "am_michael",        # US male, steady explainer
+    "paper-atlas": "bm_george",        # UK male, documentary
+    "stick-story": "am_puck",          # US male, lively & engaging
 }
 
 # Gemini API Settings (Free Tier: 15 RPM / 1M TPM)

@@ -37,6 +37,7 @@ from curiosity_engine.content.editorial_policy import (
     validate_editorial_category,
 )
 from curiosity_engine.content.gemini_client import gemini_client
+from curiosity_engine.intelligence.local_model import local_model
 from curiosity_engine.content.narrative_engine import (
     build_documentary_outline,
     generate_draft_script,
@@ -689,9 +690,10 @@ def revise_script_for_duration(
     if not lines:
         return revised, "No lines to revise"
 
-    # Case A: Exceeded MAX_DURATION_SEC (> 60s) -> condense via Gemini or drop filler clauses while preserving hook & ending
+    # Case A: Exceeded MAX_DURATION_SEC (> 60s) -> condense via local_model / Gemini or drop filler clauses while preserving hook & ending
     if current_duration_sec > MAX_DURATION_SEC:
-        if gemini_client.is_configured():
+        ai_client = local_model if local_model.is_available() else (gemini_client if gemini_client.is_configured() else None)
+        if ai_client:
             existing_text = "\n".join(f"{i+1}. {ln['text']}" for i, ln in enumerate(lines))
             prompt = f"""
 Revise the following narration script cleanly because it rendered to {current_duration_sec:.1f}s, exceeding the 60s hard maximum.
@@ -706,26 +708,29 @@ Original lines:
 
 Return strict JSON: {{"lines": [{{"text": "...", "gap": 0.25}}]}}
 """
-            ai_res = gemini_client.generate_json(prompt)
-            if ai_res and isinstance(ai_res.get("lines"), list) and len(ai_res["lines"]) >= 4:
-                new_lines = []
-                for idx, raw_ln in enumerate(ai_res["lines"]):
-                    txt = _strip_pii_and_links(str(raw_ln.get("text", "")))
-                    if not txt:
-                        continue
-                    old_scene = lines[min(idx, len(lines) - 1)].get("scene")
-                    new_lines.append({
-                        "text": txt,
-                        "caps": format_auto_caps(txt),
-                        "gap": min(0.30, max(0.18, float(raw_ln.get("gap", 0.24)))),
-                        "scene": old_scene,
-                    })
-                if MIN_WORD_COUNT <= count_spoken_words(new_lines) <= MAX_WORD_COUNT:
-                    revised["lines"] = new_lines
-                    revised["lead"] = min(float(revised.get("lead", 0.4)), 0.35)
-                    revised["outro"] = min(float(revised.get("outro", 0.7)), 0.55)
-                    assign_line_scenes(revised)
-                    return revised, f"Condensed script via AI from {current_duration_sec:.1f}s to {count_spoken_words(new_lines)} words"
+            try:
+                ai_res = ai_client.generate_json(prompt)
+                if ai_res and isinstance(ai_res.get("lines"), list) and len(ai_res["lines"]) >= 4:
+                    new_lines = []
+                    for idx, raw_ln in enumerate(ai_res["lines"]):
+                        txt = _strip_pii_and_links(str(raw_ln.get("text", "")))
+                        if not txt:
+                            continue
+                        old_scene = lines[min(idx, len(lines) - 1)].get("scene")
+                        new_lines.append({
+                            "text": txt,
+                            "caps": format_auto_caps(txt),
+                            "gap": min(0.30, max(0.18, float(raw_ln.get("gap", 0.24)))),
+                            "scene": old_scene,
+                        })
+                    if MIN_WORD_COUNT <= count_spoken_words(new_lines) <= MAX_WORD_COUNT:
+                        revised["lines"] = new_lines
+                        revised["lead"] = min(float(revised.get("lead", 0.4)), 0.35)
+                        revised["outro"] = min(float(revised.get("outro", 0.7)), 0.55)
+                        assign_line_scenes(revised)
+                        return revised, f"Condensed script via AI from {current_duration_sec:.1f}s to {count_spoken_words(new_lines)} words"
+            except Exception as e:
+                logger.warning("AI condensation encountered an issue (%s), falling back to deterministic condensation.", e)
 
         # Deterministic clean condensation: shrink gaps & lead/outro slightly first, and condense verbose middle lines
         scale_ratio = min(0.82, (target_max_sec / max(current_duration_sec, 61.0)))

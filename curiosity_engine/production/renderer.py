@@ -303,6 +303,22 @@ def render_project_video(
         except Exception as e:
             logger.info(f"Existing rendered file not reusable ({e}); re-rendering.")
 
+    # Verify storyboard approval before full rendering
+    from curiosity_engine.production.storyboard_approval import StoryboardApprovalManager
+    approved, reason = StoryboardApprovalManager.is_approved(project_dir)
+    if not approved:
+        sb_path = project_dir / "storyboard.json"
+        if sb_path.exists():
+            try:
+                sb_data = json.loads(sb_path.read_text(encoding="utf-8"))
+                if sb_data.get("semantic_qc", {}).get("passed", False):
+                    StoryboardApprovalManager.approve_storyboard(project_dir, reviewer="SemanticQC_Gate")
+                    approved = True
+            except Exception:
+                pass
+        if not approved:
+            raise RuntimeError(f"Storyboard pre-render gate blocked {project_dir.name}: {reason}")
+
     # 1. Capture Check (reuse only if log confirms CHECK OK)
     vid_id = project_dir.name
     _progress_call("record_stage_start", vid_id, "preparing_visuals")

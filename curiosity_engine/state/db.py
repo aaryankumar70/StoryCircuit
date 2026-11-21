@@ -270,7 +270,13 @@ class DatabaseClient:
     def get_recent_logs(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Retrieve recent error and operational logs."""
         self._load_local_data()
-        logs = list(self._local_data.get("logs", {}).values())
+        raw_logs = self._local_data.get("logs", {})
+        if isinstance(raw_logs, dict):
+            logs = list(raw_logs.values())
+        elif isinstance(raw_logs, list):
+            logs = [l for l in raw_logs if isinstance(l, dict)]
+        else:
+            logs = []
         logs.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         return logs[:limit]
 

@@ -305,6 +305,19 @@ def verify_video(
         failure_categories.append("story_provenance_mismatch")
         hard_failures.extend(prov_issues)
 
+    # 10b. Semantic Visual Storytelling QC (10 criteria)
+    if candidate_proj_dir and (candidate_proj_dir / "storyboard.json").exists():
+        from curiosity_engine.quality.visual_semantic_qc import SemanticVisualQC
+        try:
+            sb_dict = json.loads((candidate_proj_dir / "storyboard.json").read_text(encoding="utf-8"))
+            sem_qc = SemanticVisualQC.evaluate_storyboard(sb_dict)
+            checks["semantic_visual_qc"] = sem_qc.to_dict()
+            if not sem_qc.passed:
+                issues.extend(sem_qc.rejection_reasons)
+                failure_categories.append("semantic_visual_failure")
+        except Exception as e:
+            logger.warning(f"Semantic Visual QC evaluation error: {e}")
+
     # 11. Compute separate 5-dimensional QC sub-scores (0-10 scale)
     script_eval = score_script_quality(active_script)
     script_quality_score = float(script_eval.get("overall_score", 0.0))

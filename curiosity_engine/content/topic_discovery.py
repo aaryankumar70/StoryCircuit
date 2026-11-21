@@ -27,6 +27,7 @@ from curiosity_engine.content.editorial_policy import (
     validate_editorial_category,
 )
 from curiosity_engine.content.gemini_client import gemini_client
+from curiosity_engine.intelligence.local_model import local_model
 from curiosity_engine.content.reddit_discovery import reddit_discovery
 from curiosity_engine.state.db import db
 
@@ -250,10 +251,29 @@ Return JSON:
         "Reject bland trivia, biology, and health. Never fabricate facts or URLs."
     )
 
-    response = gemini_client.generate_json(prompt, system_instruction=system_instruction)
+    response = None
+    source_engine = "curated"
+    if local_model.is_available():
+        try:
+            logger.info("Attempting topic discovery via Local Ollama model (zero-cost)...")
+            response = local_model.generate_json(prompt, system_instruction=system_instruction)
+            if response and "candidates" in response and len(response["candidates"]) >= 2:
+                source_engine = "local_model"
+                logger.info("Local Ollama model generated %d candidate story topics.", len(response["candidates"]))
+        except Exception as e:
+            logger.warning("Local Ollama topic discovery error: %s", e)
+
+    if not response and gemini_client.is_configured():
+        try:
+            response = gemini_client.generate_json(prompt, system_instruction=system_instruction)
+            if response and "candidates" in response:
+                source_engine = "gemini"
+        except Exception as e:
+            logger.warning("Gemini topic discovery error: %s", e)
+
     candidates: List[Dict[str, Any]] = []
 
-    if response and "candidates" in response and len(response["candidates"]) >= 4:
+    if response and "candidates" in response and len(response["candidates"]) >= 2:
         for c in response["candidates"]:
             scores = {
                 "surprise_factor": float(c.get("surprise_factor", 8)),
@@ -268,12 +288,12 @@ Return JSON:
             }
             c["scores"] = scores
             c["evidence_type"] = c.get("evidence_type") or "documented_fact"
-            c["discovery_origin"] = c.get("discovery_origin") or "gemini_research"
-            c["source_mode"] = "gemini"
+            c["discovery_origin"] = c.get("discovery_origin") or f"{source_engine}_research"
+            c["source_mode"] = source_engine
             candidates.append(c)
-        logger.info("Gemini discovered %d candidate story topics.", len(candidates))
+        logger.info("%s discovered %d candidate story topics.", source_engine.capitalize(), len(candidates))
     else:
-        if reddit_seeds and gemini_client.is_configured():
+        if reddit_seeds and (gemini_client.is_configured() or local_model.is_available()):
             candidates.extend(reddit_seeds)
         logger.warning(
             "[FALLBACK] Using upgraded curated story catalog (0 paid API calls)."
