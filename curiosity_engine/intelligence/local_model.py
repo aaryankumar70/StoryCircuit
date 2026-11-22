@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-DEFAULT_MODEL = os.environ.get("LOCAL_LLM_MODEL", "qwen2.5:3b")
+DEFAULT_MODEL = os.environ.get("LOCAL_LLM_MODEL", "autonomous-skill")
 
 
 class LocalModelError(RuntimeError):

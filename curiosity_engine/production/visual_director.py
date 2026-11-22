@@ -151,9 +151,8 @@ def _environment_for_scene(terms: List[str], profile: Dict[str, str]) -> str:
 def assign_narrative_scenes(script_data: Dict[str, Any]) -> Dict[str, Any]:
     """Create bounded Cartoon 3D shot directions from approved narration without an LLM call.
 
-    This operation never creates or rewrites narration. It is available while Ollama is
-    in safe standby so existing approved scripts and Creator stories can still be
-    directed without pretending that model-generated scripts are available.
+    This operation never creates or rewrites narration. It is fully deterministic
+    so existing approved scripts and Creator stories can still be directed accurately.
     """
     if not isinstance(script_data, dict):
         raise ValueError("Scene direction requires a script object.")

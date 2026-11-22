@@ -255,13 +255,13 @@ Return JSON:
     source_engine = "curated"
     if local_model.is_available():
         try:
-            logger.info("Attempting topic discovery via Local Ollama model (zero-cost)...")
+            logger.info("Attempting topic discovery via Local model (zero-cost)...")
             response = local_model.generate_json(prompt, system_instruction=system_instruction)
             if response and "candidates" in response and len(response["candidates"]) >= 2:
                 source_engine = "local_model"
-                logger.info("Local Ollama model generated %d candidate story topics.", len(response["candidates"]))
+                logger.info("Local model generated %d candidate story topics.", len(response["candidates"]))
         except Exception as e:
-            logger.warning("Local Ollama topic discovery error: %s", e)
+            logger.warning("Local topic discovery error: %s", e)
 
     if not response and gemini_client.is_configured():
         try:

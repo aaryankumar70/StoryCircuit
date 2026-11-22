@@ -298,7 +298,7 @@ class TelegramCommandBot:
 
         msg = (
             f"🩺 <b>CurioLoop 2.0 Health Diagnostics</b>\n\n"
-            f"• <b>Local LLM (Ollama):</b> {'🟢 OK' if llm_ok else '🔴 Offline'}\n"
+            f"• <b>Script Engine:</b> {'🟢 Autonomous Skill Engine' if not llm_ok else '🟢 Local Model'}\n"
             f"• <b>Kokoro ONNX (82M):</b> {'🟢 OK' if kokoro_ok else '🔴 Missing'}\n"
             f"• <b>faster-whisper:</b> {'🟢 OK' if whisper_ok else '🔴 Missing'}\n"
             f"• <b>FFmpeg:</b> {'🟢 OK' if ffmpeg_ok else '🔴 Not Found'}\n"

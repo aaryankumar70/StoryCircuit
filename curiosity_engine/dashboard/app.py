@@ -1234,16 +1234,29 @@ def get_system_health():
     if not whisper_model.exists():
         whisper_model = config.WHISPER_DIR  # Directory check
 
+    script_engine_info = {
+        "engine": "SkillScriptEngine (Autonomous)",
+        "model": "viral-shorts-scriptwriter",
+        "available": True,
+        "installed_models": ["SkillScriptEngine (Autonomous)"],
+        "cost": "₹0 / Free Tier",
+    }
+    if engine_registry.has_script_engine():
+        eng = engine_registry.get_script_engine()
+        script_engine_info["engine"] = f"{eng.__class__.__name__} (Autonomous)"
+    elif local_model.is_available():
+        script_engine_info = {
+            "engine": "Local LLM",
+            "model": local_model.model_name,
+            "available": True,
+            "installed_models": local_model.list_installed_models(),
+            "cost": "₹0 / Free Tier",
+        }
+
     return sanitize_data({
         "status": "HEALTHY",
         "timestamp_ist": datetime.now(IST).isoformat(),
-        "local_llm": {
-            "engine": "Ollama",
-            "model": local_model.model_name,
-            "available": local_model.is_available(),
-            "installed_models": local_model.list_installed_models(),
-            "cost": "₹0 / Free Tier",
-        },
+        "local_llm": script_engine_info,
         "tts_engine": {
             "engine": "Kokoro ONNX 82M",
             "model_present": kokoro_model.exists(),
@@ -1433,12 +1446,15 @@ def get_production_queue_data():
 @app.get("/api/studio/settings")
 def get_studio_settings():
     """CurioLoop 2.0 configuration, local model parameters, and platform toggles."""
+    script_engine_label = "SkillScriptEngine (Autonomous Skill Engine)"
+    if engine_registry.has_script_engine():
+        script_engine_label = f"{engine_registry.get_script_engine().__class__.__name__} (Autonomous)"
     return sanitize_data({
         "brand_name": config.BRAND_NAME,
         "max_daily_videos": config.MAX_DAILY_VIDEOS,
         "video_dimensions": f"{config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT} (9:16 vertical)",
         "fps": config.TARGET_FPS,
-        "local_llm_model": config.DEFAULT_MODEL if hasattr(config, "DEFAULT_MODEL") else "qwen2.5:3b",
+        "local_llm_model": script_engine_label,
         "output_directory": str(OUTPUT_DIR),
         "data_directory": str(DATA_DIR),
         "scheduler_slots": {

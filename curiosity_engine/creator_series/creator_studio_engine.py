@@ -832,8 +832,8 @@ class CreatorStudioEngine:
         analysis = cls._analyze_story_structural(raw_text, title=title)
 
         # Step 2: Optional local enrichment through the shared registered engine.
-        # This keeps Creator Studio behind the same model/license gate and adapter
-        # resource lock as Automatic Studio; never construct a second Ollama client.
+        # This keeps Creator Studio behind the same model gate and adapter
+        # resource lock as Automatic Studio; never construct an uncoordinated engine client.
         if use_local_ai:
             try:
                 from curiosity_engine.generation.engine_registry import engine_registry

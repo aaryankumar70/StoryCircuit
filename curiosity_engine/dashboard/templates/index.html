@@ -2601,11 +2601,11 @@
       const c = document.getElementById('healthContainer');
       c.innerHTML = `
         <div class="card">
-          <div class="card-header"><div class="card-title">Local LLM Intelligence</div><span class="badge ${d.local_llm.available ? 'badge-lime' : 'badge-red'}">${d.local_llm.available ? 'ONLINE' : 'OFFLINE'}</span></div>
+          <div class="card-header"><div class="card-title">Autonomous Script Intelligence</div><span class="badge ${d.local_llm.available ? 'badge-lime' : 'badge-red'}">${d.local_llm.available ? 'ONLINE' : 'OFFLINE'}</span></div>
           <div class="kv-list">
             <div class="kv-row"><span class="kv-k">Engine</span><span class="kv-v">${d.local_llm.engine}</span></div>
             <div class="kv-row"><span class="kv-k">Active Model</span><span class="kv-v mono">${d.local_llm.model}</span></div>
-            <div class="kv-row"><span class="kv-k">Installed Models</span><span class="kv-v mono">${d.local_llm.installed_models.join(', ') || 'qwen2.5:3b'}</span></div>
+            <div class="kv-row"><span class="kv-k">Installed Engines</span><span class="kv-v mono">${d.local_llm.installed_models.join(', ') || 'SkillScriptEngine (Autonomous)'}</span></div>
             <div class="kv-row"><span class="kv-k">Cost</span><span class="kv-v" style="color:var(--lime);">${d.local_llm.cost}</span></div>
           </div>
         </div>
@@ -4221,7 +4221,7 @@
           <div class="kv-row"><span class="kv-k">Brand Identity</span><span class="kv-v">${d.brand_name}</span></div>
           <div class="kv-row"><span class="kv-k">Daily Video Limit</span><span class="kv-v">${d.max_daily_videos} Shorts</span></div>
           <div class="kv-row"><span class="kv-k">Dimensions</span><span class="kv-v mono">${d.video_dimensions} @ ${d.fps} fps</span></div>
-          <div class="kv-row"><span class="kv-k">Local LLM</span><span class="kv-v mono">${d.local_llm_model} (Ollama)</span></div>
+          <div class="kv-row"><span class="kv-k">Script Engine</span><span class="kv-v mono">${d.local_llm_model}</span></div>
           <div class="kv-row"><span class="kv-k">Cost Model</span><span class="kv-v" style="color:var(--lime);">${d.cost_model}</span></div>
         </div>
       `;
