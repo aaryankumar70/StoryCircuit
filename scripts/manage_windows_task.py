@@ -338,29 +338,25 @@ def start_daemon_background() -> Dict[str, Any]:
     # Launch detached process with --daemon explicitly and redirected output (safe under pythonw.exe)
     DETACHED_PROCESS = 0x00000008
     CREATE_NO_WINDOW = 0x08000000
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
     hidden_kw = get_hidden_subprocess_kwargs()
-    creationflags = DETACHED_PROCESS | hidden_kw.get("creationflags", CREATE_NO_WINDOW)
+    creationflags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | hidden_kw.get("creationflags", CREATE_NO_WINDOW)
     startupinfo = hidden_kw.get("startupinfo")
 
     SCHEDULER_CONSOLE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    log_fh = open(SCHEDULER_CONSOLE_LOG_FILE, "a", encoding="utf-8")
-    try:
-        popen_kwargs: Dict[str, Any] = {
-            "cwd": str(PROJECT_ROOT),
-            "stdin": subprocess.DEVNULL,
-            "stdout": log_fh,
-            "stderr": log_fh,
-            "creationflags": creationflags,
-            "close_fds": True,
-        }
-        if startupinfo is not None:
-            popen_kwargs["startupinfo"] = startupinfo
-        proc = subprocess.Popen(
-            [str(pythonw), str(run_script), "--daemon", "--interval", "15"],
-            **popen_kwargs,
-        )
-    finally:
-        log_fh.close()
+    popen_kwargs: Dict[str, Any] = {
+        "cwd": str(PROJECT_ROOT),
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "creationflags": creationflags,
+    }
+    if startupinfo is not None:
+        popen_kwargs["startupinfo"] = startupinfo
+    proc = subprocess.Popen(
+        [str(pythonw), str(run_script), "--daemon", "--interval", "15"],
+        **popen_kwargs,
+    )
 
     _append_startup_log(f"STARTED scheduler daemon PID={proc.pid}")
     return {
@@ -394,41 +390,38 @@ def start_dashboard_background() -> Dict[str, Any]:
     pythonw = get_pythonw_path()
     DETACHED_PROCESS = 0x00000008
     CREATE_NO_WINDOW = 0x08000000
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
     hidden_kw = get_hidden_subprocess_kwargs()
-    creationflags = DETACHED_PROCESS | hidden_kw.get("creationflags", CREATE_NO_WINDOW)
+    creationflags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | hidden_kw.get("creationflags", CREATE_NO_WINDOW)
     startupinfo = hidden_kw.get("startupinfo")
 
     DASHBOARD_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     log_fh = open(DASHBOARD_LOG_FILE, "a", encoding="utf-8")
-    try:
-        popen_kwargs: Dict[str, Any] = {
-            "cwd": str(PROJECT_ROOT),
-            "stdin": subprocess.DEVNULL,
-            "stdout": log_fh,
-            "stderr": log_fh,
-            "creationflags": creationflags,
-            "close_fds": True,
-        }
-        if startupinfo is not None:
-            popen_kwargs["startupinfo"] = startupinfo
-        proc = subprocess.Popen(
-            [
-                str(pythonw),
-                "-m",
-                "uvicorn",
-                "curiosity_engine.dashboard.app:app",
-                "--host",
-                DASHBOARD_HOST,
-                "--port",
-                str(DASHBOARD_PORT),
-                "--log-level",
-                "info",
-                "--no-use-colors",
-            ],
-            **popen_kwargs,
-        )
-    finally:
-        log_fh.close()
+    popen_kwargs: Dict[str, Any] = {
+        "cwd": str(PROJECT_ROOT),
+        "stdin": subprocess.DEVNULL,
+        "stdout": log_fh,
+        "stderr": log_fh,
+        "creationflags": creationflags,
+    }
+    if startupinfo is not None:
+        popen_kwargs["startupinfo"] = startupinfo
+    proc = subprocess.Popen(
+        [
+            str(pythonw),
+            "-m",
+            "uvicorn",
+            "curiosity_engine.dashboard.app:app",
+            "--host",
+            DASHBOARD_HOST,
+            "--port",
+            str(DASHBOARD_PORT),
+            "--log-level",
+            "info",
+            "--no-use-colors",
+        ],
+        **popen_kwargs,
+    )
 
     try:
         DASHBOARD_LOCK_FILE.write_text(str(proc.pid), encoding="utf-8")

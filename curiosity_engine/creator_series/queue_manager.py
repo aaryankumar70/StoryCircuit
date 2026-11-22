@@ -58,6 +58,7 @@ class JobStatus(str, Enum):
     FAILED = "FAILED"
     PAUSED = "PAUSED"
     CANCELLED = "CANCELLED"
+    ENGINE_NOT_CONFIGURED = "ENGINE_NOT_CONFIGURED"
 
 
 @dataclass

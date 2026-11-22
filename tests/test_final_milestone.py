@@ -534,11 +534,16 @@ class TestRendererAndPipelineReliability:
         proj_dir = out_dir / vid_id
         (proj_dir / "src").mkdir(parents=True)
         (proj_dir / "data").mkdir(parents=True)
+        (proj_dir / "tools").mkdir(parents=True)
+        (proj_dir / "vendor").mkdir(parents=True)
         (proj_dir / "index.html").write_text("<html></html>", encoding="utf-8")
         (proj_dir / "src" / "main.js").write_text("// ok", encoding="utf-8")
+        (proj_dir / "src" / "shots.js").write_text("export const shots = [];", encoding="utf-8")
+        (proj_dir / "tools" / "capture.mjs").write_text("// offline test fixture", encoding="utf-8")
+        (proj_dir / "vendor" / "three.module.js").write_text("// offline test fixture", encoding="utf-8")
         (proj_dir / "script.json").write_text(json.dumps({"title": "Test", "lines": [{"text": "Hi."}]}), encoding="utf-8")
         (proj_dir / "data" / "narration.wav").write_bytes(b"RIFF" + b"\x00" * 20_000)
-        (proj_dir / "data" / "lines.json").write_text(json.dumps({"duration": 25.0, "lines": []}), encoding="utf-8")
+        (proj_dir / "data" / "lines.json").write_text(json.dumps({"duration": 25.0, "lines": [{"text": "Hi."}]}), encoding="utf-8")
         (proj_dir / "data" / "words.json").write_text(json.dumps([{"w": "Hi", "line": 0, "s": 0.1, "e": 0.4}]), encoding="utf-8")
 
         iso_db.save_video_record(vid_id, {
@@ -549,7 +554,7 @@ class TestRendererAndPipelineReliability:
             "category": "History",
             "style": "paper-atlas",
             "production_status": "ASSETS_READY",
-            "script": {"title": "Resumed Title", "lines": [{"text": "Hi"}], "sources": ["https://www.oxrep.ox.ac.uk/"]},
+            "script": {"title": "Resumed Title", "lines": [{"text": "Hi."}], "sources": ["https://www.oxrep.ox.ac.uk/"]},
             "youtube_description": "Saved custom description",
         })
 
@@ -584,7 +589,6 @@ class TestRendererAndPipelineReliability:
         vid_id = "video_20261110_slot2"
         out_dir.mkdir(parents=True)
         mp4 = out_dir / f"{vid_id}.mp4"
-        mp4.write_bytes(b"rendered mp4 placeholder")
 
         iso_db.save_video_record(vid_id, {
             "video_id": vid_id,
@@ -600,10 +604,10 @@ class TestRendererAndPipelineReliability:
         failed_qc.to_dict.return_value = {"passed": False, "checks": {}, "issues": failed_qc.issues}
         attempt_counter = {"n": 0}
 
-        def _fake_prep(topic, category, style, vid_id, script_data=None, output_dir=None, **kwargs):
-            pdir = out_dir / vid_id
+        def _fake_prep(video_id, script_data=None, *args, **kwargs):
+            pdir = out_dir / video_id
             pdir.mkdir(parents=True, exist_ok=True)
-            return pdir, script_data or {"title": "Bad", "lines": [{"text": "One"}], "duration": 25.0}
+            return pdir
 
         def _fake_render(p_dir, out_mp4, **kwargs):
             attempt_counter["n"] += 1

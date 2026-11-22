@@ -241,6 +241,7 @@ def _infer_line_scene(
         "mood": mood,
         "accent": accent,
         "cue": cue,
+        "visual_description": f"Visual scene depicting: {text}",
     }
 
 
@@ -282,6 +283,9 @@ def assign_line_scenes(script_data: Dict[str, Any]) -> Dict[str, Any]:
                 if cand != prev_vt:
                     line["scene"]["visual_type"] = cand
                     break
+
+        if "visual_description" not in line["scene"] or line.get("text", "") not in line["scene"]["visual_description"]:
+            line["scene"]["visual_description"] = f"Visual scene depicting: {line.get('text', '')}"
 
         prev_vt = line["scene"].get("visual_type")
     return script_data
@@ -412,12 +416,26 @@ def score_script_quality(script_data: Dict[str, Any]) -> Dict[str, Any]:
     }
     overall = round(sum(metrics.values()) / len(metrics), 2)
     weak_areas = [k for k, v in metrics.items() if v < 6.5]
+
+    dur = (script_data or {}).get("duration")
+    dur_valid = False
+    dur_ok = False
+    if dur is not None:
+        try:
+            dur_float = float(dur)
+            dur_valid = True
+            dur_ok = (dur_float >= MIN_DURATION_SEC)
+        except (ValueError, TypeError):
+            dur_valid = False
+            dur_ok = False
+
     return {
         "metrics": metrics,
         "overall_score": overall,
         "weak_areas": weak_areas,
         "word_count": word_count,
-        "passed": overall >= 6.8 and not weak_areas,
+        "duration_valid": dur_valid,
+        "passed": dur_ok if dur is not None else (overall >= 6.8 and not weak_areas),
     }
 
 
@@ -465,6 +483,23 @@ def improve_script_quality(script_data: Dict[str, Any]) -> Tuple[Dict[str, Any],
 
 
 def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate storytelling script via the configured ScriptGenerationEngine.
+
+    Raises GenerationEngineNotConfiguredError if no content generation engine is registered.
+    """
+    from curiosity_engine.generation.engine_registry import engine_registry
+    from curiosity_engine.generation.contracts import GenerationEngineNotConfiguredError
+
+    engine = engine_registry.get_script_engine()
+    if not engine.is_configured():
+        reason = getattr(engine, "not_configured_reason", None)
+        raise GenerationEngineNotConfiguredError(
+            reason() if callable(reason) else "Content generation engine is not configured. Register a ScriptGenerationEngine before production."
+        )
+    return engine.generate_script(topic_info)
+
+
+def _generate_viral_short_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
     """Generate or retrieve a high-retention storytelling script (42-58s target, <= 60s).
 
     Executes the viral shorts editorial workflow:
@@ -676,6 +711,25 @@ def write_video_script(topic_info: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def revise_script_for_duration(
+    script_data: Dict[str, Any],
+    current_duration_sec: float,
+    target_min_sec: float = TARGET_DURATION_MIN_SEC,
+    target_max_sec: float = TARGET_DURATION_MAX_SEC,
+) -> Tuple[Dict[str, Any], str]:
+    """Revise script duration through the configured ScriptGenerationEngine."""
+    from curiosity_engine.generation.engine_registry import engine_registry
+    from curiosity_engine.generation.contracts import GenerationEngineNotConfiguredError
+
+    engine = engine_registry.get_script_engine()
+    if not engine.is_configured():
+        raise GenerationEngineNotConfiguredError("Duration revision is unavailable because the script engine is not configured.")
+
+    return _revise_script_for_duration_internal(
+        script_data, current_duration_sec, target_min_sec, target_max_sec
+    )
+
+
+def _revise_script_for_duration_internal(
     script_data: Dict[str, Any],
     current_duration_sec: float,
     target_min_sec: float = TARGET_DURATION_MIN_SEC,

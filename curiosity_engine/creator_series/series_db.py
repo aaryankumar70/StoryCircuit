@@ -30,11 +30,10 @@ class SeriesDatabase:
 
     def save_series(self, series: SeriesRecord) -> None:
         """Create or update a SeriesRecord in local storage."""
-        self._db._load_local_data()
-        self._db._local_data.setdefault("series", {})
         series.updated_at = datetime.now(timezone.utc).isoformat()
-        self._db._local_data["series"][series.series_id] = series.to_dict()
-        self._db._save_local_data()
+        with self._db.transaction() as state:
+            state.setdefault("series", {})
+            state["series"][series.series_id] = series.to_dict()
         logger.info(f"Series '{series.series_id}' saved with status '{series.status}'.")
 
     def get_series(self, series_id: str) -> Optional[SeriesRecord]:
@@ -63,12 +62,23 @@ class SeriesDatabase:
 
     def save_episode(self, episode: EpisodeRecord) -> None:
         """Create or update an EpisodeRecord in local storage."""
-        self._db._load_local_data()
-        self._db._local_data.setdefault("episodes", {})
         episode.updated_at = datetime.now(timezone.utc).isoformat()
-        self._db._local_data["episodes"][episode.episode_id] = episode.to_dict()
-        self._db._save_local_data()
+        with self._db.transaction() as state:
+            state.setdefault("episodes", {})
+            state["episodes"][episode.episode_id] = episode.to_dict()
         logger.info(f"Episode '{episode.episode_id}' saved with status '{episode.status}'.")
+
+    def save_series_and_episodes(self, series: SeriesRecord, episodes: List[EpisodeRecord]) -> None:
+        """Persist a schedule change and its episode timestamps in one file transaction."""
+        now = datetime.now(timezone.utc).isoformat()
+        series.updated_at = now
+        for episode in episodes:
+            episode.updated_at = now
+        with self._db.transaction() as state:
+            state.setdefault("series", {})[series.series_id] = series.to_dict()
+            episode_state = state.setdefault("episodes", {})
+            for episode in episodes:
+                episode_state[episode.episode_id] = episode.to_dict()
 
     def get_episode(self, episode_id: str) -> Optional[EpisodeRecord]:
         """Fetch episode by ID."""
@@ -133,8 +143,6 @@ class SeriesDatabase:
         ep.upload_status = "PUBLISHED"
         ep.youtube_id = youtube_id
         ep.actual_publication_time = now_iso
-        self.save_episode(ep)
-
         if episode_id not in series.published_episode_ids:
             series.published_episode_ids.append(episode_id)
 
@@ -153,7 +161,7 @@ class SeriesDatabase:
             }
             logger.info(f"Series '{series_id}' has completed all {total_episodes} episodes!")
 
-        self.save_series(series)
+        self.save_series_and_episodes(series, [ep])
 
     def record_episode_failure(self, series_id: str, episode_id: str, reason: str) -> None:
         """Record episode failure without advancing sequence pointer."""
@@ -162,11 +170,10 @@ class SeriesDatabase:
         if ep:
             ep.status = EpisodeStatus.FAILED
             ep.retry_count += 1
-            self.save_episode(ep)
         if series:
             if episode_id not in series.failed_episode_ids:
                 series.failed_episode_ids.append(episode_id)
-            self.save_series(series)
+            self.save_series_and_episodes(series, [ep] if ep else [])
         logger.error(f"Recorded failure for episode '{episode_id}' (series '{series_id}'): {reason}")
 
 

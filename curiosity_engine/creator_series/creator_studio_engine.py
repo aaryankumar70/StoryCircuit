@@ -15,23 +15,20 @@ import re
 import shutil
 import time
 import zipfile
+from urllib.parse import urljoin, urlsplit
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
 import requests
 
+from curiosity_engine.config import DATA_DIR
 from curiosity_engine.creator_series.models import EpisodeStatus, RightsStatus
 
 try:
     import docx
 except ImportError:
     docx = None
-
-try:
-    from curiosity_engine.intelligence.local_model import LocalModelAdapter
-except ImportError:
-    LocalModelAdapter = None
 
 logger = logging.getLogger("curiosity_engine.creator_studio_engine")
 
@@ -40,11 +37,35 @@ class CreatorStudioEngine:
     """Production-grade Creator Studio Engine for CurioLoop 2.0."""
 
     WPM_STANDARD: float = 135.0  # Calibrated for suspenseful, deliberate narration
-    UPLOAD_DIR: Path = Path("data/creator_series/uploads")
+    UPLOAD_DIR: Path = Path(
+        os.environ.get("CURIOLOOP_CREATOR_UPLOAD_DIR")
+        or (DATA_DIR / "creator_series" / "uploads")
+    ).resolve()
 
     # ─────────────────────────────────────────────────────────────────────────
     # 1. Document & File Ingestion Helpers
     # ─────────────────────────────────────────────────────────────────────────
+
+    @classmethod
+    def _validate_docx_size(cls, source: Union[str, Path, bytes, BinaryIO]) -> None:
+        """Reject oversized expanded DOCX archives before python-docx extracts them."""
+        if isinstance(source, (str, Path)):
+            zf = zipfile.ZipFile(str(source), "r")
+        elif isinstance(source, bytes):
+            zf = zipfile.ZipFile(io.BytesIO(source), "r")
+        else:
+            zf = zipfile.ZipFile(source, "r")
+        try:
+            members = zf.infolist()
+            if sum(member.file_size for member in members) > 16 * 1024 * 1024:
+                raise ValueError("DOCX expanded contents exceed the 16 MiB safety limit.")
+            document = next((m for m in members if m.filename == "word/document.xml"), None)
+            if document is None:
+                raise ValueError("Corrupt or invalid DOCX: 'word/document.xml' not found in archive.")
+            if document.file_size > 8 * 1024 * 1024:
+                raise ValueError("DOCX document content exceeds the 8 MiB limit.")
+        finally:
+            zf.close()
 
     @classmethod
     def _extract_docx_fallback(
@@ -62,6 +83,11 @@ class CreatorStudioEngine:
             zf = zipfile.ZipFile(source, "r")
 
         try:
+            info = zf.getinfo("word/document.xml")
+            if info.file_size > 8 * 1024 * 1024:
+                raise ValueError("DOCX document content exceeds the 8 MiB limit.")
+            if sum(item.file_size for item in zf.infolist()) > 16 * 1024 * 1024:
+                raise ValueError("DOCX expanded contents exceed the 16 MiB safety limit.")
             xml_bytes = zf.read("word/document.xml")
         except KeyError:
             raise ValueError("Corrupt or invalid DOCX: 'word/document.xml' not found in archive.")
@@ -94,6 +120,7 @@ class CreatorStudioEngine:
         """
         raw_text = ""
         title = "Untitled Creator Series"
+        cls._validate_docx_size(source)
 
         # Try python-docx if installed
         if docx is not None:
@@ -142,16 +169,23 @@ class CreatorStudioEngine:
         raw_text = raw_text.strip()
         title = Path(filename).stem if filename else "Untitled Creator Series"
 
-        # Check for markdown # Title
-        for line in raw_text.splitlines()[:10]:
-            stripped = line.strip()
-            if stripped.startswith("# "):
-                title = stripped[2:].strip()
+        # Extract document headings as metadata and keep them out of narrated text.
+        raw_lines = raw_text.splitlines()
+        heading_pattern = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
+        for line in raw_lines[:10]:
+            match = heading_pattern.match(line)
+            if not match:
+                continue
+            heading_level = len(match.group(1))
+            if heading_level == 1:
+                title = match.group(2).strip()
                 break
-            elif stripped.startswith("## ") and title == "Untitled Creator Series":
-                title = stripped[3:].strip()
+            if heading_level == 2 and title == "Untitled Creator Series":
+                title = match.group(2).strip()
                 break
 
+        spoken_lines = [line for line in raw_lines if not heading_pattern.match(line)]
+        raw_text = "\n".join(spoken_lines).strip()
         return title, raw_text
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -177,7 +211,7 @@ class CreatorStudioEngine:
         detected_ext = ""
         preserved_path: Optional[str] = None
 
-        timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f") + f"_{time.time_ns():x}"
 
         # Case A: Input is raw bytes (from multipart UploadFile)
         if isinstance(file_path_or_text, bytes):
@@ -326,19 +360,13 @@ class CreatorStudioEngine:
         if not clean_url:
             raise ValueError("Reddit URL cannot be empty.")
 
-        # Pattern check
-        match = re.search(
-            r"https?://(?:(?:www\.|old\.|new\.)?reddit\.com/(?:r|user)/([A-Za-z0-9_]+)/comments/([a-z0-9]+)|redd\.it/([a-z0-9]+))",
-            clean_url,
-            re.IGNORECASE,
-        )
-        if not match:
-            # Check /comments/<id> form
-            match = re.search(r"https?://(?:(?:www\.|old\.|new\.)?reddit\.com)/comments/([a-z0-9]+)", clean_url, re.IGNORECASE)
-            if not match:
-                raise ValueError(
-                    f"Invalid Reddit post URL: '{clean_url}'. Expected format: https://www.reddit.com/r/<subreddit>/comments/<id>/..."
-                )
+        parsed = urlsplit(clean_url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        allowed_hosts = {"reddit.com", "www.reddit.com", "old.reddit.com", "new.reddit.com", "np.reddit.com", "redd.it", "www.redd.it"}
+        if parsed.scheme != "https" or host not in allowed_hosts or parsed.username or parsed.password or parsed.port not in (None, 443):
+            raise ValueError("Reddit import requires an HTTPS post URL on reddit.com or redd.it.")
+        if not re.search(r"/(?:r/[A-Za-z0-9_]+/)?comments/[a-z0-9]+|/[a-z0-9]+/?$", parsed.path, re.I):
+            raise ValueError("Invalid Reddit post URL. Expected a Reddit post or redd.it short link.")
 
         # Normalize to JSON endpoint
         base_url = clean_url.split("?")[0].split("#")[0].rstrip("/")
@@ -352,7 +380,21 @@ class CreatorStudioEngine:
         }
 
         try:
-            resp = requests.get(json_url, headers=headers, timeout=12)
+            for _ in range(4):
+                resp = requests.get(json_url, headers=headers, timeout=12, allow_redirects=False, stream=True)
+                if resp.status_code not in (301, 302, 303, 307, 308):
+                    break
+                location = resp.headers.get("Location")
+                if not location:
+                    raise ValueError("Reddit returned a redirect without a destination.")
+                redirected = urlsplit(urljoin(json_url, location))
+                redirected_host = (redirected.hostname or "").lower().rstrip(".")
+                if redirected.scheme != "https" or redirected_host not in allowed_hosts or redirected.username or redirected.password or redirected.port not in (None, 443):
+                    raise ValueError("Reddit redirect destination is not an approved Reddit host.")
+                resp.close()
+                json_url = redirected.geturl()
+            else:
+                raise ValueError("Reddit returned too many redirects.")
         except requests.RequestException as e:
             raise ValueError(f"Failed to connect to Reddit: {str(e)}")
 
@@ -366,7 +408,23 @@ class CreatorStudioEngine:
             raise ValueError(f"Reddit API returned HTTP status {resp.status_code} for '{clean_url}'")
 
         try:
-            data = resp.json()
+            content_length = resp.headers.get("Content-Length", "")
+            if isinstance(content_length, str) and content_length.isdigit() and int(content_length) > 2 * 1024 * 1024:
+                raise ValueError("Reddit response exceeds the 2 MiB safety limit.")
+            if isinstance(resp, requests.Response):
+                payload = bytearray()
+                for chunk in resp.iter_content(64 * 1024):
+                    if chunk:
+                        payload.extend(chunk)
+                    if len(payload) > 2 * 1024 * 1024:
+                        raise ValueError("Reddit response exceeds the 2 MiB safety limit.")
+                data = json.loads(payload.decode("utf-8"))
+            else:  # Lightweight mocked or alternative response adapters.
+                data = resp.json()
+        except ValueError as exc:
+            if "safety limit" in str(exc):
+                raise
+            raise ValueError("Reddit API returned invalid JSON content.") from exc
         except Exception:
             raise ValueError("Reddit API returned invalid JSON content.")
 
@@ -426,7 +484,7 @@ class CreatorStudioEngine:
             "subreddit": f"r/{subreddit}" if subreddit else "",
             "rights_status": sr.get("rights_status", RightsStatus.UNVERIFIED_EVALUATION_ONLY.value),
             "permission_verified": sr.get("permission_verified", False),
-            "attribution_statement": f"Story originally posted by u/{author} on r/{subreddit}",
+            "attribution_statement": sr.get("attribution") or f"Story originally posted by u/{author} on r/{subreddit}",
         }
 
         return {
@@ -773,11 +831,16 @@ class CreatorStudioEngine:
         # Step 1: Run comprehensive structural & semantic narrative analysis
         analysis = cls._analyze_story_structural(raw_text, title=title)
 
-        # Step 2: Enrich with zero-cost LocalModelAdapter (Ollama) if available
-        if use_local_ai and LocalModelAdapter is not None:
+        # Step 2: Optional local enrichment through the shared registered engine.
+        # This keeps Creator Studio behind the same model/license gate and adapter
+        # resource lock as Automatic Studio; never construct a second Ollama client.
+        if use_local_ai:
             try:
-                adapter = LocalModelAdapter()
-                if adapter.is_available():
+                from curiosity_engine.generation.engine_registry import engine_registry
+
+                script_engine = engine_registry.get_script_engine()
+                adapter = getattr(script_engine, "adapter", None)
+                if script_engine.is_configured() and adapter is not None and callable(getattr(adapter, "generate_json", None)):
                     system_prompt = (
                         "You are an expert story editor and narrative analyst for YouTube Shorts series. "
                         "Return only valid JSON analyzing the story's core dilemma, genre, and key characters."

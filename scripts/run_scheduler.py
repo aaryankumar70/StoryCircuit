@@ -21,33 +21,37 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path(os.environ.get("CURIOLOOP_DATA_DIR") or PROJECT_ROOT / "data").resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = DATA_DIR / "scheduler.log"
 
 
 def _configure_safe_stdio_and_logging() -> logging.Logger:
     """Configure UTF-8 file logging before importing runtime modules so pythonw crashes are captured."""
-    if sys.stdout is None:
+    if sys.stdout is None or getattr(sys.stdout, "closed", False):
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
     elif isinstance(sys.stdout, io.TextIOWrapper):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
-            pass
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")
 
-    if sys.stderr is None:
+    if sys.stderr is None or getattr(sys.stderr, "closed", False):
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
     elif isinstance(sys.stderr, io.TextIOWrapper):
         try:
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
-            pass
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
     handlers: list[logging.Handler] = [
         logging.FileHandler(LOG_FILE, encoding="utf-8"),
     ]
-    if sys.stdout and getattr(sys.stdout, "name", "") != os.devnull:
+    if sys.stdout and getattr(sys.stdout, "name", "") != os.devnull and not getattr(sys.stdout, "closed", False):
+        try:
+            handlers.append(logging.StreamHandler(sys.stdout))
+        except Exception:
+            pass
         handlers.append(logging.StreamHandler(sys.stdout))
 
     logging.basicConfig(
@@ -82,8 +86,31 @@ def main():
 
     args = parser.parse_args()
 
+    if not 5 <= args.interval <= 3600:
+        parser.error("--interval must be between 5 and 3600 seconds")
+
+    if args.once and not args.confirm:
+        print(
+            "\n[SAFEGUARD BLOCKED] '--once' triggers actual video generation and publishing.\n"
+            "For read-only inspection, use:\n"
+            "  python scripts/run_scheduler.py --status\n"
+            "  python scripts/run_scheduler.py --dry-run\n"
+            "  python scripts/run_scheduler.py --validate\n\n"
+            "To explicitly confirm catch-up execution, run:\n"
+            "  python scripts/run_scheduler.py --once --confirm\n"
+        )
+        sys.exit(2)
+
     if args.daemon:
         startup_logger.info("Launcher starting scheduler daemon process (PID=%s)...", os.getpid())
+
+    if args.once or args.daemon or args.validate or args.dry_run or args.status:
+        try:
+            from curiosity_engine.generation.bootstrap import configure_generation_engines
+            engine_status = configure_generation_engines()
+            startup_logger.info("Generation engine readiness: %s", engine_status.get("status_message"))
+        except Exception as exc:
+            startup_logger.warning("Generation engines remain in safe standby: %s", exc)
 
     try:
         from curiosity_engine.runner.local_scheduler import scheduler
@@ -104,17 +131,6 @@ def main():
         print(json.dumps(report, indent=2, ensure_ascii=False))
         sys.exit(0 if report["valid"] else 1)
     elif args.once:
-        if not args.confirm:
-            print(
-                "\n[SAFEGUARD BLOCKED] '--once' triggers actual video generation and publishing.\n"
-                "For read-only inspection, use:\n"
-                "  python scripts/run_scheduler.py --status\n"
-                "  python scripts/run_scheduler.py --dry-run\n"
-                "  python scripts/run_scheduler.py --validate\n\n"
-                "To explicitly confirm catch-up execution, run:\n"
-                "  python scripts/run_scheduler.py --once --confirm\n"
-            )
-            sys.exit(2)
         recovered = scheduler.run_catchup_check()
         print(f"Catch-up evaluated. Executed {len(recovered)} batch record(s).")
         sys.exit(0)
@@ -131,4 +147,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            startup_logger.critical("FATAL UNCAUGHT in run_scheduler (exit %s)\n%s", exc.code, traceback.format_exc())
+        raise
+    except BaseException as exc:
+        startup_logger.critical("FATAL UNCAUGHT in run_scheduler: %s\n%s", exc, traceback.format_exc())
+        raise

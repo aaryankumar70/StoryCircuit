@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from curiosity_engine.config import WHISPER_DIR, get_hidden_subprocess_kwargs
+from curiosity_engine.generation.resource_lock import sequential_resource_stage
 
 logger = logging.getLogger("curiosity_engine.aligner")
 
@@ -121,6 +122,7 @@ def resolve_whisper_model_path(whisper_dir: Path = WHISPER_DIR) -> Optional[str]
     return None
 
 
+@sequential_resource_stage
 def align_narration_words(project_dir: Path) -> List[Dict[str, Any]]:
     """Generate data/words.json and data/words.txt for project."""
     script_path = project_dir / "script.json"

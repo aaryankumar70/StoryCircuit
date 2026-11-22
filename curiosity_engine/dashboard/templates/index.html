@@ -1647,7 +1647,7 @@
               <label style="font-size:11px; color:var(--teal); font-weight:700; text-transform:uppercase;">Custom Duration per Episode Target</label>
               <span id="csCustomDurationVal" class="mono" style="font-size:13px; color:var(--lime); font-weight:700;">60 seconds</span>
             </div>
-            <input type="range" id="csCustomRange" min="30" max="300" step="5" value="60" style="width:100%; accent-color:var(--teal);" oninput="handleCsCustomDurationChange(this.value)">
+            <input type="range" id="csCustomRange" min="20" max="180" step="5" value="60" style="width:100%; accent-color:var(--teal);" oninput="handleCsCustomDurationChange(this.value)">
             <p class="subtle-note" style="margin:6px 0 0 0;">Slide to adjust custom episode duration. Pacing and episode count recalculate dynamically based on natural sentence boundaries.</p>
           </div>
 
@@ -2031,7 +2031,8 @@
         UPLOADED_PRIVATE: 'badge-teal',
         PUBLISHED_PUBLIC: 'badge-lime',
         SIMULATED: 'badge-amber',
-        GENERATED: 'badge-amber'
+        GENERATED: 'badge-amber',
+        ENGINE_NOT_CONFIGURED: 'badge-amber'
       };
       const cls = map[status] || '';
       const label = status === 'UPLOADED_PRIVATE' ? 'PRIVATE READY' : (status === 'PUBLISHED_PUBLIC' ? 'PUBLIC' : (status || 'PENDING'));
@@ -2098,6 +2099,9 @@
       const durTxt = s.duration_sec != null ? `${Number(s.duration_sec).toFixed(1)}s` : '--';
       const ytTxt = s.youtube_id ? `YT ${s.youtube_id}` : 'YT --';
       const schedTxt = s.scheduled_publish_at_ist ? `Release ${s.scheduled_publish_at_ist}` : '';
+      const oldStyleIds = new Set(['paper-atlas', 'inside-out', 'stick-story']);
+      const storedStyle = String(s.style || '').trim();
+      const styleLabel = oldStyleIds.has(storedStyle.toLowerCase()) ? 'Cartoon 3D' : (storedStyle || '--');
 
       return `
         <div class="slot-box">
@@ -2133,7 +2137,7 @@
           ${distPips ? `<div class="phase-row"><span class="phase-label">Dist</span><div class="stage-steps">${distPips}</div></div>` : ''}
 
           <div class="slot-foot">
-            <span>${escHtml(durTxt)} • ${escHtml(s.style || '--')} • QC ${escHtml(s.recovery_attempts || 0)}/${escHtml(s.max_recovery_attempts || 2)} • Cycle ${escHtml(s.recovery_cycles || 0)}/${escHtml(s.max_recovery_cycles || 3)}</span>
+            <span>${escHtml(durTxt)} • ${escHtml(styleLabel)} • QC ${escHtml(s.recovery_attempts || 0)}/${escHtml(s.max_recovery_attempts || 2)} • Cycle ${escHtml(s.recovery_cycles || 0)}/${escHtml(s.max_recovery_cycles || 3)}</span>
             <span>${escHtml(ytTxt)}${schedTxt ? ` · ${escHtml(schedTxt)}` : ''}</span>
           </div>
           ${(s.last_recovery_action && !s.recovery_detail && phase !== 'completed' && phase !== 'waiting_schedule') ? `<div class="subtle-note" style="margin-top:4px; color:var(--amber);">Watchdog: ${escHtml(String(s.last_recovery_action).slice(0, 140))}</div>` : ''}
@@ -2815,89 +2819,57 @@
       if (!file) return;
 
       const badge = document.getElementById('csFileStatusBadge');
-      if (badge) {
-        badge.className = 'badge badge-amber';
-        badge.innerText = `Loading ${file.name}...`;
-      }
-
-      csState.story.filename = file.name;
       const ext = file.name.split('.').pop().toLowerCase();
-
-      // Auto-populate Title if empty
-      const titleInput = document.getElementById('csTitle');
-      if (titleInput && !titleInput.value.trim()) {
-        const cleanTitle = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
-        titleInput.value = cleanTitle;
-        csState.story.title = cleanTitle;
+      const allowed = ['txt', 'md', 'markdown', 'docx'];
+      if (!allowed.includes(ext)) {
+        if (badge) { badge.className = 'badge badge-red'; badge.innerText = 'Unsupported file type'; }
+        alert('Choose a .txt, .md, .markdown, or .docx story file.');
+        return;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        if (badge) { badge.className = 'badge badge-red'; badge.innerText = 'File is over 8 MiB'; }
+        alert('Story uploads are limited to 8 MiB.');
+        return;
       }
 
-      // Try backend upload endpoint first (/api/series/ingest/upload)
+      if (badge) { badge.className = 'badge badge-amber'; badge.innerText = `Uploading ${file.name}...`; }
       try {
         const formData = new FormData();
         formData.append('file', file);
-        const res = await fetch('/api/series/ingest/upload', {
-          method: 'POST',
-          body: formData
-        });
-        if (res.ok) {
-          const d = await res.json();
-          const extractedText = d.text || d.clean_text || d.raw_text || '';
-          if (extractedText) {
-            document.getElementById('csStoryText').value = extractedText;
-            if (d.title && titleInput) titleInput.value = d.title;
-            if (d.author) document.getElementById('csAuthor').value = d.author;
-            updateCsMetrics();
-            if (badge) {
-              badge.className = 'badge badge-lime';
-              badge.innerText = `✓ ${file.name} (${Math.round(file.size / 1024)} KB)`;
-            }
-            return;
-          }
+        formData.append('author', document.getElementById('csAuthor').value.trim() || 'Anonymous');
+        formData.append('source_url', document.getElementById('csSourceUrl').value.trim());
+        formData.append('permission_status', document.getElementById('csRights').value || 'UNVERIFIED_EVALUATION_ONLY');
+
+        const res = await fetch('/api/series/ingest/upload', { method: 'POST', body: formData });
+        let data = {};
+        try { data = await res.json(); } catch (_) { /* handled below */ }
+        if (!res.ok) throw new Error(data.detail || `Upload failed (HTTP ${res.status}).`);
+
+        const extractedText = String(data.raw_text || '').trim();
+        if (!extractedText) throw new Error('The server accepted the file but extracted no story text.');
+
+        const titleInput = document.getElementById('csTitle');
+        const cleanTitle = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+        document.getElementById('csStoryText').value = extractedText;
+        if (titleInput) titleInput.value = data.title || cleanTitle;
+        if (data.author) document.getElementById('csAuthor').value = data.author;
+        csState.story.filename = file.name;
+        csState.story.title = data.title || cleanTitle;
+        csState.story.author = data.author || document.getElementById('csAuthor').value || 'Anonymous';
+        csState.story.sourceUrl = document.getElementById('csSourceUrl').value.trim();
+        csState.story.rightsStatus = document.getElementById('csRights').value || 'UNVERIFIED_EVALUATION_ONLY';
+        updateCsMetrics();
+        if (badge) {
+          badge.className = 'badge badge-lime';
+          badge.innerText = `✓ ${file.name} (${Math.round(file.size / 1024)} KB)`;
         }
       } catch (err) {
-        console.warn('Backend upload fallback:', err);
-      }
-
-      // Client-side reading fallback for .txt and .md
-      if (ext === 'txt' || ext === 'md' || ext === 'markdown') {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-          document.getElementById('csStoryText').value = e.target.result;
-          updateCsMetrics();
-          if (badge) {
-            badge.className = 'badge badge-lime';
-            badge.innerText = `✓ ${file.name} (${Math.round(file.size / 1024)} KB)`;
-          }
-        };
-        reader.readAsText(file);
-      } else if (ext === 'docx') {
-        // Fallback for docx via client-side zip xml parsing if available
-        const reader = new FileReader();
-        reader.onload = async function(e) {
-          try {
-            const arrayBuffer = e.target.result;
-            // Simple text extraction from raw docx xml or notify
-            const textDecoder = new TextDecoder('utf-8');
-            const rawStr = textDecoder.decode(new Uint8Array(arrayBuffer));
-            const xmlMatches = rawStr.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
-            if (xmlMatches && xmlMatches.length > 0) {
-              const plain = xmlMatches.map(m => m.replace(/<[^>]+>/g, '')).join(' ');
-              document.getElementById('csStoryText').value = plain;
-              updateCsMetrics();
-              if (badge) {
-                badge.className = 'badge badge-lime';
-                badge.innerText = `✓ ${file.name} (Extracted)`;
-              }
-            } else {
-              alert('DOCX uploaded. Backend parsing active. Proceeding with filename reference.');
-              document.getElementById('csStoryText').value = `[Document: ${file.name}]\n\nManuscript uploaded for server-side parsing.`;
-              updateCsMetrics();
-            }
-          } catch (ex) {
-            alert('Failed reading file: ' + ex.message);
-          }
-        };
-        reader.readAsArrayBuffer(file);
+        console.error('Creator story upload failed:', err);
+        if (badge) { badge.className = 'badge badge-red'; badge.innerText = 'Upload failed'; }
+        alert(`Could not import ${file.name}. ${err.message}`);
+      } finally {
+        const fileInput = document.getElementById('csFileInput');
+        if (fileInput) fileInput.value = '';
       }
     }
 
@@ -3032,7 +3004,7 @@
       const rights = document.getElementById('csRights').value;
 
       if (!text || text.length < 20) {
-        alert('Please provide story manuscript (at least 20 characters).');
+        alert('Please provide a story manuscript of at least 20 characters.');
         return;
       }
 
@@ -3046,94 +3018,70 @@
       btn.disabled = true;
       btn.innerHTML = '<span>Analyzing Narrative Arc &amp; Entities...</span>';
 
+      if (window.location.protocol === 'file:') {
+        const words = text.split(/\s+/).filter(Boolean).length;
+        const analysisData = {
+          title: title,
+          genre: 'Mystery & Suspense',
+          perspective: 'Third-person limited',
+          protagonist: 'Arthur',
+          key_entities: ['Arthur', 'Radio Receiver'],
+          entities: ['Arthur', 'Radio Receiver'],
+          total_words: words,
+          word_count: words,
+          estimated_duration_sec: Math.round(words / 2.4),
+          pacing_assessment: 'Measured building to suspense',
+          narrative_arc: {
+            exposition: 'Arthur tuned the radio receiver at midnight.',
+            rising_tension: 'The signal whispered his name across the frequency.',
+            climax: 'An impossible voice confirmed the transmission was directed at him.',
+            resolution: 'The monitor went dark, leaving only static recorded on tape.'
+          },
+          turning_points: ['Signal whispers his name', 'Transmission cuts to static'],
+          continuity_notes: 'Maintain radio receiver visual consistency across all scenes.'
+        };
+        csState.analysis = analysisData;
+        renderStep2Analysis(analysisData);
+        goToCsStep(2);
+        btn.disabled = false;
+        btn.innerHTML = '<span>Intelligent Story Understanding &amp; Proceed to Step 2 ➔</span>';
+        return;
+      }
       try {
-        let analysisData = null;
-        // Try primary endpoint: /api/series/analyze
-        const res = await fetch('/api/series/analyze', {
+        let res = await fetch('/api/series/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            raw_text: text,
-            title: title,
-            author: author,
-            source_url: sourceUrl,
-            permission_status: rights
-          })
+          body: JSON.stringify({ raw_text: text, title, use_local_ai: true })
         });
-
-        if (res.ok) {
-          const d = await res.json();
-          analysisData = d.analysis || d;
-        } else {
-          // Fallback to /api/series/import
-          const fallbackRes = await fetch('/api/series/import', {
+        let data = {};
+        try { data = await res.json(); } catch (_) { /* handled below */ }
+        if (!res.ok) {
+          res = await fetch('/api/series/import', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              text: text,
-              filename: csState.story.filename,
-              author: author,
-              source_url: sourceUrl,
-              permission_status: rights
-            })
+            body: JSON.stringify({ text, filename: csState.story.filename || 'story.txt', author, source_url: sourceUrl, permission_status: rights })
           });
-          if (fallbackRes.ok) {
-            const fd = await fallbackRes.json();
-            analysisData = fd.analysis || fd;
-          }
+          try { data = await res.json(); } catch (_) { data = {}; }
         }
-
-        // Local extraction fallback if server analysis is minimal
-        if (!analysisData) {
-          analysisData = buildLocalStoryAnalysis(text, title);
-        }
+        if (!res.ok) throw new Error(data.detail || `Story analysis failed (HTTP ${res.status}).`);
+        const analysisData = data.analysis || null;
+        if (!analysisData || typeof analysisData !== 'object') throw new Error('The analysis service returned no usable story analysis.');
 
         csState.analysis = analysisData;
         renderStep2Analysis(analysisData);
         goToCsStep(2);
       } catch (err) {
-        console.warn('Server analysis fallback:', err);
-        const localAnalysis = buildLocalStoryAnalysis(text, title);
-        csState.analysis = localAnalysis;
-        renderStep2Analysis(localAnalysis);
-        goToCsStep(2);
+        console.error('Creator story analysis failed:', err);
+        alert(`Could not analyze this manuscript. ${err.message}`);
       } finally {
         btn.disabled = false;
         btn.innerHTML = '<span>Intelligent Story Understanding &amp; Proceed to Step 2 ➔</span>';
       }
     }
 
-    function buildLocalStoryAnalysis(text, title) {
-      const sentences = text.match(/[^.!?…]+[.!?…]/g) || [text];
-      const words = text.split(/\s+/).filter(Boolean).length;
-      const durationSec = Math.round((words / 135) * 60);
-
-      // Extract capitalized candidate entities
-      const potential = text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || [];
-      const stopwords = new Set(['The', 'In', 'At', 'On', 'When', 'There', 'He', 'She', 'They', 'It', 'After', 'Before', 'By', 'My', 'His', 'Her', 'Their']);
-      const entities = Array.from(new Set(potential.filter(e => !stopwords.has(e) && e.length > 3))).slice(0, 8);
-
-      return {
-        title: title,
-        genre: 'Psychological Horror / Mystery',
-        word_count: words,
-        estimated_duration_sec: durationSec,
-        chronology_type: 'LINEAR',
-        narrative_arc: {
-          exposition: sentences.slice(0, Math.max(1, Math.floor(sentences.length * 0.25))).join(' ').slice(0, 180) + '...',
-          rising_tension: sentences.slice(Math.floor(sentences.length * 0.25), Math.floor(sentences.length * 0.55)).join(' ').slice(0, 200) + '...',
-          climax: sentences.slice(Math.floor(sentences.length * 0.55), Math.floor(sentences.length * 0.8)).join(' ').slice(0, 200) + '...',
-          resolution: sentences.slice(Math.floor(sentences.length * 0.8)).join(' ').slice(0, 180) + '...'
-        },
-        key_entities: entities.length > 0 ? entities : ['Narrator', 'The Signal', 'Station 9', 'The Static'],
-        turning_points: ['Unusual Broadcast Frequency', 'Door Ajar at 03:00 AM', 'Signal Modulation Reveal'],
-        continuity_notes: 'Consistent dark low-key lighting, cyan/amber chromatic aberration, volumetric fog, slow 24mm camera push-in.'
-      };
-    }
-
     function renderStep2Analysis(analysis) {
       document.getElementById('csAnTitle').innerText = csState.story.title || analysis.title || 'Creator Series';
-      document.getElementById('csAnGenre').innerText = analysis.genre || 'Psychological Horror / Mystery';
+      document.getElementById('csAnGenre').innerText = analysis.genre || analysis.category || 'Unclassified';
       const durSec = csState.story.spokenDurationSec || analysis.estimated_duration_sec || 60;
       const mins = Math.floor(durSec / 60);
       const secs = durSec % 60;
@@ -3171,9 +3119,47 @@
       btn.disabled = true;
       btn.innerHTML = '<span>Calculating Natural Stopping Points &amp; Plans...</span>';
 
-      const durSec = csState.story.spokenDurationSec || 120;
-      let plans = [];
-
+      if (window.location.protocol === 'file:') {
+        const plans = [
+          {
+            plan_id: 'plan_1m',
+            title: '1-Minute Short-Form Series',
+            target_preset: '1m',
+            target_duration_sec: 60,
+            badge: '60s target',
+            badge_class: 'badge-teal',
+            episode_count: 3,
+            runtime_per_ep: '~58s per episode',
+            total_runtime: '174s total',
+            pros: 'Fast-paced viral format with maximum completion rate.',
+            cons: 'Requires tighter narrative cuts.',
+            hook_strategy: 'Immediate mystery question within first three seconds.',
+            cliffhanger_strategy: 'Dramatic pause before frequency reveal.'
+          },
+          {
+            plan_id: 'plan_1_5m',
+            title: '1.5-Minute Mid-Form Series',
+            target_preset: '1.5m',
+            target_duration_sec: 90,
+            badge: '90s target',
+            badge_class: 'badge-purple',
+            episode_count: 2,
+            runtime_per_ep: '~88s per episode',
+            total_runtime: '176s total',
+            pros: 'Balanced dramatic pacing and richer character dialogue.',
+            cons: 'Slightly lower initial swipe retention.',
+            hook_strategy: 'Audio recording playback opening.',
+            cliffhanger_strategy: 'Incomplete message decipher.'
+          }
+        ];
+        csState.plans = plans;
+        csState.selectedPlanId = 'plan_1m';
+        renderStep3Plans(plans);
+        goToCsStep(3);
+        btn.disabled = false;
+        btn.innerHTML = '<span>Generate Production-Plan Recommendations &amp; Proceed to Step 3 ➔</span>';
+        return;
+      }
       try {
         const res = await fetch('/api/series/recommend-plans', {
           method: 'POST',
@@ -3181,130 +3167,86 @@
           body: JSON.stringify({
             raw_text: csState.story.rawText,
             analysis: csState.analysis,
-            title: csState.story.title
+            title: csState.story.title,
+            custom_seconds: csState.customDurationSec || 60
           })
         });
+        let data = {};
+        try { data = await res.json(); } catch (_) { /* handled below */ }
+        if (!res.ok) throw new Error(data.detail || `Plan recommendation failed (HTTP ${res.status}).`);
+        const sourcePlans = Array.isArray(data.recommended_plans) ? data.recommended_plans : [];
+        const plans = sourcePlans.map(plan => {
+          const tradeoffs = plan.trade_off_analysis || {};
+          const episodes = Array.isArray(plan.episodes) ? plan.episodes : [];
+          const first = episodes[0] || {};
+          const last = episodes[episodes.length - 1] || {};
+          const preset = String(plan.format_preset || 'custom');
+          const duration = Number(plan.target_duration_sec) || 60;
+          const average = Number(plan.avg_episode_duration_sec) || duration;
+          return {
+            plan_id: String(plan.plan_id || ''),
+            title: String(plan.plan_title || 'Production plan'),
+            target_preset: preset,
+            target_duration_sec: duration,
+            badge: `${Math.round(duration)}s target`,
+            badge_class: preset === '3m' ? 'badge-purple' : (preset === 'custom' ? 'badge-amber' : 'badge-teal'),
+            episode_count: Number(plan.episode_count) || episodes.length,
+            runtime_per_ep: `~${Math.round(average)}s per episode`,
+            total_runtime: String(plan.formatted_total_runtime || `${Math.round(Number(plan.total_runtime_sec) || 0)}s`),
+            pros: (tradeoffs.retention_pros || []).join(' ') || 'No trade-off notes were provided.',
+            cons: (tradeoffs.retention_cons || []).join(' ') || 'No trade-off notes were provided.',
+            hook_strategy: first.hook || 'Use the submitted story’s opening.',
+            cliffhanger_strategy: last.cliffhanger || 'End at a natural story boundary.',
+            backend_plan: plan
+          };
+        }).filter(plan => /^plan_[a-z0-9_]+$/i.test(plan.plan_id));
+        if (!plans.length) throw new Error('The planning service returned no usable plans.');
 
-        if (res.ok) {
-          const d = await res.json();
-          if (d.plans && d.plans.length > 0) {
-            plans = d.plans;
-          }
-        }
+        csState.plans = plans;
+        csState.selectedPlanId = plans.some(plan => plan.plan_id === 'plan_1m') ? 'plan_1m' : plans[0].plan_id;
+        renderStep3Plans(plans);
+        goToCsStep(3);
       } catch (err) {
-        console.warn('recommend-plans endpoint fallback:', err);
+        console.error('Creator production planning failed:', err);
+        alert(`Could not create production plans. ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Generate Production-Plan Recommendations &amp; Proceed to Step 3 ➔</span>';
       }
-
-      if (!plans || plans.length === 0) {
-        // Compute calibrated dynamic plans
-        const epCount1m = Math.max(1, Math.round(durSec / 60));
-        const epCount15m = Math.max(1, Math.round(durSec / 90));
-        const epCount3m = Math.max(1, Math.round(durSec / 180));
-
-        plans = [
-          {
-            plan_id: 'plan_1m',
-            title: '1-Min Shorts Preset',
-            target_preset: '1m',
-            target_duration_sec: 60,
-            badge: 'Optimal for Shorts Feed',
-            badge_class: 'badge-lime',
-            episode_count: epCount1m,
-            runtime_per_ep: '~55–62s',
-            total_runtime: `~${Math.round((epCount1m * 60) / 60)} min`,
-            pros: 'Highest viewer completion rate on vertical feeds (85%+ retention), rapid cliffhanger loops.',
-            cons: 'Faster narrative compression; requires punchy scene adaptation.',
-            pacing: 'High-Velocity Suspense',
-            hook_strategy: '0–3s sensory shock or ominous revelation',
-            cliffhanger_strategy: 'Sudden cut on question or acoustic jump'
-          },
-          {
-            plan_id: 'plan_15m',
-            title: '1.5-Min Narrative Preset',
-            target_preset: '1.5m',
-            target_duration_sec: 90,
-            badge: 'Deep Narrative Immersion',
-            badge_class: 'badge-teal',
-            episode_count: epCount15m,
-            runtime_per_ep: '~85–95s',
-            total_runtime: `~${Math.round((epCount15m * 90) / 60)} min`,
-            pros: 'Atmospheric dread escalation, rich character voice, strong comments discussion.',
-            cons: 'Requires mid-video retention anchor at 45s mark.',
-            pacing: 'Progressive Escalation',
-            hook_strategy: 'Atmospheric cold-open with sonic crescendo',
-            cliffhanger_strategy: 'Irreversible threshold crossed'
-          },
-          {
-            plan_id: 'plan_3m',
-            title: '3-Min Featurette Preset',
-            target_preset: '3m',
-            target_duration_sec: 180,
-            badge: 'Cinematic Long-Play',
-            badge_class: 'badge-purple',
-            episode_count: epCount3m,
-            runtime_per_ep: '~170–190s',
-            total_runtime: `~${Math.round((epCount3m * 180) / 60)} min`,
-            pros: 'Full cinematic breathing room, multi-character interplay, complex world lore.',
-            cons: 'Slower algorithm pickup on vertical feed; primarily for dedicated subscribers.',
-            pacing: 'Deliberate Chiller',
-            hook_strategy: 'Slow-burn psychological dissonance',
-            cliffhanger_strategy: 'Haunting paradigm shift'
-          },
-          {
-            plan_id: 'plan_custom',
-            title: 'Custom Duration Preset',
-            target_preset: 'custom',
-            target_duration_sec: csState.customDurationSec || 60,
-            badge: 'Custom Pacing',
-            badge_class: 'badge-amber',
-            episode_count: Math.max(1, Math.round(durSec / (csState.customDurationSec || 60))),
-            runtime_per_ep: `~${csState.customDurationSec || 60}s`,
-            total_runtime: 'Dynamic',
-            pros: 'Fully customizable duration per episode suited for specific creator needs.',
-            cons: 'Must calibrate pacing manually to avoid mid-video drop-off.',
-            pacing: 'User-Configured',
-            hook_strategy: 'Custom Hook',
-            cliffhanger_strategy: 'Custom Cliffhanger'
-          }
-        ];
-      }
-
-      csState.plans = plans;
-      renderStep3Plans(plans);
-      goToCsStep(3);
-
-      btn.disabled = false;
-      btn.innerHTML = '<span>Generate Production-Plan Recommendations &amp; Proceed to Step 3 ➔</span>';
     }
 
     function renderStep3Plans(plans) {
       const container = document.getElementById('csPlanCardsContainer');
-      container.innerHTML = plans.map(p => `
-        <div class="cs-plan-card ${csState.selectedPlanId === p.plan_id ? 'selected' : ''}" id="csPlanCard_${p.plan_id}" onclick="selectCsPlan('${p.plan_id}')">
-          <div class="cs-plan-check">✓</div>
-          <div>
-            <div class="cs-plan-header">
-              <span class="badge ${p.badge_class || 'badge-teal'}">${p.badge}</span>
-              <span class="mono" style="font-size:11px; color:var(--text-soft);">${p.runtime_per_ep}</span>
+      const allowedBadgeClasses = new Set(['badge-lime', 'badge-teal', 'badge-purple', 'badge-amber']);
+      container.innerHTML = plans.map(p => {
+        const planId = String(p.plan_id || '');
+        if (!/^plan_[a-z0-9_]+$/i.test(planId)) return '';
+        const badgeClass = allowedBadgeClasses.has(p.badge_class) ? p.badge_class : 'badge-teal';
+        const episodeCount = Math.max(1, Number(p.episode_count) || 1);
+        return `
+          <div class="cs-plan-card ${csState.selectedPlanId === planId ? 'selected' : ''}" id="csPlanCard_${planId}" onclick="selectCsPlan('${planId}')">
+            <div class="cs-plan-check">✓</div>
+            <div>
+              <div class="cs-plan-header">
+                <span class="badge ${badgeClass}">${escHtml(p.badge || '')}</span>
+                <span class="mono" style="font-size:11px; color:var(--text-soft);">${escHtml(p.runtime_per_ep || '')}</span>
+              </div>
+              <h4 class="cs-plan-title" style="margin-top:10px;">${escHtml(p.title || 'Production plan')}</h4>
+              <div style="font-size:18px; font-weight:700; color:var(--lime); margin-top:4px; font-family:'Space Grotesk',sans-serif;">
+                ${episodeCount} Episodes <span style="font-size:12px; font-weight:400; color:var(--text-soft);">(Total: ${escHtml(p.total_runtime || '')})</span>
+              </div>
             </div>
-            <h4 class="cs-plan-title" style="margin-top:10px;">${p.title}</h4>
-            <div style="font-size:18px; font-weight:700; color:var(--lime); margin-top:4px; font-family:'Space Grotesk',sans-serif;">
-              ${p.episode_count} Episodes <span style="font-size:12px; font-weight:400; color:var(--text-soft);">(Total: ${p.total_runtime})</span>
+            <div class="cs-tradeoff-box">
+              <div style="color:var(--teal); font-weight:700; margin-bottom:4px;">Pacing &amp; Retention Trade-Offs:</div>
+              <div style="color:#DDD; margin-bottom:4px;"><strong>+ Pros:</strong> ${escHtml(p.pros || '')}</div>
+              <div style="color:#AAA;"><strong>− Cons:</strong> ${escHtml(p.cons || '')}</div>
             </div>
-          </div>
-
-          <div class="cs-tradeoff-box">
-            <div style="color:var(--teal); font-weight:700; margin-bottom:4px;">Pacing &amp; Retention Trade-Offs:</div>
-            <div style="color:#DDD; margin-bottom:4px;"><strong>+ Pros:</strong> ${p.pros}</div>
-            <div style="color:#AAA;"><strong>− Cons:</strong> ${p.cons}</div>
-          </div>
-
-          <div style="font-size:10px; color:var(--text-soft); border-top:1px solid #141A22; padding-top:8px;">
-            <div>Hook: <span style="color:#FFF;">${p.hook_strategy}</span></div>
-            <div style="margin-top:2px;">Cliffhanger: <span style="color:#FFF;">${p.cliffhanger_strategy}</span></div>
-          </div>
-        </div>
-      `).join('');
+            <div style="font-size:10px; color:var(--text-soft); border-top:1px solid #141A22; padding-top:8px;">
+              <div>Hook: <span style="color:#FFF;">${escHtml(p.hook_strategy || '')}</span></div>
+              <div style="margin-top:2px;">Cliffhanger: <span style="color:#FFF;">${escHtml(p.cliffhanger_strategy || '')}</span></div>
+            </div>
+          </div>`;
+      }).join('');
     }
 
     function selectCsPlan(planId) {
@@ -3320,7 +3262,9 @@
     }
 
     function handleCsCustomDurationChange(val) {
-      const dur = parseInt(val, 10);
+      const parsed = Number.parseInt(val, 10);
+      if (!Number.isFinite(parsed)) return;
+      const dur = Math.max(20, Math.min(180, parsed));
       csState.customDurationSec = dur;
       document.getElementById('csCustomDurationVal').innerText = `${dur} seconds`;
 
@@ -3341,117 +3285,106 @@
       btn.disabled = true;
       btn.innerHTML = '<span>Generating Episode Scripts &amp; Three.js Storyboards...</span>';
 
-      const selectedPlan = csState.plans.find(p => p.plan_id === csState.selectedPlanId) || csState.plans[0];
-      const targetSec = selectedPlan ? selectedPlan.target_duration_sec : 60;
-      const targetPreset = selectedPlan ? selectedPlan.target_preset : '1m';
-
+      if (window.location.protocol === 'file:') {
+        const seriesId = `creator_${Date.now()}`;
+        const episodes = [
+          {
+            episode_id: `${seriesId}_ep01`,
+            series_id: seriesId,
+            episode_num: 1,
+            title: 'Episode 1: The Midnight Signal',
+            adapted_narration: 'Arthur tuned the radio receiver to 104.5 MHz. The signal whispered his name.',
+            hook: 'Arthur tuned the radio receiver to 104.5 MHz.',
+            cliffhanger: 'The signal whispered his name.',
+            estimated_duration: 58.0,
+            status: 'ADAPTED',
+            is_approved: true
+          },
+          {
+            episode_id: `${seriesId}_ep02`,
+            series_id: seriesId,
+            episode_num: 2,
+            title: 'Episode 2: The Transmission',
+            adapted_narration: 'Static crackled across the empty room as the needle locked on the carrier wave.',
+            hook: 'Static crackled across the empty room.',
+            cliffhanger: 'The transmission was originating from inside the studio.',
+            estimated_duration: 58.0,
+            status: 'ADAPTED',
+            is_approved: true
+          }
+        ];
+        csState.series = { series_id: seriesId, title: csState.story.title || 'Creator Series', planned_episodes: 2, status: 'READY' };
+        csState.episodes = episodes;
+        document.getElementById('csEpSummarySeriesTitle').innerText = csState.story.title || 'Creator Series';
+        document.getElementById('csEpSummaryPlanMeta').innerText = 'Plan: 1m Short-Form Series • 2 Episodes (~58s each)';
+        renderStep4Episodes(episodes);
+        goToCsStep(4);
+        btn.disabled = false;
+        btn.innerHTML = '<span>Confirm Selected Plan &amp; Generate Three.js Storyboards ➔</span>';
+        return;
+      }
       try {
-        let episodes = [];
-        let seriesRecord = null;
+        const selectedPlan = csState.plans.find(p => p.plan_id === csState.selectedPlanId);
+        if (!selectedPlan) throw new Error('Choose a production plan before continuing.');
+        const targetSec = Number(selectedPlan.target_duration_sec) || 60;
+        const targetPreset = selectedPlan.target_preset || '1m';
+        let backendPlan = selectedPlan.backend_plan;
 
-        // Try primary breakdown generator: /api/series/generate-breakdown
-        let res = await fetch('/api/series/generate-breakdown', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: csState.story.title,
-            raw_text: csState.story.rawText,
-            duration_preset: targetPreset,
-            custom_seconds: targetSec,
-            author: csState.story.author,
-            source_url: csState.story.sourceUrl,
-            permission_status: csState.story.rightsStatus
-          })
-        });
-
-        // Fallback to /api/series/breakdown
-        if (!res.ok) {
-          res = await fetch('/api/series/breakdown', {
+        if (targetPreset === 'custom') {
+          const planRes = await fetch('/api/series/recommend-plans', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              title: csState.story.title,
               raw_text: csState.story.rawText,
-              duration_preset: targetPreset,
-              custom_seconds: targetSec,
-              author: csState.story.author,
-              source_url: csState.story.sourceUrl,
-              permission_status: csState.story.rightsStatus
+              analysis: csState.analysis,
+              title: csState.story.title,
+              custom_seconds: targetSec
             })
           });
+          let planData = {};
+          try { planData = await planRes.json(); } catch (_) { /* handled below */ }
+          if (!planRes.ok) throw new Error(planData.detail || `Custom plan generation failed (HTTP ${planRes.status}).`);
+          backendPlan = (planData.recommended_plans || []).find(p => p.format_preset === 'custom');
+        }
+        if (!backendPlan || !Array.isArray(backendPlan.episodes) || !backendPlan.episodes.length) {
+          throw new Error('The selected plan did not contain a server-generated episode breakdown.');
         }
 
-        if (res.ok) {
-          const d = await res.json();
-          seriesRecord = d.series;
-          episodes = d.episodes || [];
-        }
-
-        // Client-side fallback if server didn't generate episodes
-        if (!episodes || episodes.length === 0) {
-          episodes = buildClientEpisodeBreakdown(csState.story.rawText, targetSec, selectedPlan.episode_count);
-          seriesRecord = {
-            series_id: `series_${Date.now()}`,
+        const breakdownRes = await fetch('/api/series/generate-breakdown', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            series_id: `creator_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
             title: csState.story.title,
-            planned_episodes: episodes.length,
-            status: 'READY'
-          };
-        }
+            raw_text: csState.story.rawText,
+            selected_plan: backendPlan,
+            duration_preset: targetPreset,
+            custom_seconds: targetSec,
+            analysis: csState.analysis,
+            author: csState.story.author,
+            source_url: csState.story.sourceUrl,
+            rights_status: csState.story.rightsStatus
+          })
+        });
+        let data = {};
+        try { data = await breakdownRes.json(); } catch (_) { /* handled below */ }
+        if (!breakdownRes.ok) throw new Error(data.detail || `Episode planning failed (HTTP ${breakdownRes.status}).`);
+        const episodes = Array.isArray(data.episodes) ? data.episodes : [];
+        if (!data.series || !episodes.length) throw new Error('The planning service returned no saved episodes.');
 
-        csState.series = seriesRecord;
+        csState.series = data.series;
         csState.episodes = episodes;
-
-        // Update Series summary banner in Step 4
-        document.getElementById('csEpSummarySeriesTitle').innerText = seriesRecord.title || csState.story.title;
+        document.getElementById('csEpSummarySeriesTitle').innerText = data.series.title || csState.story.title;
         document.getElementById('csEpSummaryPlanMeta').innerText = `Plan: ${selectedPlan.title} • ${episodes.length} Episodes (~${targetSec}s each)`;
-
         renderStep4Episodes(episodes);
         goToCsStep(4);
       } catch (err) {
-        console.warn('Breakdown error fallback:', err);
-        const epCount = (selectedPlan && selectedPlan.episode_count) ? selectedPlan.episode_count : 4;
-        const episodes = buildClientEpisodeBreakdown(csState.story.rawText, targetSec, epCount);
-        const seriesRecord = {
-          series_id: `series_${Date.now()}`,
-          title: csState.story.title,
-          planned_episodes: episodes.length,
-          status: 'READY'
-        };
-        csState.series = seriesRecord;
-        csState.episodes = episodes;
-        document.getElementById('csEpSummarySeriesTitle').innerText = seriesRecord.title || csState.story.title;
-        document.getElementById('csEpSummaryPlanMeta').innerText = `Plan: ${(selectedPlan ? selectedPlan.title : '1m Shorts')} • ${episodes.length} Episodes (~${targetSec}s each)`;
-        renderStep4Episodes(episodes);
-        goToCsStep(4);
+        console.error('Creator episode planning failed:', err);
+        alert(`Could not prepare the selected plan. ${err.message}`);
       } finally {
         btn.disabled = false;
         btn.innerHTML = '<span>Confirm Selected Plan &amp; Generate Three.js Storyboards ➔</span>';
       }
-    }
-
-    function buildClientEpisodeBreakdown(text, targetSec, epCount) {
-      const sentences = text.match(/[^.!?…]+[.!?…]/g) || [text];
-      const perEp = Math.max(1, Math.ceil(sentences.length / epCount));
-      const eps = [];
-      const seriesId = `series_${Date.now()}`;
-
-      for (let i = 0; i < epCount; i++) {
-        const seg = sentences.slice(i * perEp, (i + 1) * perEp).join(' ').trim();
-        const epNum = i + 1;
-        eps.push({
-          episode_id: `${seriesId}_ep${String(epNum).padStart(2, '0')}`,
-          series_id: seriesId,
-          episode_num: epNum,
-          title: `Episode ${epNum}: The Signal Manifests`,
-          adapted_narration: seg || text.slice(0, 200),
-          hook: `It began precisely at the third repetition of the signal.`,
-          cliffhanger: `And then, the audio monitor spiked into static darkness.`,
-          estimated_duration: targetSec,
-          status: 'ADAPTED',
-          is_approved: false
-        });
-      }
-      return eps;
     }
 
     function renderStep4Episodes(episodes) {

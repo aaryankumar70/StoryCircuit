@@ -1,5 +1,5 @@
 """Comprehensive regression & feature tests for CurioLoop Phase 3 upgrades:
-1. 20-60s duration policy & audio/caption/timeline sync validation
+1. 20s minimum duration policy & audio/caption/timeline sync validation
 2. Bounded automatic QC failure recovery (<=2 attempts), unchanged-hash skip, & exhaustion
 3. Ethical Reddit discovery sanitization, topic quality gate, scriptwriter diversity, & scene directives
 4. Safe automatic daily local video cleanup in Asia/Kolkata
@@ -42,9 +42,11 @@ from curiosity_engine.content.reddit_discovery import (
 from curiosity_engine.content.scriptwriter import (
     assign_line_scenes,
     revise_script_for_duration,
+    score_script_quality,
     validate_script_quality,
     write_video_script,
 )
+from curiosity_engine.generation import GenerationEngineNotConfiguredError, UnconfiguredScriptEngine, engine_registry
 from curiosity_engine.content.topic_discovery import evaluate_topic_candidate
 from curiosity_engine.dashboard import app as dashboard_app
 from curiosity_engine.distribution.youtube_analytics import (
@@ -69,13 +71,14 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 # =============================================================================
-# 1. 20-60s Duration Bounds & Project Sync Validation
+# 1. Minimum Duration & Project Sync Validation
 # =============================================================================
 class TestDurationPolicyAndSync:
     def _mock_probe_and_loudness(self, duration_sec: float):
         probe_data = {
             "streams": [
-                {"codec_type": "video", "codec_name": "h264", "width": 1080, "height": 1920},
+                {"codec_type": "video", "codec_name": "h264", "width": 1080, "height": 1920,
+                 "r_frame_rate": "30/1", "avg_frame_rate": "30/1"},
                 {"codec_type": "audio", "codec_name": "aac"},
             ],
             "format": {"duration": str(duration_sec)},
@@ -93,13 +96,16 @@ class TestDurationPolicyAndSync:
         (19.5, False),
         (20.0, True),
         (30.0, True),
-        (31.6, True),
         (60.0, True),
-        (60.5, False),
+        (60.5, True),
+        (63.14, True),
+        (180.0, True),
+        ("not-a-duration", False),
     ])
-    def test_duration_policy_accepts_20_to_60s_and_rejects_outside(self, tmp_path, duration_sec, expected):
+    def test_duration_policy_rejects_only_below_20s(self, tmp_path, duration_sec, expected):
         assert MIN_DURATION_SEC == 20.0
-        assert MAX_DURATION_SEC == 60.0
+        # 180s remains an operational render safety cap, not a QC upper bound.
+        assert MAX_DURATION_SEC == 180.0
         assert TARGET_DURATION_MIN_SEC == 25.0
         assert TARGET_DURATION_MAX_SEC == 45.0
 
@@ -109,7 +115,8 @@ class TestDurationPolicyAndSync:
 
         with patch("curiosity_engine.quality.qc_gatekeeper.check_ffprobe_streams", return_value=probe_data), \
              patch("curiosity_engine.quality.qc_gatekeeper.measure_audio_loudness", return_value=loud_data), \
-             patch("curiosity_engine.quality.qc_gatekeeper.check_black_frames", return_value=True):
+             patch("curiosity_engine.quality.qc_gatekeeper.check_black_frames", return_value=True), \
+             patch("curiosity_engine.quality.qc_gatekeeper.check_frozen_frames", return_value=True):
             report = verify_video(mp4, {"duration": duration_sec, "sources": ["https://nasa.gov"]})
 
         assert report.passed is expected
@@ -117,6 +124,21 @@ class TestDurationPolicyAndSync:
             assert report.checks["within_preferred_target"] is (25.0 <= duration_sec <= 45.0)
         else:
             assert any("duration" in i.lower() or "out of range" in i.lower() for i in report.issues)
+
+    @pytest.mark.parametrize("duration,expected", [
+        (19.9, False),
+        (20.0, True),
+        (60.5, True),
+        (180.0, True),
+        ("invalid", False),
+    ])
+    def test_script_quality_duration_is_minimum_only_and_handles_bad_values(self, duration, expected):
+        result = score_script_quality({
+            "duration": duration,
+            "lines": [{"text": "A clear opening reveals a new question."}],
+        })
+        assert result["passed"] is expected
+        assert result["duration_valid"] is (duration != "invalid")
 
     def test_verify_project_sync_detects_caption_drift_and_empty_words(self, tmp_path):
         proj = tmp_path / "video_20261111_slot1"
@@ -145,13 +167,12 @@ class TestDurationPolicyAndSync:
 # 2. Automatic Bounded QC Recovery & Unchanged Hash Skip
 # =============================================================================
 class TestAutomaticQCRecovery:
-    def test_qc_duration_exceeded_recovers_within_two_attempts(self, tmp_path):
+    def test_qc_short_duration_recovers_within_two_attempts(self, tmp_path):
         iso_db = DatabaseClient(custom_file=tmp_path / "db.json")
         out_dir = tmp_path / "output"
         out_dir.mkdir(parents=True)
         vid_id = "video_20261111_slot1"
         mp4 = out_dir / f"{vid_id}.mp4"
-        mp4.write_bytes(b"initial-overlong-mp4-bytes")
 
         long_lines = [{"text": f"Sentence number {i} adds rich historical intrigue to the unfolding story.", "scene": "archive"} for i in range(12)]
         iso_db.save_video_record(vid_id, {
@@ -160,11 +181,11 @@ class TestAutomaticQCRecovery:
             "target_date": "2026-11-11",
             "topic": "Secret Brass Calendar",
             "category": "History",
-            "script": {"title": "Secret Brass Calendar", "lines": long_lines, "duration": 64.0, "sources": ["https://britannica.com"]},
+            "script": {"title": "Secret Brass Calendar", "lines": long_lines, "duration": 15.0, "sources": ["https://britannica.com"]},
             "youtube_description": "Link-free description body.",
         })
 
-        qc_fail = MagicMock(passed=False, issues=["Duration 64.00s exceeds maximum 60.0s"], checks={"duration_sec": 64.0, "failure_categories": ["duration_exceeded"]})
+        qc_fail = MagicMock(passed=False, issues=["Duration 15.00s is below the 20.0s minimum"], checks={"duration_sec": 15.0, "failure_categories": ["duration_too_short"]})
         qc_fail.to_dict.return_value = {"passed": False, "checks": qc_fail.checks, "issues": qc_fail.issues}
         qc_pass = MagicMock(passed=True, issues=[], checks={"duration_sec": 38.5, "within_preferred_target": True})
         qc_pass.to_dict.return_value = {"passed": True, "checks": qc_pass.checks, "issues": []}
@@ -184,8 +205,11 @@ class TestAutomaticQCRecovery:
             (pdir / "data" / "words.json").write_text("[]")
             return pdir
 
+        render_count = {"n": 0}
+
         def _fake_render(p_dir, target_mp4, **kwargs):
-            target_mp4.write_bytes(b"recovered-compact-38s-mp4-bytes")
+            render_count["n"] += 1
+            target_mp4.write_bytes(f"recovered-compact-38s-mp4-{render_count['n']}".encode("utf-8"))
             return target_mp4
 
         with patch("curiosity_engine.runner.pipeline.db", iso_db), \
@@ -194,6 +218,8 @@ class TestAutomaticQCRecovery:
              patch("curiosity_engine.runner.pipeline.verify_video", side_effect=[qc_fail, qc_pass]), \
              patch("curiosity_engine.runner.pipeline.prepare_project", side_effect=_fake_prep), \
              patch("curiosity_engine.runner.pipeline.render_project_video", side_effect=_fake_render), \
+             patch("curiosity_engine.runner.pipeline.revise_script_for_duration",
+                   return_value=({"duration": 38.5, "lines": long_lines}, "offline test revision")), \
              patch("curiosity_engine.notifications.telegram_notifier.get_telegram_notifier", return_value=fake_tg):
 
             res = produce_single_video(vid_id, {}, slot_index=1, target_date="2026-11-11")
@@ -221,7 +247,7 @@ class TestAutomaticQCRecovery:
             "slot_index": 2,
             "target_date": "2026-11-11",
             "topic": "Broken Visuals",
-            "category": "Science",
+            "category": "Space",
             "script": {"title": "Broken", "lines": [{"text": "Hook"}]},
             "youtube_description": "Clean description",
             "failed_mp4_sha256": same_hash,
@@ -315,7 +341,8 @@ class TestContentIntelligenceAndStorytelling:
         })
         assert ok_good is True
 
-    def test_scriptwriter_scenes_validation_and_duration_revision(self):
+    def test_scriptwriter_scenes_validation_and_duration_revision(self, monkeypatch):
+        monkeypatch.setattr(engine_registry, "_script_engine", UnconfiguredScriptEngine())
         lines = [
             {"text": "In 1971 a lightning bolt tore apart LANSA Flight 508 over the rainforest."},
             {"text": "Minutes later Juliane Koepcke woke up alone beneath emerald jungle canopy."},
@@ -324,8 +351,9 @@ class TestContentIntelligenceAndStorytelling:
             {"text": "Nine days later timber workers spotted her beside a wooden canoe."},
         ]
         script = {"title": "Two Miles Freefall Over the Amazon", "category": "Survival", "lines": lines, "duration": 34.0}
-        assign_line_scenes(script)
-        assert all("scene" in ln and "visual_type" in ln["scene"] for ln in script["lines"])
+        script = assign_line_scenes(script)
+        assert all("scene" in ln and ln["scene"].get("visual_description") for ln in script["lines"])
+        assert all(ln["text"] in ln["scene"]["visual_description"] for ln in script["lines"])
 
         ok_q, q_issues = validate_script_quality({"title": "Weak", "lines": [{"text": "Did you know this fact is cool?"}]})
         assert ok_q is False
@@ -333,24 +361,21 @@ class TestContentIntelligenceAndStorytelling:
 
         # Excess >60s trims middle elaboration cleanly while preserving hook (index 0) and ending (-1)
         overlong = {"title": "Long Story", "lines": [{"text": f"Beat {i} adds extra suspenseful historical detail about the deep expedition."} for i in range(12)], "duration": 66.0}
-        revised, note = revise_script_for_duration(overlong, 66.0)
-        assert len(revised["lines"]) < len(overlong["lines"])
-        assert revised["lines"][0]["text"] == overlong["lines"][0]["text"]
-        assert revised["lines"][-1]["text"] == overlong["lines"][-1]["text"]
-        assert "condensed" in note.lower() or "trimmed" in note.lower()
+        with pytest.raises(GenerationEngineNotConfiguredError):
+            revise_script_for_duration(overlong, 66.0)
 
 
 # =============================================================================
 # 4. Safe Automatic Daily Local Cleanup (Asia/Kolkata)
 # =============================================================================
 class TestSafeDailyStorageCleanup:
-    def test_cleanup_deletes_eligible_yesterday_and_protects_active_today_unconfirmed_and_code(self, tmp_path):
+    def test_cleanup_preserves_final_mp4_deliverables_and_protects_active_and_unconfirmed_jobs(self, tmp_path):
         out_dir = tmp_path / "output"
         out_dir.mkdir()
         iso_db = DatabaseClient(custom_file=tmp_path / "db.json")
         state_file = tmp_path / "cleanup.json"
 
-        # 1. Eligible completed + confirmed scheduled video from yesterday (2026-11-10) -> CLEANED
+        # 1. Completed + confirmed scheduled video from yesterday remains a local deliverable.
         y_mp4 = out_dir / "video_20261110_slot1.mp4"
         y_mp4.write_bytes(b"A" * 5000)
         y_prev = out_dir / "video_20261110_slot1_preview_t5.jpg"
@@ -412,10 +437,11 @@ class TestSafeDailyStorageCleanup:
             )
 
         assert res1["success"] is True
-        assert not y_mp4.exists()
-        assert not y_prev.exists()
-        assert not y_dir.exists()
-        assert res1["bytes_reclaimed"] == 7500
+        assert y_mp4.exists()
+        assert y_prev.exists()
+        assert y_dir.exists()
+        assert res1["protected"]["video_20261110_slot1"] == "final_mp4_deliverable_retained"
+        assert res1["bytes_reclaimed"] == 0
 
         assert u_mp4.exists()
         assert t_mp4.exists()
@@ -423,7 +449,7 @@ class TestSafeDailyStorageCleanup:
 
         # DB metadata preserved!
         rec_cleaned = iso_db.get_video_record("video_20261110_slot1")
-        assert rec_cleaned["local_file_cleaned"] is True
+        assert rec_cleaned.get("local_file_cleaned") is not True
         assert rec_cleaned["youtube_upload_id"] == "y-54SJ4MCFM"
         assert rec_cleaned["youtube_description"] == "Preserved metadata description"
         assert rec_cleaned["qc_results"]["passed"] is True
@@ -440,6 +466,7 @@ class TestSafeDailyStorageCleanup:
             summary = get_storage_summary(output_dir=out_dir, state_file=state_file)
         assert res2["files_deleted"] == 0
         assert res2["dirs_deleted"] == 0
+        assert y_mp4.exists()
         assert summary["last_cleanup_date_ist"] == "2026-11-11"
 
 
@@ -640,6 +667,116 @@ class TestDashboardPhase3Telemetry:
         assert body["slot_timeline"][0]["stage"] == "Scheduled"
         assert body["slot_timeline"][0]["recovery_attempts"] == 1
         assert body["slot_timeline"][1]["stage"] == "Published"
-        assert body["policy"]["max_duration_sec"] == 60.0
+        assert body["policy"]["max_duration_sec"] == 180.0
         assert "CurioLoop Studio" in html_resp.text
         assert "STUDIO_AUTH_KEY" in html_resp.text
+
+def test_reconcile_missing_db_record_preserves_confirmed_youtube_schedule(tmp_path):
+    date_str = "2026-11-22"
+    scheduled_slot = {
+        "video_id": "video_20261122_slot1",
+        "generation_status": "COMPLETED",
+        "qc_passed": True,
+        "qc_results": {"passed": True},
+        "upload_status": "UPLOADED_PRIVATE",
+        "youtube_video_id": "real-youtube-id",
+        "youtube_simulated": False,
+        "scheduled_status": "SCHEDULED",
+        "scheduled_publish_at": "2026-11-23T07:00:00Z",
+        "scheduled_publish_at_ist": "2026-11-23T12:30:00+05:30",
+        "error": None,
+    }
+    state = {
+        "date": date_str,
+        "overall_status": "COMPLETED",
+        "generation": {"status": "COMPLETED"},
+        "slot1": scheduled_slot,
+        "slot2": {"video_id": "video_20261122_slot2", "generation_status": "PENDING", "qc_passed": False},
+    }
+
+    class FakeAutomationState:
+        def get_daily_record(self, _date):
+            return state
+
+        def update_daily_record(self, _date, updates):
+            for key, value in updates.items():
+                if isinstance(value, dict) and isinstance(state.get(key), dict):
+                    state[key].update(value)
+                else:
+                    state[key] = value
+            return state
+
+    class FakeDB:
+        @staticmethod
+        def get_video_record(_video_id):
+            return None
+
+    sched = LocalScheduler.__new__(LocalScheduler)
+    sched.tz = ZoneInfo("Asia/Kolkata")
+    with patch("curiosity_engine.runner.local_scheduler.automation_state", FakeAutomationState()), \
+         patch("curiosity_engine.runner.local_scheduler.db", FakeDB()):
+        result = sched.reconcile_daily_state(date_str)
+
+    slot = result["slot1"]
+    assert slot["generation_status"] == "INTERRUPTED"
+    assert slot["qc_passed"] is None
+    assert slot["qc_results"] == {"passed": True}
+    assert slot["youtube_video_id"] == "real-youtube-id"
+    assert slot["youtube_simulated"] is False
+    assert slot["scheduled_status"] == "SCHEDULED"
+    assert slot["scheduled_publish_at"] == "2026-11-23T07:00:00Z"
+    assert result["overall_status"] == "INTERRUPTED"
+
+def test_daily_automation_stops_if_confirmed_schedule_has_no_local_db_row(tmp_path):
+    date_str = "2026-11-22"
+    state = {
+        "date": date_str,
+        "overall_status": "PARTIAL",
+        "generation": {"status": "PARTIAL"},
+        "slot1": {
+            "video_id": "video_20261122_slot1",
+            "generation_status": "COMPLETED",
+            "qc_passed": True,
+            "qc_results": {"passed": True},
+            "upload_status": "UPLOADED_PRIVATE",
+            "youtube_video_id": "real-youtube-id",
+            "youtube_simulated": False,
+            "scheduled_status": "SCHEDULED",
+            "scheduled_publish_at": "2026-11-23T07:00:00Z",
+        },
+        "slot2": {"video_id": "video_20261122_slot2", "generation_status": "PENDING", "qc_passed": False},
+    }
+
+    class FakeAutomationState:
+        def update_daily_record(self, _date, updates):
+            for key, value in updates.items():
+                if isinstance(value, dict) and isinstance(state.get(key), dict):
+                    state[key].update(value)
+                else:
+                    state[key] = value
+            return state
+
+    class FakeDB:
+        @staticmethod
+        def get_video_record(_video_id):
+            return None
+
+    sched = LocalScheduler.__new__(LocalScheduler)
+    sched.now_ist = lambda: datetime(2026, 11, 22, 19, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+    sched.is_automation_enabled = lambda: True
+    sched.reconcile_daily_state = lambda _date: state
+
+    from curiosity_engine.creator_series.queue_manager import queue_manager
+    with patch.object(queue_manager, "ensure_automatic_studio_reserved"), patch(
+        "curiosity_engine.runner.local_scheduler.automation_state", FakeAutomationState()
+    ), patch("curiosity_engine.runner.local_scheduler.db", FakeDB()), patch(
+        "curiosity_engine.runner.local_scheduler.YOUTUBE_PUBLISHING_MODE", "live"
+    ), patch("curiosity_engine.runner.local_scheduler.run_daily_generation") as generate:
+        result = sched.process_daily_automation()
+
+    generate.assert_not_called()
+    assert result["overall_status"] == "INTERRUPTED"
+    assert result["slot1"]["youtube_video_id"] == "real-youtube-id"
+    assert result["slot1"]["scheduled_status"] == "SCHEDULED"
+    assert "prevent a duplicate" in result["slot1"]["error"]
+

@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from curiosity_engine import config
@@ -48,6 +48,7 @@ from curiosity_engine.config import (
     get_hidden_subprocess_kwargs,
 )
 from curiosity_engine.distribution.token_manager import token_manager
+from curiosity_engine.generation import engine_registry
 from curiosity_engine.distribution.youtube_analytics import performance_tracker
 from curiosity_engine.distribution.youtube_publisher import (
     NON_PRODUCTION_TEST_YOUTUBE_IDS,
@@ -81,6 +82,19 @@ logger = logging.getLogger("curiosity_engine.dashboard")
 
 app = FastAPI(title="Curiosity Engine Studio Dashboard", version="1.1.0")
 
+
+@app.middleware("http")
+async def protect_creator_mutations(request, call_next):
+    """Protect every state-changing Creator endpoint with auth and same-origin checks."""
+    if request.url.path == "/api/series" or request.url.path.startswith("/api/series/"):
+        if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+            from curiosity_engine.dashboard.security import validate_creator_mutation
+            try:
+                validate_creator_mutation(request)
+            except HTTPException as exc:
+                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+    return await call_next(request)
+
 try:
     from curiosity_engine.dashboard.series_api import router as series_router
     app.include_router(series_router)
@@ -111,6 +125,13 @@ def startup_token_audit():
             DASHBOARD_LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
         except Exception as e:
             logger.warning(f"Failed writing dashboard PID lockfile: {e}")
+
+    try:
+        from curiosity_engine.generation.bootstrap import configure_generation_engines
+        engine_status = configure_generation_engines()
+        logger.info("Generation engine readiness: %s", engine_status.get("status_message"))
+    except Exception as e:
+        logger.warning("Generation engines remain in safe standby: %s", e)
 
     try:
         token_manager.audit_configured_tokens_on_startup()
@@ -169,6 +190,9 @@ def compute_ui_status(v: Dict[str, Any]) -> str:
     pub_status = v.get("publishing_status", "PENDING")
     prod_status = v.get("production_status", "PENDING")
     yt_status = v.get("youtube_status", "")
+
+    if prod_status == "ENGINE_NOT_CONFIGURED":
+        return "ENGINE_NOT_CONFIGURED"
 
     if (
         prod_status in ("FAILED", "REJECTED_QC")
@@ -491,6 +515,12 @@ def index_page() -> str:
     return injected_html
 
 
+@app.get("/api/generation/status")
+def get_generation_status() -> Dict[str, Any]:
+    """Return readiness status of content generation and visual rendering engines."""
+    return engine_registry.get_status()
+
+
 @app.get("/api/status")
 def get_system_status() -> Dict[str, Any]:
     """Return comprehensive studio telemetry, dedicated upload quotas, and token health."""
@@ -702,6 +732,7 @@ def get_system_status() -> Dict[str, Any]:
             "oauth_paused": oauth_paused,
             "oauth_pause_reason": oauth_pause_reason,
         },
+        "generation_engine": engine_registry.get_status(),
         "next_scheduled_video": next_sched_video,
         "todays_production_count": todays_prod_count,
         "daily_limit": MAX_DAILY_VIDEOS,
@@ -1222,6 +1253,7 @@ def get_system_health():
             "engine": "faster-whisper",
             "model_present": whisper_model.exists(),
         },
+        "generation_engine": engine_registry.get_status(),
         "video_compositor": {
             "engine": "Headless Chromium CDP + FFmpeg",
             "ffmpeg_available": bool(shutil.which("ffmpeg")),
@@ -1342,19 +1374,20 @@ def get_narration_studio_data():
 
 @app.get("/api/studio/visuals")
 def get_visual_studio_data():
-    """Visual Studio 2.5D spatial compositions, camera paths, and asset resolution telemetry."""
-    from curiosity_engine.production.asset_resolver import asset_resolver
+    """Visual Studio Three.js 3D compositions, camera paths, and renderer telemetry."""
+    visual_engine = engine_registry.get_visual_engine()
+    template_dir = getattr(visual_engine, "template_dir", TEMPLATES_PATH / "cartoon-3d")
     return sanitize_data({
-        "engine": "Cinematic Hybrid 2.5D (Three.js WebGL + Canvas Multiplane)",
-        "rendering_mode": "DIMENSIONAL_2_5D",
+        "engine": "Cartoon 3D Three.js WebGL Engine",
+        "rendering_mode": "THREEJS_CANVAS_CAPTURE",
         "camera_shots": [
             "SLOW_DRIFT", "DYNAMIC_DOLLY", "ORBIT_SURVEY", "MACRO_DETAIL",
             "DRAMATIC_REVEAL", "DUAL_PERSPECTIVE", "TIMELINE_OVERLAY"
         ],
         "safe_zones": {"top_px": 250, "bottom_px": 1600, "captions_y_px": 1400},
         "asset_resolver": {
-            "status": "ONLINE",
-            "base_dir": str(asset_resolver.base_dir),
+            "status": "ONLINE" if visual_engine.is_configured() else "STANDBY",
+            "base_dir": str(template_dir),
             "procedural_fallback_enabled": True,
         },
     })

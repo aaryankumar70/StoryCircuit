@@ -1,7 +1,7 @@
 """Programmatic Quality Control Gatekeeper.
 Enforces strict programmatic criteria before any video can proceed to distribution.
 Validates:
-- Duration strictly 20.0 to 60.0 seconds (preferred storytelling target ~25-45s)
+- Minimum duration 20 seconds; 25-45 seconds remains the preferred storytelling target
 - Vertical 9:16 aspect ratio (1080x1920)
 - Codecs: H.264 video + AAC audio
 - Audio broadcast loudness compliance (EBU R128 integrated LUFS and True Peak)
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -20,7 +21,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from curiosity_engine.config import (
     CAPTION_ZONE_Y,
-    MAX_DURATION_SEC,
     MAX_TRUE_PEAK_DB,
     MIN_DURATION_SEC,
     SAFE_ZONE_BOTTOM,
@@ -66,7 +66,7 @@ def check_ffprobe_streams(video_path: Path) -> Dict[str, Any]:
         "-of", "json",
         str(video_path),
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True, check=True, **get_hidden_subprocess_kwargs())
+    res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60, **get_hidden_subprocess_kwargs())
     return json.loads(res.stdout)
 
 
@@ -79,7 +79,7 @@ def measure_audio_loudness(video_path: Path) -> Dict[str, float]:
         "-f", "null",
         "-",
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True, **get_hidden_subprocess_kwargs())
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=180, **get_hidden_subprocess_kwargs())
     out = res.stderr
     metrics = {"integrated_lufs": -70.0, "true_peak_db": -70.0, "lra": 0.0}
 
@@ -107,9 +107,23 @@ def check_black_frames(video_path: Path) -> bool:
         "-f", "null",
         "-",
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True, **get_hidden_subprocess_kwargs())
-    has_persistent_black = "black_start:" in res.stderr and "black_duration: [2-9]" in res.stderr
-    return not has_persistent_black
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=180, **get_hidden_subprocess_kwargs())
+    if res.returncode != 0:
+        logger.error("FFmpeg black-frame analysis failed: %s", (res.stderr or "")[-1000:])
+        return False
+    durations = [float(value) for value in re.findall(r"black_duration:\s*([0-9]+(?:\.[0-9]+)?)", res.stderr or "")]
+    return not any(duration >= 1.0 for duration in durations)
+
+
+def check_frozen_frames(video_path: Path) -> bool:
+    """Reject a scene that repeats an identical frame for two seconds or longer."""
+    cmd = ["ffmpeg", "-v", "info", "-i", str(video_path), "-vf", "freezedetect=n=-50dB:d=2.0", "-an", "-f", "null", "-"]
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=180, **get_hidden_subprocess_kwargs())
+    if res.returncode != 0:
+        logger.error("FFmpeg frozen-frame analysis failed: %s", (res.stderr or "")[-1000:])
+        return False
+    durations = [float(value) for value in re.findall(r"freeze_duration:\s*([0-9]+(?:\.[0-9]+)?)", res.stderr or "")]
+    return not any(duration >= 2.0 for duration in durations)
 
 
 def verify_project_sync(
@@ -206,18 +220,22 @@ def verify_video(
         issues.append("Missing audio stream.")
         failure_categories.append("integrity_missing")
 
-    # 2. Duration check (Strict: 20.0 to 60.0s; Preferred target ~25-45s)
-    duration = float(format_info.get("duration", 0.0))
+    # 2. Minimum duration check. Preferred length is advisory, not a hard QC gate.
+    raw_duration = format_info.get("duration", 0.0)
+    try:
+        duration = float(raw_duration)
+    except (TypeError, ValueError, OverflowError):
+        duration = float("nan")
     checks["duration_sec"] = duration
     checks["min_duration_limit_sec"] = MIN_DURATION_SEC
-    checks["max_duration_limit_sec"] = MAX_DURATION_SEC
+    checks["duration_upper_qc_limit_sec"] = None
     checks["within_preferred_target"] = TARGET_DURATION_MIN_SEC <= duration <= TARGET_DURATION_MAX_SEC
-    if duration < MIN_DURATION_SEC:
-        issues.append(f"Duration {duration:.2f}s is out of range [{MIN_DURATION_SEC}, {MAX_DURATION_SEC}s].")
+    if not math.isfinite(duration):
+        issues.append("Video duration is not a finite number.")
+        failure_categories.append("duration_invalid")
+    elif duration < MIN_DURATION_SEC:
+        issues.append(f"Duration {duration:.2f}s is below the {MIN_DURATION_SEC:.0f}s minimum.")
         failure_categories.append("duration_too_short")
-    elif duration > MAX_DURATION_SEC:
-        issues.append(f"Duration {duration:.2f}s exceeds maximum {MAX_DURATION_SEC}s [{MIN_DURATION_SEC}, {MAX_DURATION_SEC}s].")
-        failure_categories.append("duration_exceeded")
 
     # 3. Resolution & Aspect Ratio (1080x1920)
     width = video_stream.get("width") if video_stream else 0
@@ -238,6 +256,16 @@ def verify_video(
     if a_codec != "aac":
         issues.append(f"Audio codec {a_codec} is not AAC.")
         failure_categories.append("audio_codec")
+    fps_text = (video_stream or {}).get("avg_frame_rate") or (video_stream or {}).get("r_frame_rate") or "0/1"
+    try:
+        numerator, denominator = fps_text.split("/", 1)
+        fps = float(numerator) / float(denominator)
+    except (ValueError, ZeroDivisionError):
+        fps = 0.0
+    checks["fps"] = fps
+    if not math.isfinite(fps) or abs(fps - TARGET_FPS) > 0.1:
+        issues.append(f"Frame rate {fps:.3f} FPS does not match the {TARGET_FPS} FPS target.")
+        failure_categories.append("frame_rate")
 
     # 5. Audio Loudness & Broadcast Compliance (EBU R128)
     loudness = measure_audio_loudness(video_path)
@@ -261,12 +289,19 @@ def verify_video(
     if not is_not_black:
         issues.append("Persistent black frames detected.")
         failure_categories.append("visual_black_frames")
+    no_frozen_frames = check_frozen_frames(video_path)
+    checks["no_frozen_frames"] = no_frozen_frames
+    if not no_frozen_frames:
+        issues.append("A frozen visual interval of at least two seconds was detected.")
+        failure_categories.append("visual_frozen_frames")
 
     # 7. Factual and editorial grounding verification
     sources = script_metadata.get("sources", [])
     evidence_type = str(script_metadata.get("evidence_type") or "")
     checks["sources_count"] = len(sources)
-    if not sources and evidence_type not in ("unexplained_mystery", "personal_account"):
+    content_lane = str(script_metadata.get("content_lane") or "automatic").strip().lower()
+    creator_provided = content_lane == "creator_series" and evidence_type == "creator_provided"
+    if not sources and evidence_type not in ("unexplained_mystery", "personal_account") and not creator_provided:
         issues.append("Missing verified source references.")
         failure_categories.append("missing_sources")
 
@@ -278,6 +313,27 @@ def verify_video(
 
     candidate_proj_dir = project_dir or (video_path.with_suffix("") if video_path.with_suffix("").is_dir() else None)
     sync_ok, sync_issues, sync_meta = verify_project_sync(candidate_proj_dir, duration)
+    if candidate_proj_dir and candidate_proj_dir.exists():
+        try:
+            approved_script = json.loads((candidate_proj_dir / "script.json").read_text(encoding="utf-8"))
+            expected_words = [token for line in (approved_script.get("lines") or [])
+                              for token in str(line.get("text") or "").split()]
+            aligned_words = json.loads((candidate_proj_dir / "data" / "words.json").read_text(encoding="utf-8"))
+            actual_words = [str(word.get("w") or "") for word in aligned_words]
+            alignment_ok = len(expected_words) == len(actual_words) and all(
+                re.sub(r"[^a-z0-9]", "", left.casefold()) == re.sub(r"[^a-z0-9]", "", right.casefold())
+                for left, right in zip(expected_words, actual_words)
+            )
+            checks["word_text_alignment"] = alignment_ok
+            if not alignment_ok:
+                sync_ok = False
+                sync_issues.append("Word-level caption text does not match the approved narration.")
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            checks["word_text_alignment"] = False
+            sync_ok = False
+            sync_issues.append("Word-level caption alignment could not be verified against the approved narration.")
+    sync_meta["sync_ok"] = sync_ok
+    sync_meta["issues"] = list(sync_issues)
     checks["sync"] = sync_meta
     if not sync_ok:
         issues.extend(sync_issues)
@@ -338,8 +394,6 @@ def verify_video(
         narration_penalty += 3.0
     if i_lufs < TARGET_INTEGRATED_LUFS_MIN or i_lufs > TARGET_INTEGRATED_LUFS_MAX or tp_db > MAX_TRUE_PEAK_DB:
         narration_penalty += 2.0
-    if not (TARGET_DURATION_MIN_SEC <= duration <= TARGET_DURATION_MAX_SEC):
-        narration_penalty += 1.5
     narration_quality_score = max(0.0, 10.0 - narration_penalty)
 
     tech_penalty = 0.0

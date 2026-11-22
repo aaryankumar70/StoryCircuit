@@ -8,6 +8,13 @@ if workspace_dir not in sys.path:
     sys.path.insert(0, workspace_dir)
 
 @pytest.fixture(autouse=True)
+def ensure_generation_engines_configured():
+    """Ensure production generation engines are registered for test runs."""
+    from curiosity_engine.generation.bootstrap import configure_generation_engines
+    configure_generation_engines()
+
+
+@pytest.fixture(autouse=True)
 def mock_external_ai_in_unit_tests(monkeypatch, request):
     """By default in unit tests, mock local_model.is_available to False to prevent
     hitting real Ollama and generating on CPU during 240+ unit tests, unless marked 'live_ai'.

@@ -6,7 +6,7 @@ story analysis, episode segmentation, scheduling, and QC inspection.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -27,11 +27,10 @@ from curiosity_engine.creator_series.production_planner import (
     estimate_duration_seconds,
 )
 from curiosity_engine.creator_series.queue_manager import queue_manager
+from curiosity_engine.creator_series.creator_queue import creator_queue_manager
 from curiosity_engine.creator_series.series_db import series_db
 from curiosity_engine.creator_series.series_scheduler import series_scheduler
 from curiosity_engine.creator_series.story_adapter import story_adapter
-from curiosity_engine.creator_series.visual_director import visual_director
-from curiosity_engine.creator_series.visual_qc import visual_qc
 
 logger = logging.getLogger("curiosity_engine.series_api")
 
@@ -65,8 +64,16 @@ class ReorderEpisodesRequest(BaseModel):
 
 class ScheduleSeriesRequest(BaseModel):
     start_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
-    time_ist: str = Field("20:30", pattern=r"^\d{2}:\d{2}$")
-    slot: int = Field(2, ge=1, le=2)
+    schedule_type: str = "A"
+    start_time: Optional[str] = Field("20:30", pattern=r"^\d{2}:\d{2}$")
+    timezone: str = "Asia/Kolkata"
+    cadence: str = "daily"
+    custom_slots: Optional[List[str]] = None
+    custom_days: Optional[List[str]] = None
+    interval_days: int = Field(1, ge=1, le=365)
+
+    class Config:
+        extra = "forbid"
 
 
 class SchedulePreviewRequest(BaseModel):
@@ -81,6 +88,9 @@ class SchedulePreviewRequest(BaseModel):
     custom_days: Optional[List[str]] = None
     interval_days: Optional[int] = 1
 
+    class Config:
+        extra = "forbid"
+
 
 class ScheduleCommitRequest(BaseModel):
     schedule_type: Optional[str] = "A"
@@ -90,6 +100,10 @@ class ScheduleCommitRequest(BaseModel):
     cadence: Optional[str] = "daily"
     custom_slots: Optional[List[str]] = None
     custom_days: Optional[List[str]] = None
+    interval_days: int = Field(1, ge=1, le=365)
+
+    class Config:
+        extra = "forbid"
 
 
 class ImportStoryRequest(BaseModel):
@@ -113,6 +127,7 @@ class IngestPasteRequest(BaseModel):
 class IngestRedditRequest(BaseModel):
     url: str = Field(..., min_length=10)
     permission_status: Optional[str] = "UNVERIFIED_EVALUATION_ONLY"
+    attribution: Optional[str] = None
 
 
 class AnalyzeStoryRequest(BaseModel):
@@ -127,7 +142,7 @@ class StoryBreakdownRequest(BaseModel):
     title: str = "Creator Series"
     raw_text: str = Field(..., min_length=20)
     duration_preset: str = Field("1m", description="1m (60s), 1.5m (90s), 3m (180s), or custom")
-    custom_seconds: Optional[float] = 60.0
+    custom_seconds: Optional[float] = Field(60.0, ge=20.0, le=180.0)
     author: Optional[str] = "Anonymous"
     source_url: Optional[str] = None
     permission_status: Optional[str] = "UNVERIFIED_EVALUATION_ONLY"
@@ -139,7 +154,7 @@ class RecommendPlansRequest(BaseModel):
     raw_text: Optional[str] = None
     analysis: Optional[Dict[str, Any]] = None
     title: Optional[str] = "Creator Story"
-    custom_seconds: Optional[float] = None
+    custom_seconds: Optional[float] = Field(None, ge=20.0, le=180.0)
 
 
 class GenerateBreakdownRequest(BaseModel):
@@ -148,10 +163,12 @@ class GenerateBreakdownRequest(BaseModel):
     raw_text: Optional[str] = None
     selected_plan: Optional[Dict[str, Any]] = None
     duration_preset: Optional[str] = "1m"
-    custom_seconds: Optional[float] = None
+    custom_seconds: Optional[float] = Field(None, ge=20.0, le=180.0)
+    analysis: Optional[Dict[str, Any]] = None
     rights_status: Optional[str] = "UNVERIFIED_EVALUATION_ONLY"
     author: Optional[str] = "Anonymous"
     source_url: Optional[str] = None
+    attribution: Optional[str] = None
 
 
 class SingleEpisodeEditRequest(BaseModel):
@@ -167,6 +184,11 @@ class ApproveStoryboardRequest(BaseModel):
     approved: bool = True
     reviewer: Optional[str] = "Creator"
     notes: Optional[str] = None
+
+
+class ReviewRightsRequest(BaseModel):
+    rights_status: RightsStatus
+    evidence_note: str = Field(..., min_length=8, max_length=2000)
 
 
 @router.post("/create", status_code=status.HTTP_201_CREATED)
@@ -234,7 +256,10 @@ async def ingest_upload(
             detail=f"Unsupported file extension '{ext}'. Only .txt, .md, and .docx files are supported.",
         )
 
-    content_bytes = await file.read()
+    max_bytes = 8 * 1024 * 1024
+    content_bytes = await file.read(max_bytes + 1)
+    if len(content_bytes) > max_bytes:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Story uploads are limited to 8 MiB.")
     if not content_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
 
@@ -317,6 +342,7 @@ def ingest_reddit(req: IngestRedditRequest) -> Dict[str, Any]:
     """Fetch public Reddit post via official JSON API, validating against deleted/removed/404."""
     rights_data = {
         "rights_status": req.permission_status or "UNVERIFIED_EVALUATION_ONLY",
+        "attribution": req.attribution,
     }
     try:
         result = CreatorStudioEngine.ingest_reddit(url=req.url, source_rights=rights_data)
@@ -432,7 +458,6 @@ def generate_series_breakdown(req: StoryBreakdownRequest) -> Dict[str, Any]:
             estimated_duration=float(ep.get("estimated_duration_sec", target_sec)),
             status=EpisodeStatus.ADAPTED,
         )
-        series_db.save_episode(ep_rec)
         ep_records.append(ep_rec)
         ep_ids.append(ep_id)
 
@@ -448,7 +473,13 @@ def generate_series_breakdown(req: StoryBreakdownRequest) -> Dict[str, Any]:
         series_id=series_id,
         title=req.title,
         full_script=req.raw_text,
-        creator_info={"name": req.author, "source": req.source_url},
+        creator_info={
+            "name": req.author,
+            "source": req.source_url,
+            "attribution": req.attribution or req.author or "Creator Series",
+            "rights_status": rights_status.value,
+            "source_type": "REDDIT" if req.source_url and "reddit.com" in req.source_url.lower() else "CREATOR_PROVIDED",
+        },
         content_type="creator_story",
         visual_profile="psychological_horror",
         rights_status=rights_status,
@@ -457,7 +488,7 @@ def generate_series_breakdown(req: StoryBreakdownRequest) -> Dict[str, Any]:
         episode_ids=ep_ids,
         status=SeriesStatus.READY,
     )
-    series_db.save_series(series)
+    series_db.save_series_and_episodes(series, ep_records)
 
     return {
         "status": "success",
@@ -569,38 +600,49 @@ def reorder_episodes(series_id: str, req: ReorderEpisodesRequest) -> Dict[str, A
     if series.status == SeriesStatus.ACTIVE:
         raise HTTPException(status_code=400, detail="Cannot reorder episodes of an ACTIVE series.")
 
+    reordered = []
     for idx, ep_id in enumerate(req.ordered_episode_ids):
         ep = series_db.get_episode(ep_id)
         if ep and ep.series_id == series_id:
             ep.episode_num = idx + 1
-            series_db.save_episode(ep)
+            reordered.append(ep)
 
     series.episode_ids = req.ordered_episode_ids
-    series_db.save_series(series)
+    series_db.save_series_and_episodes(series, reordered)
     return {"status": "success", "new_order": req.ordered_episode_ids}
 
 
 @router.post("/{series_id}/schedule")
 def configure_schedule(series_id: str, req: ScheduleSeriesRequest) -> Dict[str, Any]:
-    """Set publication slot, target time, and first release date."""
+    """Preview and persist the Creator cadence without claiming an Automatic slot."""
     series = series_db.get_series(series_id)
     if not series:
         raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
-
-    series.publication_schedule = {
-        "start_date": req.start_date,
-        "time_ist": req.time_ist,
-        "slot": req.slot,
-        "cadence": "daily",
-        "max_episodes_per_day": 1,
-    }
+    config_payload = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+    try:
+        preview = series_scheduler.generate_calendar_preview(
+            series_id=series_id,
+            episode_count=len(series.episode_ids),
+            schedule_type=req.schedule_type,
+            start_date=req.start_date,
+            start_time=req.start_time,
+            timezone_name=req.timezone,
+            cadence=req.cadence,
+            custom_slots=req.custom_slots,
+            custom_days=req.custom_days,
+            interval_days=req.interval_days,
+            s_db=series_db,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid Creator schedule: {exc}")
+    series.publication_schedule = {**config_payload, "calendar": preview["calendar"]}
     series_db.save_series(series)
-    return {"status": "success", "schedule": series.publication_schedule}
+    return {"status": "success", "schedule": series.publication_schedule, "calendar": preview["calendar"]}
 
 
 @router.post("/{series_id}/activate")
 def activate_series(series_id: str) -> Dict[str, Any]:
-    """Activate series to claim the 8:30 PM Slot 2 priority."""
+    """Activate a Creator series; Automatic Studio reservations remain separate."""
     series = series_db.get_series(series_id)
     if not series:
         raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
@@ -616,18 +658,40 @@ def activate_series(series_id: str) -> Dict[str, Any]:
     return {"status": "success", "series_status": series.status}
 
 
+@router.post("/{series_id}/rights")
+def review_series_rights(series_id: str, req: ReviewRightsRequest) -> Dict[str, Any]:
+    """Record the creator's rights decision and release any eligible rights-held jobs."""
+    series = series_db.get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
+    series.rights_status = req.rights_status
+    series.creator_info = {**(series.creator_info or {}), "rights_review_note": req.evidence_note.strip(),
+                           "rights_reviewed_at": datetime.now(timezone.utc).isoformat()}
+    series_db.save_series(series)
+    released = []
+    if req.rights_status in (RightsStatus.OWNED, RightsStatus.LICENSED, RightsStatus.PUBLIC_DOMAIN):
+        try:
+            released = creator_queue_manager.enqueue_series(series_id)
+        except ValueError:
+            # A rights review may be recorded before the user commits a release calendar.
+            pass
+    return {"status": "success", "rights_status": req.rights_status.value, "released_jobs": len(released)}
+
+
 @router.post("/{series_id}/pause")
 def pause_series(series_id: str) -> Dict[str, Any]:
     """Pause series to yield execution while preserving Automatic Studio."""
     series = series_db.get_series(series_id)
     if not series:
         raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
-    res = queue_manager.pause_series(series_id, s_db=series_db)
+    series.status = SeriesStatus.PAUSED
+    series_db.save_series(series)
+    paused_count = creator_queue_manager.set_series_paused(series_id, True)
     return {
         "status": "success",
-        "series_status": res["series_status"],
+        "series_status": series.status.value,
         "series_id": series_id,
-        "paused_jobs": res.get("paused_jobs", 0),
+        "paused_jobs": paused_count,
     }
 
 
@@ -639,12 +703,14 @@ def resume_series(series_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
     if series.status != SeriesStatus.PAUSED:
         raise HTTPException(status_code=400, detail=f"Series is '{series.status}', not PAUSED.")
-    res = queue_manager.resume_series(series_id, s_db=series_db)
+    series.status = SeriesStatus.ACTIVE
+    series_db.save_series(series)
+    resumed_count = creator_queue_manager.set_series_paused(series_id, False)
     return {
         "status": "success",
-        "series_status": res["series_status"],
+        "series_status": series.status.value,
         "series_id": series_id,
-        "resumed_jobs": res.get("resumed_jobs", 0),
+        "resumed_jobs": resumed_count,
     }
 
 
@@ -654,12 +720,19 @@ def cancel_series(series_id: str) -> Dict[str, Any]:
     series = series_db.get_series(series_id)
     if not series:
         raise HTTPException(status_code=404, detail=f"Series '{series_id}' not found.")
-    res = queue_manager.cancel_series(series_id, s_db=series_db)
+    series.status = SeriesStatus.CANCELLED
+    episodes = series_db.get_episodes_for_series(series_id)
+    for episode in episodes:
+        if episode.status not in (EpisodeStatus.PUBLISHED, EpisodeStatus.FAILED):
+            episode.status = EpisodeStatus.CANCELLED
+    series_db.save_series_and_episodes(series, episodes)
+    counts = creator_queue_manager.cancel_series(series_id)
     return {
         "status": "success",
-        "series_status": res["series_status"],
+        "series_status": series.status.value,
         "series_id": series_id,
-        "cancelled_jobs": res.get("cancelled_jobs", 0),
+        "cancelled_jobs": counts["cancelled"],
+        "running_jobs_cancellation_requested": counts["running"],
     }
 
 
@@ -667,7 +740,17 @@ def cancel_series(series_id: str) -> Dict[str, Any]:
 def get_series_queue_status(series_id: str) -> Dict[str, Any]:
     """Return production lifecycle statuses across all episodes in the series."""
     try:
-        return queue_manager.get_series_queue_status(series_id, s_db=series_db)
+        result = queue_manager.get_series_queue_status(series_id, s_db=series_db)
+        jobs = creator_queue_manager.get_series_jobs(series_id)
+        result["creator_queue"] = {
+            "queue_file": "creator_series_queue.json",
+            "jobs": jobs,
+            "pending": sum(j.get("status") in ("QUEUED", "RETRY_WAIT", "PAUSED") for j in jobs),
+            "running": sum(j.get("status") == "RUNNING" for j in jobs),
+            "failed": sum(j.get("status") == "FAILED" for j in jobs),
+            "blocked_rights": sum(j.get("status") == "BLOCKED_RIGHTS" for j in jobs),
+        }
+        return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -750,6 +833,8 @@ def generate_breakdown(req: GenerateBreakdownRequest) -> Dict[str, Any]:
         rights_status=req.rights_status or "UNVERIFIED_EVALUATION_ONLY",
         author=req.author or "Anonymous",
         source_url=req.source_url,
+        attribution=req.attribution,
+        analysis=req.analysis,
     )
 
     return {
@@ -858,6 +943,10 @@ def commit_series_schedule(series_id: str, req: ScheduleCommitRequest) -> Dict[s
         enqueued = queue_manager.enqueue_series(series_id, s_db=series_db)
         res["enqueued_jobs"] = len(enqueued)
         res["queue_status"] = queue_manager.get_series_queue_status(series_id, s_db=series_db)
+        try:
+            creator_queue_manager.enqueue_series(series_id, episodes=series_db.get_episodes_for_series(series_id))
+        except Exception:
+            pass
         return res
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

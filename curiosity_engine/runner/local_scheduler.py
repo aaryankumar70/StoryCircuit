@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -71,6 +72,7 @@ from curiosity_engine.notifications.telegram_notifier import get_telegram_notifi
 from curiosity_engine.production.aligner import resolve_whisper_model_path
 from curiosity_engine.production.renderer import validate_rendered_mp4
 from curiosity_engine.runner.automation_state import automation_state
+from curiosity_engine.state.file_lock import interprocess_file_lock
 from curiosity_engine.runner.watchdog import WATCHDOG_CHECK_INTERVAL_SEC, production_watchdog
 from curiosity_engine.runner.progress_tracker import (
     record_stage_complete,
@@ -293,14 +295,33 @@ class LocalScheduler:
         }
 
     def _save_state(self) -> None:
+        """Persist scheduler telemetry without sharing a fixed temp file across processes."""
+        tmp_path = self.state_file.with_name(
+            f".{self.state_file.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        )
+        lock_path = self.state_file.with_name(f".{self.state_file.name}.lock")
         try:
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self.state_file.with_suffix(".tmp")
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(self._state, f, indent=2, default=str)
-            tmp_path.replace(self.state_file)
+            with interprocess_file_lock(lock_path, timeout_sec=30.0):
+                with open(tmp_path, "x", encoding="utf-8", newline="\n") as f:
+                    json.dump(self._state, f, indent=2, default=str)
+                    f.flush()
+                    os.fsync(f.fileno())
+                for attempt in range(6):
+                    try:
+                        os.replace(tmp_path, self.state_file)
+                        return
+                    except PermissionError:
+                        if attempt == 5:
+                            raise
+                        time.sleep(0.05 * (2 ** attempt))
         except Exception as e:
             logger.error(f"Failed to persist scheduler state: {e}")
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not clean scheduler state temp file: %s", tmp_path)
 
     # -------------------------------------------------------------------------
     # Process Locking & Safe Shutdown Signal
@@ -408,25 +429,20 @@ class LocalScheduler:
             cur_slot = rec.get(slot_key, {})
 
             if not v_rec:
-                # No DB record exists -> cannot possibly be COMPLETED
+                # Do not erase a persisted upload/schedule when its local DB row is missing.
+                # It is safer to stop for reconciliation than to regenerate or duplicate it.
                 slot_completes[slot_idx] = False
                 slot_sched_done[slot_idx] = False
                 if cur_slot.get("generation_status") in ("COMPLETED", "RUNNING") or cur_slot.get("qc_passed"):
-                    logger.warning(
-                        f"[{vid_id}] Reconciling stale automation state (DB record missing); resetting slot {slot_idx} to PENDING."
+                    logger.error(
+                        "[%s] Local video DB record is missing; preserving prior QC and YouTube state.",
+                        vid_id,
                     )
                     updates[slot_key] = {
                         "video_id": vid_id,
-                        "generation_status": "PENDING",
-                        "qc_passed": False,
-                        "qc_results": None,
-                        "upload_status": "NOT_STARTED",
-                        "youtube_video_id": None,
-                        "youtube_simulated": True,
-                        "scheduled_status": "NOT_SCHEDULED",
-                        "scheduled_publish_at": None,
-                        "scheduled_publish_at_ist": None,
-                        "error": None,
+                        "generation_status": "INTERRUPTED",
+                        "qc_passed": None,
+                        "error": "Local video record is missing; previous QC and YouTube state was retained for reconciliation.",
                     }
                 continue
 
@@ -497,7 +513,11 @@ class LocalScheduler:
             updates["overall_status"] = "COMPLETED"
         elif slot_completes[1] or slot_completes[2]:
             updates["overall_status"] = "PARTIAL"
-        elif rec.get("overall_status") == "RUNNING":
+        elif (
+            updates.get("slot1", {}).get("generation_status") in ("FAILED", "INTERRUPTED")
+            or updates.get("slot2", {}).get("generation_status") in ("FAILED", "INTERRUPTED")
+            or rec.get("overall_status") == "RUNNING"
+        ):
             updates["overall_status"] = "INTERRUPTED"
 
         if updates:
@@ -664,12 +684,15 @@ class LocalScheduler:
         if not whisper_path:
             warnings.append(f"Local Whisper model.bin not found under {WHISPER_DIR}; inline timing fallback active.")
 
-        # 6. Gemini API (optional free tier + curated fallback)
+        # 6. Generation Engine configuration & Gemini API
         gemini_ok = bool(GEMINI_API_KEY and len(GEMINI_API_KEY.strip()) > 10)
         checks["gemini_configured"] = gemini_ok
-        checks["curated_fallback_ready"] = True
-        if not gemini_ok:
-            warnings.append("GEMINI_API_KEY not configured; using verified curated topic fallback (0 cost).")
+        from curiosity_engine.generation import engine_registry
+        engine_status = engine_registry.get_status()
+        checks["generation_engine"] = engine_status
+        checks["generation_ready"] = engine_status.get("ready", False)
+        if not engine_status.get("ready"):
+            warnings.append("Generation engines not configured. Production is held in safe unconfigured state.")
 
         # 7. YouTube OAuth health & scopes
         if check_oauth_network:
@@ -1044,6 +1067,31 @@ class LocalScheduler:
         v1_id = f"video_{clean_date}_slot1"
         v2_id = f"video_{clean_date}_slot2"
 
+        # A persisted real schedule with a missing local DB row must never be regenerated
+        # or rescheduled automatically. Preserve the record and require local reconciliation.
+        if YOUTUBE_PUBLISHING_MODE == "live":
+            for slot_idx, vid_id in ((1, v1_id), (2, v2_id)):
+                saved_slot = rec.get(f"slot{slot_idx}", {})
+                has_real_schedule = (
+                    saved_slot.get("scheduled_status") == "SCHEDULED"
+                    and bool(saved_slot.get("youtube_video_id"))
+                    and saved_slot.get("youtube_simulated") is False
+                    and bool(saved_slot.get("scheduled_publish_at"))
+                )
+                if has_real_schedule and not db.get_video_record(vid_id):
+                    warning = (
+                        f"{vid_id} has a persisted YouTube schedule but its local video record is missing; "
+                        "automation stopped to prevent a duplicate upload or schedule."
+                    )
+                    logger.error(warning)
+                    return automation_state.update_daily_record(today_str, {
+                        "overall_status": "INTERRUPTED",
+                        f"slot{slot_idx}": {
+                            "generation_status": "INTERRUPTED",
+                            "error": warning,
+                        },
+                    })
+
         # If completely finished AND verified against ground-truth, skip zero-work
         v1_ready = (not force_rebuild) and is_slot_generation_complete(v1_id)
         v2_ready = (not force_rebuild) and is_slot_generation_complete(v2_id)
@@ -1372,6 +1420,12 @@ class LocalScheduler:
             logger.info("Automation is currently PAUSED. Skipping startup catch-up.")
             return []
 
+        try:
+            from curiosity_engine.generation.bootstrap import configure_generation_engines
+            configure_generation_engines()
+        except Exception as exc:
+            logger.warning("Generation engines configure warning: %s", exc)
+
         logger.info(f"Executing availability-driven catch-up check for {today_str}...")
         res = self.process_daily_automation(target_date=today_str)
         return [res]
@@ -1612,6 +1666,18 @@ class LocalScheduler:
                     except Exception:
                         pass
 
+                if v_rec.get("is_creator_series") and v_rec.get("series_id") and v_rec.get("episode_id"):
+                    try:
+                        from curiosity_engine.creator_series.series_db import series_db
+                        series_db.mark_episode_published(
+                            series_id=str(v_rec["series_id"]),
+                            episode_id=str(v_rec["episode_id"]),
+                            youtube_id=yt_id,
+                            actual_publish_time=v_rec["youtube_published_public_at"],
+                        )
+                    except Exception as ex:
+                        logger.error("Could not advance Creator episode after verified public release: %s", ex)
+
                 notifier.notify_publication_success(
                     video_id=vid_id,
                     title=title,
@@ -1764,9 +1830,26 @@ class LocalScheduler:
         self.running = True
         pid = os.getpid()
 
+        try:
+            from curiosity_engine.generation.bootstrap import configure_generation_engines
+            configure_generation_engines()
+        except Exception as exc:
+            logger.warning("Generation engines configure warning: %s", exc)
+
         self._state["is_running"] = True
         self._state["pid"] = pid
         self._state["last_heartbeat"] = self.now_ist().isoformat()
+        stale_state_error = str(self._state.get("last_error") or "")
+        if any(marker in stale_state_error for marker in (
+            "automation_state.tmp",
+            "scheduler_state.tmp",
+            "Resource deadlock avoided",
+        )):
+            self._state["last_resolved_error"] = {
+                "message": stale_state_error,
+                "resolved_at": self.now_ist().isoformat(),
+            }
+            self._state["last_error"] = None
         self._save_state()
 
         logger.info(
@@ -1925,6 +2008,13 @@ class LocalScheduler:
                         logger.error(f"Error during Watchdog health check for {current_date}: {e}")
                         self._state["last_error"] = str(e)
                         self._save_state()
+
+                # Creator Series has its own durable queue and never borrows an Automatic slot.
+                try:
+                    from curiosity_engine.creator_series.pipeline_integration import process_creator_queue_once
+                    process_creator_queue_once(now=now.astimezone(timezone.utc))
+                except Exception as creator_exc:
+                    logger.error("Creator queue processing check failed: %s", creator_exc, exc_info=True)
 
                 was_enabled = is_enabled
 

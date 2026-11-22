@@ -242,8 +242,16 @@ class DescriptionGenerator:
         recent_hashtags: Optional[List[List[str]]] = None,
     ) -> Dict[str, Any]:
         """Generate natural description with zero external links plus separate API tags and hashtags."""
-        verified_sources = [s.strip() for s in (sources or script_data.get("sources", [])) if s]
-        verified_claims = claims or script_data.get("claims", [])
+        verified_sources = [
+            (s.get("title") or s.get("url") or str(s)).strip() if isinstance(s, dict) else str(s).strip()
+            for s in (sources or script_data.get("sources", []))
+            if s
+        ]
+        verified_claims = [
+            (c.get("claim") or c.get("text") or c.get("statement") or str(c)).strip() if isinstance(c, dict) else str(c).strip()
+            for c in (claims or script_data.get("claims", []))
+            if c
+        ]
         title = generate_youtube_title(topic, script_data)
         youtube_tags = build_youtube_tags(topic, category, script_data)
         hash_meta = recommend_hashtags(

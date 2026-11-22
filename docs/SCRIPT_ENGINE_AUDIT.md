@@ -1,5 +1,7 @@
 # CurioLoop Script Engine & Editorial System Audit
 
+> Historical audit (2026-11-17). Its “missing” and “planned” statuses describe the repository at that date and are not current implementation guidance. See [GENERATION_ENGINES.md](GENERATION_ENGINES.md) for the current local engine architecture, activation gate, limits, and license status. No legacy prompt or renderer from this audit is an active fallback.
+
 **Date:** 2026-11-17  
 **System:** CurioLoop / StoryCircuit Autonomous Production Studio  
 **Branch:** `feature/editorial-transformation`  
@@ -52,7 +54,7 @@ From 8 actual finished production videos in `output/`:
 | **Downstream TTS Engine** | `curiosity_engine/production/tts_engine.py` | Consumes `script.json` (`lines[].text`, `lines[].gap`, `voice`, `speed`). | **Implemented** | **Preserve exactly.** Ensure script output preserves existing schema with additive metadata. |
 | **Visual Alignment** | `curiosity_engine/production/aligner.py` | Runs faster-whisper on `narration.wav` to create `words.json`. | **Implemented** | **Preserve exactly.** |
 | **Visual Scene Choreography** | `curiosity_engine/production/director.py` | Copies style template, writes `script.json`, launches TTS/aligner. | **Implemented** | **Preserve exactly.** |
-| **Visual Templates** | `templates/{inside-out, paper-atlas, stick-story}` | Web templates rendered via Chrome and FFmpeg. | **Implemented** | **Preserve all 3 styles.** Route `MYSTERY`, `HISTORY`, `SPACE` appropriately across all three styles. |
+| **Cartoon 3D Visual Engine** | templates/cartoon-3d | One narration-led Three.js renderer captured by Chromium and FFmpeg, with story-based Cartoon 3D profiles. | **Implemented** | Keep style selection within the supported Cartoon 3D family; do not select retired templates. |
 | **Video QC Gatekeeper** | `curiosity_engine/quality/qc_gatekeeper.py` | Validates rendered MP4, duration (20-60s), visual checks, audio LUFS. | **Implemented** | **Preserve exactly.** |
 | **Production Pipeline** | `curiosity_engine/runner/pipeline.py` | Orchestrates single video production and QC recovery. | **Implemented** | Integrate deterministic script validator check before TTS stage. |
 
@@ -80,23 +82,11 @@ We audited every entry point where forbidden biology, animal trivia, or generic 
 
 ---
 
-## 4. Visual Style Mapping Preservation
+## 4. Cartoon 3D Style Selection
 
-The project contains three visual styles:
-- `inside-out`: High-tech schematic / conceptual visualizer with radar scans, meter surges, and neural/cosmic pulses.
-- `paper-atlas`: Archival parchment, vintage expedition maps, historical documents, and navigational lines.
-- `stick-story`: Dynamic character-driven vignettes, situational storytelling, and tension rooms.
+Cartoon3DVisualEngine is the only supported visual renderer family. Its selector chooses narrative profiles inside that family (historical, mystery, space, science, and fiction) from the script, category, and story text. Profile selection does not imply separate renderers or unsupported template families. New topic metadata uses the cartoon_3d family label; the renderer builds story-specific Cartoon 3D scenes.
 
-**Preservation Strategy:**
-- Do NOT delete any visual style.
-- Route categories appropriately:
-  - `MYSTERY`: `paper-atlas` (unresolved expeditions, lost cities), `stick-story` (survivors, witnesses), or `inside-out` (cryptographic anomalies, enigmatic artifacts).
-  - `HISTORY`: `paper-atlas` (empires, ancient technology), `stick-story` (historical personalities, turning points).
-  - `SPACE`: `inside-out` (black holes, cosmic bursts, exoplanet telemetry), `stick-story` (astronaut experiences, mission control), `paper-atlas` (astronomical discovery history).
-
----
-
-## 5. Implementation Roadmap
+---## 5. Implementation Roadmap
 
 1. **Phase 1: Editorial Policy & Configuration**
    - Create `curiosity_engine/content/editorial_policy.py`.

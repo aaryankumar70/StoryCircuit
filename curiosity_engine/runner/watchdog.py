@@ -492,6 +492,42 @@ class ProductionWatchdog:
         any_degraded = False
 
         if not automation_enabled:
+            # A paused watchdog must not leave a completed, QC-passed production slot
+            # displayed as permanently failed. Clear only its live failure flags; retain
+            # the recovered count and historical error log entries.
+            for slot_index in (1, 2):
+                vid_id = f"video_{clean_date}_slot{slot_index}"
+                s_key = self._slot_key(today_str, slot_index)
+                slot_entry = dict(state["slots"].get(s_key) or {
+                    "date": today_str,
+                    "slot_index": slot_index,
+                    "video_id": vid_id,
+                    "recovery_cycles": 0,
+                    "max_cycles": self.cfg.max_recovery_cycles,
+                    "stalled": False,
+                    "permanently_failed": False,
+                    "recovered_count": 0,
+                })
+                if self._is_generation_finished(store.get_video_record(vid_id), out_root):
+                    had_failure = bool(
+                        slot_entry.get("stalled")
+                        or slot_entry.get("permanently_failed")
+                        or slot_entry.get("last_error")
+                        or slot_entry.get("next_retry_after")
+                    )
+                    slot_entry["stalled"] = False
+                    slot_entry["waiting_state"] = None
+                    slot_entry["permanently_failed"] = False
+                    slot_entry["last_failure_kind"] = None
+                    slot_entry["last_error"] = None
+                    slot_entry["next_retry_after"] = None
+                    if had_failure:
+                        slot_entry["recovered_count"] = int(slot_entry.get("recovered_count") or 0) + 1
+                        slot_entry["recovery_cycles"] = 0
+                        slot_entry["last_recovery_action"] = (
+                            "Recovered: production and QC verified; automation remains paused."
+                        )
+                    state["slots"][s_key] = slot_entry
             state["status"] = "PAUSED"
             self._save_state(state)
             return {"status": "PAUSED", "actions": actions_taken, "watchdog": state}

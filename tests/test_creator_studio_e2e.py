@@ -172,13 +172,15 @@ class TestStep1IngestionE2E:
 
     def test_upload_markdown_file_with_h1_title(self, env):
         client, _, _, _, _ = env
-        md_text = f"# The Solstice Keeper\n\n{SAMPLE_E2E_HORROR_STORY}"
+        md_text = f"# The Solstice Keeper\n\n## Chapter One\n\n{SAMPLE_E2E_HORROR_STORY}"
         files = {"file": ("solstice.md", io.BytesIO(md_text.encode("utf-8")), "text/markdown")}
 
         res = client.post("/api/series/ingest/upload", files=files)
         assert res.status_code == 200
         body = res.json()
         assert body["title"] == "The Solstice Keeper"
+        assert body["raw_text"] == SAMPLE_E2E_HORROR_STORY
+        assert "#" not in body["raw_text"]
         assert body["file_type"] == "md"
 
     def test_upload_docx_file_fallback_parsing(self, env):
@@ -453,15 +455,18 @@ class TestStep4StoryboardsAndInvalidationE2E:
         episodes = body.get("episodes", [])
         assert len(episodes) >= 2
 
-        valid_three_scenes = {"ocean_scene", "helm_scene", "cabin_scene", "procedural_environment"}
         for ep in episodes:
             storyboard = ep.get("storyboard", {})
             scenes = storyboard.get("scenes", [])
             assert len(scenes) >= 1
             for scene in scenes:
-                assert scene["three_js_scene"] in valid_three_scenes
-                assert scene["rendering_method"] == "SELECTIVE_3D"
+                assert scene["three_js_scene"].startswith("cartoon3d_")
+                assert scene["rendering_method"] == "CARTOON_3D_THREEJS"
+                assert scene["narration"]["text"].strip()
+                assert scene["narration"]["text"] in scene["visual_objective"]
+                assert "Narrator / Key Subject" not in scene["primary_subject"]["name"]
                 assert "camera" in scene
+                assert scene["environment"]["name"]
                 assert 1 <= scene["tension_level"] <= 10
 
     def test_single_episode_edit_cascading_invalidation(self, env):

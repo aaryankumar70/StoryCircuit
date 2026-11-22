@@ -40,23 +40,20 @@ WEEKDAY_ABBRS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
 def get_timezone(tz_name: Optional[str] = None) -> ZoneInfo:
-    """Retrieve ZoneInfo object, safely defaulting to Asia/Kolkata."""
+    """Retrieve a timezone, rejecting invalid names instead of silently changing schedules."""
     name = tz_name or DEFAULT_TIMEZONE
     try:
         return ZoneInfo(name)
-    except Exception:
-        logger.warning(f"Invalid timezone '{tz_name}'; falling back to {DEFAULT_TIMEZONE}.")
-        return ZoneInfo(DEFAULT_TIMEZONE)
+    except Exception as exc:
+        raise ValueError(f"Unknown timezone '{name}'. Use an IANA timezone such as Asia/Kolkata.") from exc
 
 
 def normalize_schedule_type(schedule_type: Optional[str]) -> str:
     """Normalize schedule preset type to 'A', 'B', or 'C'."""
     raw = str(schedule_type or "A").strip().upper()
-    if "B" in raw:
-        return "B"
-    elif "C" in raw or "CUSTOM" in raw:
-        return "C"
-    return "A"
+    if raw not in {"A", "B", "C", "CUSTOM"}:
+        raise ValueError("schedule_type must be A, B, or C.")
+    return "C" if raw == "CUSTOM" else raw
 
 
 def parse_time_str(time_str: str) -> Tuple[int, int]:
@@ -123,6 +120,29 @@ class SeriesScheduler:
         tz = get_timezone(timezone_name)
         now_local = datetime.now(tz)
         norm_type = normalize_schedule_type(schedule_type)
+
+        if cadence not in {"daily", "alternate", "custom"}:
+            raise ValueError("cadence must be daily, alternate, or custom")
+        if int(interval_days) < 1:
+            raise ValueError("interval_days must be at least 1")
+        requested_times = list(custom_slots or [])
+        if norm_type == "C":
+            if not requested_times:
+                requested_times = [start_time or SCHEDULE_A_DEFAULT_TIME]
+            for value in requested_times:
+                try:
+                    h, m = (int(part) for part in str(value).split(":"))
+                except Exception as exc:
+                    raise ValueError(f"Invalid custom time '{value}'; expected HH:MM.") from exc
+                if not (0 <= h <= 23 and 0 <= m <= 59):
+                    raise ValueError(f"Invalid custom time '{value}'; expected a 24-hour HH:MM time.")
+        if start_time:
+            try:
+                h, m = (int(part) for part in start_time.split(":"))
+            except Exception as exc:
+                raise ValueError(f"Invalid start_time '{start_time}'; expected HH:MM.") from exc
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError(f"Invalid start_time '{start_time}'; expected a 24-hour HH:MM time.")
 
         # 1. Resolve existing episodes or count
         db = self._get_s_db(s_db)
@@ -269,9 +289,15 @@ class SeriesScheduler:
                 norm_custom_days = set()
                 for d_str in custom_days:
                     d_clean = str(d_str).strip().lower()
+                    matched = False
                     for idx, (name, abbr) in enumerate(zip(WEEKDAY_NAMES, WEEKDAY_ABBRS)):
                         if d_clean == name or d_clean == abbr:
                             norm_custom_days.add(idx)
+                            matched = True
+                    if not matched:
+                        raise ValueError(f"Invalid custom day '{d_str}'; use a weekday name or abbreviation.")
+                if not norm_custom_days:
+                    raise ValueError("custom_days must contain at least one valid weekday.")
 
             ep_idx = 0
             day_cursor = base_date
@@ -303,6 +329,10 @@ class SeriesScheduler:
 
         # 5. Calculate estimated series completion date
         final_item = calendar_items[-1] if calendar_items else None
+        if calendar_items:
+            first_local = datetime.fromisoformat(calendar_items[0]["scheduled_datetime_ist"])
+            if first_local < now_local + timedelta(minutes=min_lead_minutes):
+                raise ValueError(f"First Creator release must be at least {min_lead_minutes} minutes in the future.")
         completion_date = final_item["date"] if final_item else base_date.strftime("%Y-%m-%d")
         completion_dt_ist = final_item["scheduled_datetime_ist"] if final_item else None
         completion_dt_utc = final_item["scheduled_datetime_utc"] if final_item else None
@@ -338,6 +368,9 @@ class SeriesScheduler:
     ) -> Dict[str, Any]:
         """Construct a standardized single episode calendar entry."""
         dt_utc = dt.astimezone(timezone.utc)
+        round_trip = dt_utc.astimezone(dt.tzinfo).replace(tzinfo=None)
+        if round_trip != dt.replace(tzinfo=None):
+            raise ValueError(f"Scheduled local time {dt.isoformat()} does not exist because of a timezone clock change.")
         return {
             "episode_num": episode_num,
             "episode_id": episode_meta.get("episode_id", f"ep_{episode_num:02d}"),
@@ -406,9 +439,6 @@ class SeriesScheduler:
             "custom_slots": schedule_config.get("custom_slots"),
             "custom_days": schedule_config.get("custom_days"),
         }
-        series.status = SeriesStatus.ACTIVE
-        db.save_series(series)
-
         # Update each episode's scheduled_publication_time
         cal_map = {item["episode_num"]: item for item in preview["calendar"]}
         updated_episodes = []
@@ -419,8 +449,11 @@ class SeriesScheduler:
                 # If episode is currently draft or adapted, mark as planned or ready for publishing
                 if ep.status in (EpisodeStatus.DRAFT, EpisodeStatus.ADAPTED, EpisodeStatus.PLANNED):
                     ep.status = EpisodeStatus.SCHEDULED
-            db.save_episode(ep)
             updated_episodes.append(ep)
+
+        # Schedule details and every episode timestamp commit as one JSON transaction.
+        series.status = SeriesStatus.ACTIVE
+        db.save_series_and_episodes(series, updated_episodes)
 
         logger.info(
             f"Committed schedule for series '{series_id}' ({len(episodes)} episodes). "

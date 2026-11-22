@@ -355,6 +355,12 @@ def record_stage_complete(
     progress["stage_durations_sec"] = stage_durations
     if progress.get("active_stage") == stage_key:
         progress["stage_detail"] = {}
+    if (
+        stage_key == "running_qc"
+        and rec.get("production_status") == "COMPLETED"
+        and rec.get("qc_passed") is True
+    ):
+        rec["lifecycle_stage"] = "READY_TO_UPLOAD"
 
     rec["stage_progress"] = progress
     store.save_video_record(video_id, rec)

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Type, TypeVar, Union
 import requests
 from pydantic import BaseModel, ValidationError
+from curiosity_engine.generation.resource_lock import sequential_resource_stage
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,26 @@ class LocalModelAdapter:
         base_url: str = DEFAULT_OLLAMA_URL,
         model_name: str = DEFAULT_MODEL,
         timeout: int = 120,
+        context_size: Optional[int] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
-        self.timeout = timeout
-        self._ensure_ollama_ready()
+        try:
+            configured_timeout = int(os.environ.get("LOCAL_LLM_TIMEOUT_SEC", str(timeout)))
+        except (TypeError, ValueError):
+            configured_timeout = timeout
+        self.timeout = max(15, min(configured_timeout, 600))
+        try:
+            configured_context = int(
+                os.environ.get("LOCAL_LLM_CONTEXT_SIZE", "8192") if context_size is None else context_size
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("LOCAL_LLM_CONTEXT_SIZE must be an integer from 4096 to 32768.") from exc
+        if not 4096 <= configured_context <= 32768:
+            raise ValueError("LOCAL_LLM_CONTEXT_SIZE must be between 4096 and 32768 tokens.")
+        self.context_size = configured_context
+        # Construction/import must stay side-effect free. Readiness is checked only
+        # when a caller explicitly asks or starts an inference request.
 
     def _find_ollama_executable(self) -> Optional[Path]:
         """Locates ollama.exe in system PATH or standard Windows AppData directory."""
@@ -68,7 +84,10 @@ class LocalModelAdapter:
         except requests.RequestException:
             pass
 
-        # If not running, attempt background launch
+        if os.environ.get("OLLAMA_AUTOSTART", "0").strip() != "1":
+            return False
+
+        # Background launch is available only after an explicit local CLI opt-in.
         ollama_bin = self._find_ollama_executable()
         if ollama_bin and ollama_bin.exists():
             logger.info("Ollama service not detected; launching background daemon: %s", ollama_bin)
@@ -95,17 +114,20 @@ class LocalModelAdapter:
         return False
 
     def is_available(self) -> bool:
-        """Checks if Ollama is accessible and has the requested model available."""
+        """Checks if Ollama is accessible and has the requested model available.
+        Disabled by default to operate in autonomous zero-dependency mode.
+        """
+        if not os.environ.get("CURIOLOOP_ENABLE_OLLAMA"):
+            return False
         try:
             resp = requests.get(f"{self.base_url}/api/tags", timeout=5)
             if resp.status_code != 200:
                 return False
             data = resp.json()
             models = [m.get("name", "") for m in data.get("models", [])]
-            return any(
-                self.model_name in m or m in self.model_name
-                for m in models
-            )
+            wanted = self.model_name.casefold()
+            normalized = {str(m).strip().casefold() for m in models}
+            return wanted in normalized or (wanted.endswith(":latest") and wanted[:-7] in normalized) or f"{wanted}:latest" in normalized
         except Exception:
             return False
 
@@ -143,6 +165,7 @@ class LocalModelAdapter:
             logger.warning("Failed to explicitly unload model %s: %s", self.model_name, e)
             return False
 
+    @sequential_resource_stage
     def generate(
         self,
         prompt: str,
@@ -178,6 +201,7 @@ class LocalModelAdapter:
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
+                "num_ctx": self.context_size,
             },
         }
         if eff_system:
@@ -226,6 +250,7 @@ class LocalModelAdapter:
         system: Optional[str] = None,
         temperature: float = 0.3,
         max_retries: int = 2,
+        max_tokens: int = 4096,
     ) -> T:
         """Generates output validated against a Pydantic v2 schema.
         Includes self-correcting retry loop if schema validation fails.
@@ -237,6 +262,8 @@ class LocalModelAdapter:
             + schema_json
         )
 
+        max_retries = max(0, min(int(max_retries), 3))
+        max_tokens = max(256, min(int(max_tokens), 8192))
         last_error = ""
         current_prompt = prompt
 
@@ -247,11 +274,17 @@ class LocalModelAdapter:
                     f"{last_error}\n\nPlease output ONLY valid JSON adhering strictly to the required schema."
                 )
 
-            raw_dict = self.generate_json(
-                prompt=current_prompt,
-                system=system_with_schema,
-                temperature=temperature,
-            )
+            try:
+                raw_dict = self.generate_json(
+                    prompt=current_prompt,
+                    system=system_with_schema,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            except LocalModelError as err:
+                last_error = str(err)
+                logger.warning("Structured output parse attempt %d failed: %s", attempt + 1, last_error)
+                continue
 
             try:
                 validated = schema.model_validate(raw_dict)

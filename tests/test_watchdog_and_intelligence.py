@@ -535,3 +535,56 @@ def test_dashboard_status_exposes_watchdog_without_secret_redaction_corruption()
         assert "stage_id" in slot_snap
         assert slot_snap.get("recovery_cycles") is not None or "recovery_cycles" in body["watchdog"]["slots"]["slot1"]
 
+def test_paused_watchdog_clears_stale_failure_after_verified_qc(tmp_path: Path):
+    fake_db = DatabaseClient(custom_file=tmp_path / "db.json")
+    date_str = "2026-11-22"
+    vid = "video_20261122_slot1"
+    mp4 = tmp_path / f"{vid}.mp4"
+    mp4.write_bytes(b"verified")
+    fake_db.save_video_record(vid, {
+        "video_id": vid,
+        "target_date": date_str,
+        "production_status": "COMPLETED",
+        "qc_passed": True,
+        "qc_results": {"passed": True},
+        "local_video_path": str(mp4),
+    })
+
+    wd = ProductionWatchdog(state_file=tmp_path / "wd.json", db_client=fake_db)
+    key = wd._slot_key(date_str, 1)
+    wd._save_state({
+        "status": "PAUSED",
+        "slots": {
+            key: {
+                "date": date_str,
+                "slot_index": 1,
+                "video_id": vid,
+                "recovery_cycles": 3,
+                "max_cycles": 3,
+                "stalled": True,
+                "permanently_failed": True,
+                "last_failure_kind": "failed",
+                "last_error": "obsolete render error",
+                "last_recovery_action": "Recovery attempts exhausted (3/3)",
+                "next_retry_after": "2026-11-22T00:20:23+05:30",
+                "recovered_count": 0,
+            }
+        },
+    })
+
+    res = wd.run_health_check(
+        now_ist=datetime(2026, 11, 22, 19, 0, tzinfo=timezone(timedelta(hours=5, minutes=30))),
+        automation_enabled=False,
+        output_dir=tmp_path,
+        data_dir=tmp_path,
+    )
+
+    slot = res["watchdog"]["slots"][key]
+    assert res["status"] == "PAUSED"
+    assert slot["permanently_failed"] is False
+    assert slot["stalled"] is False
+    assert slot["recovery_cycles"] == 0
+    assert slot["recovered_count"] == 1
+    assert slot["last_error"] is None
+    assert "automation remains paused" in slot["last_recovery_action"]
+

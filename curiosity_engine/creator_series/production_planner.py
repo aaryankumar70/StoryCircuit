@@ -10,13 +10,14 @@ Part of CurioLoop Creator Studio (Steps 3 & 4):
    - Calculates plan title, target duration, actual episode count, runtime, trade-off analysis,
      and episode summaries with hooks and cliffhangers.
 2. Episode Storyboard & Editing:
-   - Generates Three.js narrative visual engine storyboards (compatible with templates/narrative-engine/).
+   - Generates Three.js narrative visual engine storyboards (compatible with templates/cartoon-3d/).
    - Provides granular single-episode editing with cascading invalidation (STALE_INVALIDATED).
    - Storyboard approval gate (is_approved flag).
 """
 from __future__ import annotations
 
 import logging
+import hashlib
 import math
 import re
 from dataclasses import asdict, dataclass, field
@@ -31,6 +32,8 @@ from curiosity_engine.creator_series.models import (
     SeriesStatus,
 )
 from curiosity_engine.creator_series.series_db import SeriesDatabase, series_db
+from curiosity_engine.production.visual_director import assign_narrative_scenes
+from curiosity_engine.production.visual_style_selector import select_visual_style
 
 logger = logging.getLogger("curiosity_engine.production_planner")
 
@@ -364,7 +367,7 @@ class ProductionPlanner:
         plan_1m_runtime = sum(e.estimated_duration_sec for e in plan_1m_episodes)
         plan_1m = ProductionPlan(
             plan_id="plan_1m",
-            plan_title="Bite-Sized Viral Shorts (~60s)",
+            plan_title="Bite-Sized Short-Form Story (~60s)",
             format_preset="1m",
             target_duration_sec=60.0,
             episode_count=len(plan_1m_episodes),
@@ -373,9 +376,9 @@ class ProductionPlanner:
             trade_off_analysis=TradeOffAnalysis(
                 pacing="High-velocity, dopamine-optimized pacing tailored for vertical mobile feeds (Shorts/Reels).",
                 retention_pros=[
-                    "Highest completion rate (>80%) on vertical mobile algorithms.",
-                    "Punchy cliffhangers at 50-60s maximize Part 2/3 binge-viewing.",
-                    "Quick algorithmic testing and maximum publishing frequency.",
+                    "Designed for a concise beginning-to-end viewing experience.",
+                    "A natural story boundary near the end can support a clear continuation when one exists.",
+                    "Supports frequent publishing when production and review capacity allow.",
                 ],
                 retention_cons=[
                     "Requires strict brevity; minimal room for ambient world-building.",
@@ -408,11 +411,11 @@ class ProductionPlanner:
                 retention_pros=[
                     "Deeper psychological immersion and character connection.",
                     "Accommodates subtle clue layering and richer Three.js 3D visual environments.",
-                    "Higher overall watch-time per viewer for storytelling-focused YouTube channels.",
+                    "Offers more room for character development and layered clues.",
                 ],
                 retention_cons=[
-                    "Requires strong mid-video retention hook around 45s to prevent drop-off before climax.",
-                    "Slightly lower initial swipe-through tolerance than 60s shorts.",
+                    "Benefits from a clear midpoint beat before the climax.",
+                    "Asks viewers for a longer time commitment than the 60-second option.",
                 ],
                 audience_fit="True crime, psychological horror, and lore-focused audiences seeking cinematic depth.",
             ),
@@ -440,11 +443,11 @@ class ProductionPlanner:
                 pacing="Theatrical three-act narrative progression with complete exposition, rising dread, and definitive resolution.",
                 retention_pros=[
                     "Zero episodic friction or cliffhanger churn—complete story experience in one view.",
-                    "Higher monetization value and long-form algorithmic credit.",
+                    "May suit creators seeking a complete-story viewing experience when platform duration rules allow.",
                     "Deepest audience satisfaction and emotional payoff.",
                 ],
                 retention_cons=[
-                    "Demands relentless visual diversity and dynamic camera movement to sustain mobile attention beyond 2 minutes.",
+                    "Needs sustained visual variety and clear story beats beyond two minutes.",
                     "Produces fewer individual published assets from a single narrative script.",
                 ],
                 audience_fit="Cinephiles, documentary lovers, and audiences looking for complete self-contained stories.",
@@ -454,13 +457,14 @@ class ProductionPlanner:
 
         plans = [plan_1m, plan_15m, plan_3m]
 
-        # Optional Custom Plan if custom_seconds requested
-        if custom_seconds and abs(custom_seconds - 60.0) > 5 and abs(custom_seconds - 90.0) > 5 and abs(custom_seconds - 180.0) > 5:
+        # Include a server-planned custom option whenever the creator requests one.
+        if custom_seconds is not None:
             custom_episodes = self.segment_narrative_organically(
                 sentences=sentences,
                 target_duration_sec=custom_seconds,
                 raw_text=raw_text,
                 series_title=story_title,
+                analysis=analysis,
             )
             c_runtime = sum(e.estimated_duration_sec for e in custom_episodes)
             custom_plan = ProductionPlan(
@@ -496,104 +500,93 @@ class ProductionPlanner:
         visual_profile: str = "psychological_horror",
         total_duration_sec: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """Generates a rich, grounded Three.js narrative visual storyboard compatible with
-        templates/narrative-engine/ (Three.js 3D WebGL environments and cinematic cameras).
-        """
+        """Generate story-specific storyboard shots for the Cartoon 3D renderer."""
         sentences = split_into_sentences(narration)
         if not sentences:
             sentences = [narration.strip()]
+        if not narration.strip():
+            raise ValueError("A Creator storyboard requires narration.")
 
-        dur_s = total_duration_sec or estimate_duration_seconds(narration)
-        num_scenes = max(3, min(6, len(sentences)))
-        time_per_scene = dur_s / num_scenes
-
-        # Distribute sentences across scenes
-        scene_sentences_map: List[List[str]] = [[] for _ in range(num_scenes)]
+        dur_s = float(total_duration_sec or estimate_duration_seconds(narration))
+        num_scenes = max(1, min(6, len(sentences)))
+        sentence_groups: List[List[str]] = [[] for _ in range(num_scenes)]
         for idx, sentence in enumerate(sentences):
-            target_scene = min(idx * num_scenes // len(sentences), num_scenes - 1)
-            scene_sentences_map[target_scene].append(sentence)
-
-        for s_idx in range(num_scenes):
-            if not scene_sentences_map[s_idx]:
-                scene_sentences_map[s_idx].append(sentences[min(s_idx, len(sentences) - 1)])
-
-        # Three.js 3D narrative environments available in templates/narrative-engine/src/three_scenes.js
-        three_environments = [
-            ("ocean_scene", "Atlantic Swell & Brigantine Hull", "Three-Quarter Perspective Broadside View", "REVEAL"),
-            ("helm_scene", "Quarterdeck Abandoned Helm", "Three-Quarter Dolly-In onto Abandoned Ship's Wheel", "TENSION"),
-            ("cabin_scene", "Captain's Writing Desk & Logbook", "Macro Close-Up slowly pushing down toward Logbook", "MYSTERY"),
-            ("ocean_scene", "Swells Battering Wooden Hull", "Dynamic Low-Angle Prow View with sea spray", "DREAD"),
-            ("cabin_scene", "Flickering Brass Candlestick", "Slow push-in on Wax Seal & Cursive Script", "CLIMAX"),
-            ("ocean_scene", "Open Ocean Horizon Isolation", "Isolation Dolly-Out into Deep Fog", "RESOLUTION"),
-        ]
-
-        shot_types = ["wide", "medium", "over_the_shoulder", "close_up", "macro", "silhouette"]
+            sentence_groups[min(idx * num_scenes // len(sentences), num_scenes - 1)].append(sentence)
+        profile_key = visual_profile.casefold()
+        category = (
+            "History" if "histor" in profile_key
+            else "Space" if "space" in profile_key
+            else "Science" if "science" in profile_key
+            else "Mysteries" if any(token in profile_key for token in ("mystery", "horror"))
+            else "Fiction"
+        )
+        directed = assign_narrative_scenes({
+            "title": episode_title,
+            "topic": f"{episode_title} {visual_profile}",
+            "category": category,
+            "content_lane": "creator_series",
+            "words_per_second": WPS_STANDARD,
+            "lead": 0,
+            "gap": 0,
+            "lines": [{
+                "text": " ".join(group),
+                "scene": {"scene_id": f"ep{episode_num:02d}_s{index + 1:02d}"},
+            } for index, group in enumerate(sentence_groups) if group],
+        })
 
         scenes: List[Dict[str, Any]] = []
-        for s_idx in range(num_scenes):
-            sc_id = f"ep{episode_num:02d}_s{s_idx + 1:02d}"
-            s_text = " ".join(scene_sentences_map[s_idx])
-            start_t = round(s_idx * time_per_scene, 2)
-            end_t = round((s_idx + 1) * time_per_scene, 2)
-            sc_dur = round(end_t - start_t, 2)
-
-            env_preset = three_environments[s_idx % len(three_environments)]
-            three_scene_id, env_name, camera_desc, motivation = env_preset
-            shot_type = shot_types[s_idx % len(shot_types)]
-            cam_move = "slow_push_in" if s_idx % 2 == 0 else "dolly_in"
-
-            # Determine tension level based on position in episode (rising tension arc)
-            tension = min(10, 4 + int((s_idx / max(1, num_scenes - 1)) * 5))
-
-            scene_obj = {
-                "scene_id": sc_id,
-                "beat_index": s_idx,
-                "narration": {
-                    "text": s_text,
-                    "start_s": start_t,
-                    "end_s": end_t,
-                    "duration_sec": sc_dur,
-                },
-                "story_event": f"Beat {s_idx + 1}: {s_text[:75]}...",
-                "visual_objective": f"Cinematic visualization of beat {s_idx + 1}: {camera_desc}.",
-                "primary_subject": {
-                    "name": "Narrator / Key Subject",
-                    "action": "advancing narrative tension",
-                    "character_id": f"char_subject_{s_idx + 1}",
-                    "presence": "silhouette" if visual_profile == "psychological_horror" else "grounded",
-                },
-                "environment": {
-                    "name": env_name,
-                    "era": "Narrative Era",
-                    "time_of_day": "Night / Dim Twilight",
-                    "setting_id": f"env_{three_scene_id}",
-                },
-                "three_js_scene": three_scene_id,
-                "rendering_method": "SELECTIVE_3D",
+        profile = directed.get("visual_profile") or {}
+        for s_idx, line in enumerate(directed["lines"]):
+            shot = line["scene"]
+            s_text = line["text"]
+            start_t = float(shot["estimated_start_sec"])
+            end_t = float(shot["estimated_end_sec"])
+            characters = shot.get("characters") or []
+            props = shot.get("props") or []
+            subject_name = characters[0] if characters else (props[0] if props else shot["environment"])
+            camera_desc = shot["camera"]
+            lowered_camera = camera_desc.casefold()
+            shot_type = (
+                "close_up" if any(term in lowered_camera for term in ("close", "detail", "focus"))
+                else "wide" if "wide" in lowered_camera
+                else "low_angle" if "low" in lowered_camera
+                else "tracking" if "tracking" in lowered_camera
+                else "medium"
+            )
+            movement = (
+                "rack_focus" if "rack focus" in lowered_camera
+                else "tracking" if "tracking" in lowered_camera
+                else "dolly_out" if "pullback" in lowered_camera
+                else "dolly_in" if any(term in lowered_camera for term in ("push", "dolly"))
+                else "hold"
+            )
+            env_digest = hashlib.sha256(shot["environment"].casefold().encode("utf-8")).hexdigest()[:10]
+            subject_digest = hashlib.sha256(str(subject_name).casefold().encode("utf-8")).hexdigest()[:10]
+            tension = min(10, 4 + int((s_idx / max(1, len(directed["lines"]) - 1)) * 5))
+            scenes.append({
+                "scene_id": str(shot["scene_id"]), "beat_index": s_idx,
+                "narration": {"text": s_text, "start_s": round(start_t, 2), "end_s": round(end_t, 2),
+                              "duration_sec": round(max(0.1, end_t - start_t), 2)},
+                "story_event": s_text, "visual_objective": shot["visual_description"],
+                "primary_subject": {"name": str(subject_name), "action": shot["animation"],
+                                    "character_id": f"char_{subject_digest}" if characters else None,
+                                    "presence": "grounded" if characters else "focal_object_or_environment"},
+                "characters": characters,
+                "environment": {"name": shot["environment"], "era": "story-specific",
+                                "time_of_day": shot["lighting"], "setting_id": f"env_{env_digest}"},
+                "important_objects": props,
+                "three_js_scene": f"cartoon3d_{profile.get('environment', 'interior')}",
+                "rendering_method": "CARTOON_3D_THREEJS",
                 "composition_type": shot_type.upper(),
-                "camera": {
-                    "shot_type": shot_type,
-                    "movement": cam_move,
-                    "motivation": motivation,
-                    "description": camera_desc,
-                },
-                "lighting_and_atmosphere": {
-                    "style": "low_key",
-                    "contrast": "high",
-                    "mood": "dread" if visual_profile == "psychological_horror" else "cinematic",
-                    "key_source": "motivated practical / moonlight / lantern",
-                },
-                "tension_level": tension,
-                "transition_out": {
-                    "type": "hard_cut" if s_idx < num_scenes - 1 else "dip_to_black",
-                    "duration_ms": 200 if s_idx < num_scenes - 1 else 500,
-                },
-                "continuity_requirements": [
-                    "Preserve consistent color grading across Three.js 3D WebGL scenes.",
-                    "Maintain continuous camera momentum and lighting motivation.",
-                ],
-            }
-            scenes.append(scene_obj)
+                "camera": {"shot_type": shot_type, "movement": movement,
+                           "motivation": shot["visual_type"], "description": camera_desc},
+                "lighting_and_atmosphere": {"style": shot["lighting"], "contrast": "cinematic",
+                                             "mood": profile.get("profile", "fiction"), "key_source": shot["lighting"]},
+                "animation": shot["animation"], "tension_level": tension,
+                "transition_out": {"type": shot["transition"], "duration_ms": 300},
+                "continuity_requirements": [shot["continuity"]],
+                "visual_match_explanation": shot["visual_description"],
+            })
 
         storyboard = {
             "series_id": series_id,
@@ -601,8 +594,8 @@ class ProductionPlanner:
             "title": episode_title,
             "total_scenes": len(scenes),
             "total_duration_sec": dur_s,
-            "visual_profile": visual_profile,
-            "rendering_engine": "Three.js 3D Narrative Engine (templates/narrative-engine/)",
+            "visual_profile": profile.get("profile", "fiction"),
+            "rendering_engine": "CurioLoop Cartoon 3D renderer (Three.js/WebGL + Chromium/FFmpeg)",
             "approval_status": "PENDING_REVIEW",
             "is_approved": False,
             "approved_by": None,
@@ -626,12 +619,22 @@ class ProductionPlanner:
         rights_status: str = "UNVERIFIED_EVALUATION_ONLY",
         author: Optional[str] = "Creator",
         source_url: Optional[str] = None,
+        attribution: Optional[str] = None,
+        analysis: Optional[Dict[str, Any]] = None,
     ) -> Tuple[SeriesRecord, List[EpisodeRecord]]:
         """Generates full episode breakdowns, scripts, and Three.js visual scene storyboards
         for the selected production plan, persisting them to series_db.
         """
-        sid = series_id or f"series_{int(datetime.now().timestamp())}"
+        sid = series_id or f"series_{int(datetime.now().timestamp() * 1000)}"
         stitle = title or "Creator Series"
+        category_hint = str((analysis or {}).get("genre") or (analysis or {}).get("category") or "")
+        series_visual_profile = select_visual_style({
+            "topic": stitle,
+            "title": stitle,
+            "category": category_hint,
+            "content_lane": "creator_series",
+            "lines": [{"text": raw_text}],
+        })["profile"]
 
         # Determine episodes from selected_plan or generate plan dynamically
         plan_episodes_data = []
@@ -674,7 +677,7 @@ class ProductionPlanner:
                 episode_num=ep_num,
                 episode_title=ep_title,
                 narration=narration,
-                visual_profile="psychological_horror",
+                visual_profile=series_visual_profile,
                 total_duration_sec=est_dur,
             )
 
@@ -711,9 +714,9 @@ class ProductionPlanner:
             series_id=sid,
             title=stitle,
             full_script=raw_text,
-            creator_info={"name": author, "source": source_url},
+            creator_info={"name": author, "source": source_url, "attribution": attribution or author},
             content_type="creator_story",
-            visual_profile="psychological_horror",
+            visual_profile=series_visual_profile,
             rights_status=r_status,
             target_duration=target_sec,
             planned_episodes=len(ep_records),

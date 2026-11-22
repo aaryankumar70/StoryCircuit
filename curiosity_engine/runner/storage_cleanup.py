@@ -158,7 +158,7 @@ def cleanup_old_generated_videos(
     db_client: Any = None,
     now_ist: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Identify and safely remove eligible previous-day generated files inside OUTPUT_DIR."""
+    """Remove eligible old intermediate-only files while retaining final MP4 deliverables."""
     out_root = Path(output_dir) if output_dir else config.OUTPUT_DIR
     st_file = Path(state_file) if state_file else CLEANUP_STATE_FILE
     store = db_client or db
@@ -216,6 +216,13 @@ def cleanup_old_generated_videos(
     deleted_paths: List[str] = []
 
     for vid_id, (job_date_iso, paths) in candidates_by_job.items():
+        # A final MP4 is a user deliverable. Keep it and the rest of its job artifacts
+        # together; cleanup may remove only old intermediate-only job folders.
+        final_mp4_name = f"{vid_id}.mp4".casefold()
+        if any(path.is_file() and path.name.casefold() == final_mp4_name for path in paths):
+            protected_jobs[vid_id] = "final_mp4_deliverable_retained"
+            continue
+
         reason = _is_job_protected(
             vid_id=vid_id,
             job_date_iso=job_date_iso,

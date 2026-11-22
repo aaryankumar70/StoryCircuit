@@ -255,12 +255,14 @@ def test_generate_threejs_storyboard(temp_planner):
     assert len(sb["scenes"]) >= 3
 
     # Check Three.js scene assignment
-    valid_three_scenes = {"ocean_scene", "helm_scene", "cabin_scene", "procedural_environment"}
     for sc in sb["scenes"]:
-        assert sc["three_js_scene"] in valid_three_scenes
-        assert sc["rendering_method"] == "SELECTIVE_3D"
+        assert sc["three_js_scene"].startswith("cartoon3d_")
+        assert sc["rendering_method"] == "CARTOON_3D_THREEJS"
+        assert sc["narration"]["text"].strip()
+        assert sc["narration"]["text"] in sc["visual_objective"]
         assert "camera" in sc
         assert "shot_type" in sc["camera"]
+        assert sc["environment"]["name"]
         assert 1 <= sc["tension_level"] <= 10
 
 

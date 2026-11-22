@@ -46,6 +46,7 @@ class EpisodeStatus(str, Enum):
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
     STALE_INVALIDATED = "STALE_INVALIDATED"
+    ENGINE_NOT_CONFIGURED = "ENGINE_NOT_CONFIGURED"
 
 
 EPISODE_STATUS_DISPLAY_MAP: Dict[EpisodeStatus, str] = {
@@ -58,6 +59,7 @@ EPISODE_STATUS_DISPLAY_MAP: Dict[EpisodeStatus, str] = {
     EpisodeStatus.IN_PRODUCTION: "In production",
     EpisodeStatus.AUDIO_READY: "In production",
     EpisodeStatus.RENDERED: "In production",
+    EpisodeStatus.ENGINE_NOT_CONFIGURED: "Engine not configured",
     EpisodeStatus.QC_FAILED: "QC failed",
     EpisodeStatus.FAILED: "QC failed",
     EpisodeStatus.READY_FOR_PUBLISHING: "Ready for publishing",
@@ -94,6 +96,7 @@ def normalize_episode_status(val: Any) -> EpisodeStatus:
         "PUBLISHED": EpisodeStatus.PUBLISHED,
         "CANCELLED": EpisodeStatus.CANCELLED,
         "STALE_INVALIDATED": EpisodeStatus.STALE_INVALIDATED,
+        "ENGINE_NOT_CONFIGURED": EpisodeStatus.ENGINE_NOT_CONFIGURED,
     }
     return alias_map.get(s, EpisodeStatus.PLANNED)
 
@@ -139,10 +142,12 @@ class SeriesRecord:
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     next_episode_num: int = 1
     publication_schedule: Dict[str, Any] = field(default_factory=lambda: {
-        "slot": 2,
-        "time_ist": "20:30",
+        "schedule_type": "A",
+        "start_time": "20:30",
+        "timezone": "Asia/Kolkata",
         "cadence": "daily",
-        "max_episodes_per_day": 1,
+        "interval_days": 1,
+        "queue": "creator_series",
     })
     published_episode_ids: List[str] = field(default_factory=list)
     failed_episode_ids: List[str] = field(default_factory=list)

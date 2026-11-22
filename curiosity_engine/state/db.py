@@ -8,12 +8,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import threading
+import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from curiosity_engine.config import DATA_DIR
+from curiosity_engine.state.file_lock import interprocess_file_lock
 
 logger = logging.getLogger("curiosity_engine.db")
 
@@ -55,43 +60,58 @@ class DatabaseClient:
     def __init__(self, custom_file: Optional[Path] = None):
         self.local_file = custom_file or (DATA_DIR / "firestore_local.json")
         self._local_data: Dict[str, Dict[str, Any]] = {"videos": {}, "topics": {}, "logs": {}}
-        self._last_mtime: float = 0.0
+        self._last_mtime: Any = None
+        self._thread_lock = threading.RLock()
         self._load_local_data()
 
     def _load_local_data(self) -> None:
         """Load persistent records from local JSON store."""
         if self.local_file.exists():
             try:
-                mtime = self.local_file.stat().st_mtime
-                if mtime != self._last_mtime:
+                stat = self.local_file.stat()
+                signature = (stat.st_mtime_ns, stat.st_size)
+                if signature != self._last_mtime:
                     with open(self.local_file, "r", encoding="utf-8") as f:
                         self._local_data = json.load(f)
-                    self._last_mtime = mtime
+                    self._last_mtime = signature
             except Exception as e:
                 logger.error(f"Error loading local state from {self.local_file}: {e}")
 
     def _save_local_data(self) -> None:
-        """Persist records atomically via temp file + replace."""
+        """Persist the current transaction atomically via a unique temp file."""
         try:
             self.local_file.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self.local_file.with_suffix(".tmp")
-            with open(tmp_path, "w", encoding="utf-8") as f:
+            tmp_path = self.local_file.with_name(
+                f".{self.local_file.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            )
+            with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(self._local_data, f, indent=2, default=str)
+                f.flush()
+                os.fsync(f.fileno())
             tmp_path.replace(self.local_file)
-            self._last_mtime = self.local_file.stat().st_mtime
+            stat = self.local_file.stat()
+            self._last_mtime = (stat.st_mtime_ns, stat.st_size)
         except Exception as e:
             logger.error(f"Error saving local state to {self.local_file}: {e}")
+            raise
+
+    @contextmanager
+    def transaction(self):
+        """Serialize a complete read-modify-write across threads and processes."""
+        lock_path = self.local_file.with_suffix(self.local_file.suffix + ".lock")
+        with self._thread_lock, interprocess_file_lock(lock_path):
+            if self.local_file.exists():
+                with open(self.local_file, "r", encoding="utf-8") as f:
+                    self._local_data = json.load(f)
+            yield self._local_data
+            self._save_local_data()
 
     def save_video_record(self, video_id: str, data: Dict[str, Any]) -> None:
         """Create or update a video production & publishing record."""
-        self._load_local_data()
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self._local_data.setdefault("videos", {})
-        self._local_data["videos"][video_id] = {
-            **self._local_data["videos"].get(video_id, {}),
-            **data,
-        }
-        self._save_local_data()
+        with self.transaction() as state:
+            data["updated_at"] = datetime.now(timezone.utc).isoformat()
+            state.setdefault("videos", {})
+            state["videos"][video_id] = {**state["videos"].get(video_id, {}), **data}
 
     def get_video_record(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve video record by ID (auto-reloading if modified on disk)."""
@@ -127,7 +147,6 @@ class DatabaseClient:
         script_hash: Optional[str] = None,
     ) -> None:
         """Record used topic, category, date, and optional fallback ID to prevent duplicates within 90 days."""
-        self._load_local_data()
         rec = {
             "topic": topic,
             "category": category,
@@ -137,38 +156,34 @@ class DatabaseClient:
             "aliases": aliases or [],
             "script_hash": script_hash,
         }
-        self._local_data.setdefault("topics", {})
-        self._local_data["topics"][topic] = rec
-        if fallback_id:
-            self._local_data.setdefault("used_fallback_ids", {})
-            self._local_data["used_fallback_ids"][fallback_id] = {
-                "used_date": date_str,
-                "topic": topic,
-            }
-        self._save_local_data()
+        with self.transaction() as state:
+            state.setdefault("topics", {})
+            state["topics"][topic] = rec
+            if fallback_id:
+                state.setdefault("used_fallback_ids", {})
+                state["used_fallback_ids"][fallback_id] = {"used_date": date_str, "topic": topic}
 
     def record_fallback_used(self, fallback_id: str, date_str: str, topic: str = "") -> None:
         """Mark a curated fallback story ID as consumed to prevent repetitive selection."""
         if not fallback_id:
             return
-        self._load_local_data()
-        self._local_data.setdefault("used_fallback_ids", {})
-        self._local_data["used_fallback_ids"][fallback_id] = {
-            "used_date": date_str,
-            "topic": topic,
-        }
-        self._save_local_data()
+        with self.transaction() as state:
+            state.setdefault("used_fallback_ids", {})
+            state["used_fallback_ids"][fallback_id] = {"used_date": date_str, "topic": topic}
 
     def get_used_fallback_ids(self) -> Set[str]:
         """Return set of all curated fallback IDs consumed across past runs and videos."""
         self._load_local_data()
-        used = set(self._local_data.get("used_fallback_ids", {}).keys())
+        raw_used = self._local_data.get("used_fallback_ids", {})
+        used = set(raw_used.keys()) if isinstance(raw_used, dict) else set(raw_used)
         for v in self._local_data.get("videos", {}).values():
             if isinstance(v, dict):
                 fid = v.get("fallback_id") or (v.get("script") or {}).get("id")
                 if fid:
                     used.add(str(fid))
-        for t in self._local_data.get("topics", {}).values():
+        raw_topics = self._local_data.get("topics", {})
+        topic_vals = raw_topics.values() if isinstance(raw_topics, dict) else raw_topics
+        for t in topic_vals:
             if isinstance(t, dict) and t.get("fallback_id"):
                 used.add(str(t["fallback_id"]))
         return used
@@ -255,7 +270,6 @@ class DatabaseClient:
 
     def log_error(self, component: str, message: str, context: Optional[Dict[str, Any]] = None) -> None:
         """Persist error log entry."""
-        self._load_local_data()
         log_entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "component": component,
@@ -263,9 +277,9 @@ class DatabaseClient:
             "context": context or {},
         }
         log_id = f"err_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
-        self._local_data.setdefault("logs", {})
-        self._local_data["logs"][log_id] = log_entry
-        self._save_local_data()
+        with self.transaction() as state:
+            state.setdefault("logs", {})
+            state["logs"][log_id] = log_entry
 
     def get_recent_logs(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Retrieve recent error and operational logs."""

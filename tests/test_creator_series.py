@@ -25,9 +25,6 @@ from curiosity_engine.creator_series.continuity import (
     ContinuityLedgerEntry,
     StoryContinuityBible,
 )
-from curiosity_engine.creator_series.visual_director import VisualDirector
-from curiosity_engine.creator_series.renderer_adapter import RendererAdapter
-from curiosity_engine.creator_series.visual_qc import VisualQCEvaluator
 from curiosity_engine.creator_series.pipeline_integration import get_slot2_content_choice
 from curiosity_engine.dashboard.app import app
 from curiosity_engine.state.db import DatabaseClient
@@ -56,6 +53,80 @@ def temp_db(tmp_path: Path):
     client = DatabaseClient(custom_file=db_file)
     s_db = SeriesDatabase(db_client=client)
     return s_db, client
+
+
+def test_manual_upload_analysis_planning_and_breakdown_use_isolated_state(temp_db, tmp_path, monkeypatch):
+    """Exercise Creator Studio's manual workflow without starting video production."""
+    from curiosity_engine.creator_series.creator_studio_engine import CreatorStudioEngine
+    from curiosity_engine.creator_series.production_planner import ProductionPlanner
+    from curiosity_engine.dashboard import series_api
+
+    isolated_db, _ = temp_db
+    upload_dir = tmp_path / "creator_uploads"
+    monkeypatch.setattr(CreatorStudioEngine, "UPLOAD_DIR", upload_dir)
+    monkeypatch.setattr(series_api, "series_db", isolated_db)
+    monkeypatch.setattr(series_api, "production_planner", ProductionPlanner(db_instance=isolated_db))
+
+    story = (
+        "At dawn, scientist Mira adjusted a laboratory spectrometer and caught a repeating flash in a sealed sample chamber. "
+        "The signal appeared every seven minutes, then vanished whenever the observatory lights came on. "
+        "She checked the equipment, compared the readings, and found the pulse was moving through the sample. "
+        "A second instrument on the other side of the lab recorded the same pattern. "
+        "Mira sent the measurements to her team, who ruled out a sensor fault and traced the signal to a small crystal. "
+        "When the next pulse arrived, the crystal brightened in the image, revealing a structure no reference map showed. "
+        "The team saved the raw data and planned a careful follow-up observation before making any public claim."
+    )
+    client = TestClient(app)
+    upload = client.post(
+        "/api/series/ingest/upload",
+        files={"file": ("silent_signal.txt", story.encode("utf-8"), "text/plain")},
+        data={"author": "Temporary Test Writer", "permission_status": "OWNED"},
+    )
+    assert upload.status_code == 200, upload.text
+    uploaded = upload.json()
+    assert "repeating flash" in uploaded["raw_text"]
+    saved_upload = Path(uploaded["preserved_path"])
+    assert saved_upload.exists() and saved_upload.parent == upload_dir
+
+    analysis_res = client.post("/api/series/analyze", json={
+        "raw_text": uploaded["raw_text"], "title": uploaded["title"], "use_local_ai": False,
+    })
+    assert analysis_res.status_code == 200, analysis_res.text
+    analysis = analysis_res.json()["analysis"]
+    assert isinstance(analysis, dict) and analysis
+
+    plans_res = client.post("/api/series/recommend-plans", json={
+        "raw_text": uploaded["raw_text"], "title": "The Silent Signal",
+        "analysis": {**analysis, "genre": "science"}, "custom_seconds": 75,
+    })
+    assert plans_res.status_code == 200, plans_res.text
+    plans = plans_res.json()["recommended_plans"]
+    assert {plan["format_preset"] for plan in plans} >= {"1m", "1.5m", "3m", "custom"}
+    custom_plan = next(plan for plan in plans if plan["format_preset"] == "custom")
+    assert custom_plan["target_duration_sec"] == 75
+    assert custom_plan["episodes"]
+
+    series_id = "creator_manual_isolated_test"
+    breakdown_res = client.post("/api/series/generate-breakdown", json={
+        "series_id": series_id,
+        "title": "The Silent Signal",
+        "raw_text": uploaded["raw_text"],
+        "selected_plan": custom_plan,
+        "duration_preset": "custom",
+        "custom_seconds": 75,
+        "analysis": {**analysis, "genre": "science"},
+        "author": "Temporary Test Writer",
+        "rights_status": "OWNED",
+    })
+    assert breakdown_res.status_code == 200, breakdown_res.text
+    result = breakdown_res.json()
+    assert result["series"]["series_id"] == series_id
+    assert result["series"]["target_duration"] == 75
+    assert result["series"]["visual_profile"] == "science"
+    assert result["total_episodes"] == len(result["episodes"]) > 0
+    assert all(ep["storyboard"]["scenes"] for ep in result["episodes"])
+    assert isolated_db.get_series(series_id) is not None
+    assert not list(tmp_path.rglob("*.mp4")), "Manual planning must not render a video."
 
 
 # ── Story Engine Tests ──
@@ -142,85 +213,6 @@ def test_continuity_validation():
     )
     assert not is_valid2
     assert any("premature" in e.lower() for e in errors2)
-
-
-# ── Visual System Tests ──
-
-def test_visual_bible_schema_conformance():
-    vd = VisualDirector()
-    bible = vd.create_horror_visual_bible(
-        series_id="test_horror",
-        title="The Scariest Story",
-        logline="A man discovers that a forgotten childhood story predicted his death.",
-    )
-    assert bible["schema_version"] == "1.0"
-    assert bible["profile"] == "psychological_horror"
-    assert len(bible["visual_identity"]["palette"]["colors"]) >= 4
-    assert len(bible["characters"]) >= 2
-    assert len(bible["locations"]) >= 3
-
-
-def test_episode_storyboard_schema_conformance():
-    vd = VisualDirector()
-    bible = vd.create_horror_visual_bible("test_horror", "The Scariest Story", "Logline description here.")
-    ep = EpisodeRecord(
-        episode_id="test_horror_ep01",
-        series_id="test_horror",
-        episode_num=1,
-        title="Part 1: The Mountain Pass",
-        adapted_narration="The bus stopped in the mist. The driver gathered the children around him.",
-        hook="The bus stopped in the mist.",
-        cliffhanger="The driver gathered the children around him.",
-    )
-    storyboard = vd.create_episode_storyboard("test_horror", ep, bible, duration_s=45.0)
-
-    assert storyboard["schema_version"] == "1.0"
-    assert storyboard["series_id"] == "test_horror"
-    assert storyboard["episode_number"] == 1
-    assert len(storyboard["scenes"]) >= 3
-    for s in storyboard["scenes"]:
-        assert s["tension_level"] >= 1
-        assert "palette" in s
-        assert "lighting" in s
-
-
-def test_renderer_adapter_translation():
-    vd = VisualDirector()
-    bible = vd.create_horror_visual_bible("test_horror", "Title", "Logline description text.")
-    ep = EpisodeRecord(
-        episode_id="test_horror_ep01",
-        series_id="test_horror",
-        episode_num=1,
-        title="Part 1",
-        adapted_narration="Sentence one. Sentence two. Sentence three.",
-    )
-    storyboard = vd.create_episode_storyboard("test_horror", ep, bible)
-
-    ra = RendererAdapter()
-    script_data, downgrades = ra.translate_storyboard_to_script_data(storyboard, bible)
-    assert script_data["style"] == "paper-atlas"
-    assert len(script_data["lines"]) >= 3
-    assert "visual_profile" in script_data
-
-
-def test_visual_qc_scoring():
-    vd = VisualDirector()
-    bible = vd.create_horror_visual_bible("test_horror", "Title", "Logline description text.")
-    ep = EpisodeRecord(
-        episode_id="test_horror_ep01",
-        series_id="test_horror",
-        episode_num=1,
-        title="Part 1",
-        adapted_narration="Sentence one. Sentence two. Sentence three.",
-    )
-    storyboard = vd.create_episode_storyboard("test_horror", ep, bible)
-
-    qc = VisualQCEvaluator()
-    score = qc.evaluate_storyboard(storyboard, bible)
-
-    assert score.average_score >= 7.5
-    assert score.serialized_score_min >= 8.0
-    assert score.verdict in ("SHIP", "REVISE")
 
 
 # ── Scheduling & State Management Tests ──
@@ -389,7 +381,7 @@ def test_dashboard_series_api(temp_db, monkeypatch):
 
 def test_source_fidelity_validator_passes_on_canonical_episodes():
     from curiosity_engine.creator_series.source_fidelity import source_fidelity_validator
-    from curiosity_engine.creator_series.generate_pilot_deliverables import episodes_data
+    from tests.pilot_fixture import episodes_data
 
     texts = [ep["narration"] for ep in episodes_data]
     res = source_fidelity_validator.validate_series_fidelity(texts)
@@ -403,7 +395,7 @@ def test_source_fidelity_validator_passes_on_canonical_episodes():
 
 def test_source_fidelity_validator_detects_hallucinations():
     from curiosity_engine.creator_series.source_fidelity import source_fidelity_validator
-    from curiosity_engine.creator_series.generate_pilot_deliverables import episodes_data
+    from tests.pilot_fixture import episodes_data
 
     texts = [ep["narration"] for ep in episodes_data]
     corrupted_texts = texts.copy()
@@ -418,7 +410,7 @@ def test_source_fidelity_validator_detects_hallucinations():
 
 def test_source_fidelity_validator_detects_altered_ending():
     from curiosity_engine.creator_series.source_fidelity import source_fidelity_validator
-    from curiosity_engine.creator_series.generate_pilot_deliverables import episodes_data
+    from tests.pilot_fixture import episodes_data
 
     texts = [ep["narration"] for ep in episodes_data]
     corrupted_texts = texts.copy()

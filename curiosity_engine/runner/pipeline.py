@@ -15,7 +15,10 @@ from zoneinfo import ZoneInfo
 from curiosity_engine.config import (
     INSTAGRAM_PUBLISHING_MODE,
     MAX_DAILY_VIDEOS,
+    MAX_DURATION_SEC,
     MAX_QC_RECOVERY_ATTEMPTS,
+    MIN_DURATION_SEC,
+    TARGET_DURATION_MIN_SEC,
     OUTPUT_DIR,
     SCHEDULER_TIMEZONE,
     YOUTUBE_PRIVACY_STATUS,
@@ -41,8 +44,9 @@ from curiosity_engine.distribution.youtube_publisher import (
     YouTubePublisherError,
     youtube_publisher,
 )
+from curiosity_engine.generation import engine_registry
 from curiosity_engine.production.director import prepare_project
-from curiosity_engine.production.renderer import render_project_video, validate_rendered_mp4
+from curiosity_engine.production.renderer import current_render_matches, render_project_video, validate_rendered_mp4, write_render_manifest
 from curiosity_engine.quality.qc_gatekeeper import verify_video
 from curiosity_engine.quality.provenance import (
     build_production_provenance,
@@ -111,8 +115,8 @@ def _choose_recovery_strategy(qc_report: Any) -> Tuple[str, str]:
 
     if "duration_exceeded" in cats or "duration_too_short" in cats or "duration" in issues_txt:
         if "exceed" in issues_txt or "duration_exceeded" in cats:
-            return "revise_script_duration_down", "Revising script and re-rendering video within 20-60s."
-        return "revise_script_duration_up", "Expanding story depth and re-rendering within 20-60s."
+            return "revise_script_duration_down", f"Shortening narration to fit the {MAX_DURATION_SEC:.0f}s render safety ceiling."
+        return "revise_script_duration_up", f"Expanding narration to meet the {MIN_DURATION_SEC:.0f}s minimum (target around {TARGET_DURATION_MIN_SEC:.0f}s)."
     if "sync_mismatch" in cats or "caption" in issues_txt or "drift" in issues_txt:
         return "resync_tts_alignment", "Re-aligning narration timings and regenerating fresh render."
     if ("audio_loudness" in cats or "audio_codec" in cats or "loudness" in issues_txt or "true peak" in issues_txt) and not (
@@ -149,7 +153,7 @@ def _execute_recovery_attempt(
     )
 
     if strategy in ("revise_script_duration_down", "revise_script_duration_up"):
-        fallback_dur = 65.0 if strategy == "revise_script_duration_down" else 17.0
+        fallback_dur = MAX_DURATION_SEC if strategy == "revise_script_duration_down" else TARGET_DURATION_MIN_SEC
         revised_script, rev_note = revise_script_for_duration(
             updated_script,
             curr_dur if curr_dur > 0 else fallback_dur,
@@ -164,7 +168,7 @@ def _execute_recovery_attempt(
             extra_detail={"substage": "revising_script", "next_action": rev_note},
             db_client=db,
         )
-        prep_dir = prepare_project(video_id, updated_script)
+        prep_dir = prepare_project(video_id, updated_script, prepare_narration_assets=True)
         render_project_video(prep_dir, output_mp4, resume=False, force_rebuild=True)
         return updated_script, prep_dir, strategy, action_desc
 
@@ -178,10 +182,15 @@ def _execute_recovery_attempt(
             db_client=db,
         )
         staged = output_mp4.with_name(f".{attempt_id}_norm.mp4")
-        if _run_ffmpeg_loudnorm_fix(output_mp4, staged):
-            staged.replace(output_mp4)
-            return updated_script, project_dir, strategy, "Applied FFmpeg EBU R128 loudness normalization"
-        # Fallback if audio-only mux failed (e.g. corrupt stream): remove & run fresh render cleanly
+        try:
+            if _run_ffmpeg_loudnorm_fix(output_mp4, staged):
+                metadata = validate_rendered_mp4(staged)
+                staged.replace(output_mp4)
+                write_render_manifest(output_mp4, project_dir, metadata)
+                return updated_script, project_dir, strategy, "Applied verified FFmpeg EBU R128 loudness normalization"
+        finally:
+            staged.unlink(missing_ok=True)
+        # If audio-only repair failed, retain the failed MP4 and render a verified replacement to a unique staging path.
 
     if strategy == "regenerate_visual_sequence":
         for idx, ln in enumerate(updated_script.get("lines") or []):
@@ -190,18 +199,12 @@ def _execute_recovery_attempt(
                 alt_moods = ("wonder", "calm", "tense")
                 sc["mood"] = alt_moods[idx % len(alt_moods)]
                 ln["scene"] = sc
-        assign_line_scenes(updated_script)
+        updated_script = assign_line_scenes(updated_script)
 
-    # Remove prior failed MP4 so render_project_video never reuses the failed artifact
-    try:
-        if output_mp4.exists():
-            output_mp4.unlink()
-    except Exception:
-        pass
-
+    # Leave the failed output in place until the renderer has a fully validated replacement.
     prep_dir = project_dir
     if strategy in ("resync_tts_alignment", "regenerate_visual_sequence") or not _has_valid_project_assets(project_dir):
-        prep_dir = prepare_project(video_id, updated_script)
+        prep_dir = prepare_project(video_id, updated_script, prepare_narration_assets=True)
     render_project_video(prep_dir, output_mp4, resume=False, force_rebuild=True)
     return updated_script, prep_dir, strategy, action_desc
 
@@ -211,7 +214,10 @@ def _has_valid_project_assets(project_dir: Path, expected_script_hash: Optional[
     required_files = [
         project_dir / "script.json",
         project_dir / "index.html",
+        project_dir / "tools" / "capture.mjs",
         project_dir / "src" / "main.js",
+        project_dir / "src" / "shots.js",
+        project_dir / "vendor" / "three.module.js",
         project_dir / "data" / "narration.wav",
         project_dir / "data" / "lines.json",
         project_dir / "data" / "words.json",
@@ -227,7 +233,15 @@ def _has_valid_project_assets(project_dir: Path, expected_script_hash: Optional[
                 return False
         lines = json.loads((project_dir / "data" / "lines.json").read_text(encoding="utf-8"))
         words = json.loads((project_dir / "data" / "words.json").read_text(encoding="utf-8"))
-        return float(lines.get("duration", 0)) > 5.0 and len(words) > 0
+        narration_lines = (proj_script.get("lines") or []) if expected_script_hash else json.loads((project_dir / "script.json").read_text(encoding="utf-8")).get("lines", [])
+        aligned_lines = lines.get("lines") or []
+        if len(narration_lines) != len(aligned_lines) or not words:
+            return False
+        if any(str(source.get("text") or "") != str(timed.get("text") or "")
+               for source, timed in zip(narration_lines, aligned_lines)):
+            return False
+        expected_words = sum(len(str(line.get("text") or "").split()) for line in narration_lines)
+        return MIN_DURATION_SEC <= float(lines.get("duration", 0)) <= MAX_DURATION_SEC and len(words) == expected_words
     except Exception:
         return False
 
@@ -259,6 +273,14 @@ def produce_single_video(
     existing = db.get_video_record(video_id)
     output_mp4 = OUTPUT_DIR / f"{video_id}.mp4"
     project_dir = OUTPUT_DIR / video_id
+    saved_project = (existing or {}).get("project_path")
+    if saved_project:
+        try:
+            candidate = Path(saved_project).resolve()
+            if candidate.is_relative_to(OUTPUT_DIR.resolve()):
+                project_dir = candidate
+        except (OSError, ValueError):
+            logger.warning("Ignoring invalid saved project path for %s", video_id)
 
     # 1. Check if already produced and MP4 verified
     if not force_rebuild and is_slot_generation_complete(video_id):
@@ -336,16 +358,28 @@ def produce_single_video(
         )
 
         if is_saved_script_compliant:
-            script_data = saved_script
-            assign_line_scenes(script_data)
+            script_data = assign_line_scenes(saved_script)
             logger.info(f"[{video_id}] Reusing existing verified compliant script for '{record.get('topic')}'.")
         else:
             if saved_script and not is_saved_script_compliant:
                 logger.warning(
                     f"[{video_id}] Existing script category '{raw_saved_cat}' violates editorial policy. Discarding and regenerating."
                 )
+
+            from curiosity_engine.generation import GenerationEngineNotConfiguredError
             logger.info(f"[{video_id}] Writing storytelling script and verifying internal sources...")
-            script_data = write_video_script(topic_info)
+            try:
+                script_data = write_video_script(topic_info)
+            except GenerationEngineNotConfiguredError as exc:
+                unconfigured_msg = f"Content generation engine not configured: {exc}"
+                logger.warning(f"[{video_id}] {unconfigured_msg}")
+                record["production_status"] = "ENGINE_NOT_CONFIGURED"
+                record["error"] = unconfigured_msg
+                record["paused"] = True
+                db.save_video_record(video_id, record)
+                record_stage_failed(video_id, "writing_script", unconfigured_msg, db_client=db)
+                release_slot_worker_lock(slot_index, video_id)
+                return record
             record["script"] = script_data
             record["sources"] = script_data.get("sources", [])
             record["claims"] = script_data.get("claims", [])
@@ -379,6 +413,15 @@ def produce_single_video(
         record["storyboard_id"] = provenance["storyboard_id"]
         record["production_run_id"] = provenance["production_run_id"]
         record["category"] = provenance["category"]
+        cur_script_hash = record.get("script_hash") or compute_script_narration_hash(script_data)
+        if not _has_valid_project_assets(project_dir, expected_script_hash=cur_script_hash):
+            visual_engine = engine_registry.get_visual_engine()
+            project_factory = getattr(visual_engine, "project_directory", None)
+            if callable(project_factory):
+                candidate_dir = Path(project_factory(video_id, script_data, OUTPUT_DIR)).resolve()
+                if _has_valid_project_assets(candidate_dir, expected_script_hash=cur_script_hash) or not project_dir.exists():
+                    project_dir = candidate_dir
+        record["project_path"] = str(project_dir)
 
         # 2b. Link-Free YouTube Title, Description & Separate API Tags Generation
         cur_topic_str = str(record.get("topic") or topic_info.get("topic", ""))
@@ -425,21 +468,28 @@ def produce_single_video(
         # 3. Check if valid rendered MP4 already exists on disk (NEVER reuse an unchanged previously failed MP4!)
         rendered_valid = False
         is_same_failed_file = bool(prior_failed_hash and current_disk_hash and current_disk_hash == prior_failed_hash)
-        if not force_rebuild and output_mp4.exists() and not is_same_failed_file:
+        if output_mp4.exists() and not force_rebuild and not is_same_failed_file and not current_render_matches(output_mp4, project_dir):
+            conflict = (f"Existing MP4 for {video_id} is not bound to the current script. "
+                        "The file was preserved; use a new video ID or explicitly request a rebuild.")
+            logger.warning("[%s] %s", video_id, conflict)
+            record.update({"production_status": "OUTPUT_CONFLICT", "error": conflict, "paused": True})
+            db.save_video_record(video_id, record)
+            record_stage_failed(video_id, "rendering_video", conflict, db_client=db)
+            return record
+        if not force_rebuild and output_mp4.exists() and not is_same_failed_file and current_render_matches(output_mp4, project_dir):
             try:
                 validate_rendered_mp4(output_mp4)
                 rendered_valid = True
-                logger.info(f"[{video_id}] Valid rendered MP4 already present at {output_mp4}; resuming at QC.")
+                logger.info(f"[{video_id}] Script-matched verified MP4 already present at {output_mp4}; resuming at QC.")
             except Exception as mp4_err:
-                logger.warning(f"[{video_id}] Existing MP4 invalid ({mp4_err}); removing corrupt output.")
-                try:
-                    output_mp4.unlink()
-                except Exception:
-                    pass
+                logger.warning(f"[{video_id}] Existing MP4 is not reusable ({mp4_err}); preserving it until a verified replacement is ready.")
+        elif output_mp4.exists() and not is_same_failed_file:
+            logger.info(f"[{video_id}] Existing output is not bound to the current script; preserving it until a verified replacement is ready.")
         elif is_same_failed_file:
             logger.info(f"[{video_id}] Existing MP4 matches previously rejected failed hash; skipping redundant unchanged QC.")
 
         if not rendered_valid and not is_same_failed_file:
+            from curiosity_engine.generation import GenerationEngineNotConfiguredError
             # 3b. Preparation: TTS and Alignment (resume from valid project assets only if matching approved script)
             cur_script_hash = record.get("script_hash") or compute_script_narration_hash(script_data)
             if not force_rebuild and _has_valid_project_assets(project_dir, expected_script_hash=cur_script_hash):
@@ -449,14 +499,37 @@ def produce_single_video(
                 db.save_video_record(video_id, record)
             else:
                 logger.info(f"[{video_id}] Preparing project assets, voice, and timing...")
-                project_dir = prepare_project(video_id, script_data)
+                try:
+                    project_dir = prepare_project(video_id, script_data, prepare_narration_assets=True)
+                except GenerationEngineNotConfiguredError as exc:
+                    unconfigured_msg = f"Visual rendering engine not configured: {exc}"
+                    logger.warning(f"[{video_id}] {unconfigured_msg}")
+                    record["production_status"] = "ENGINE_NOT_CONFIGURED"
+                    record["error"] = unconfigured_msg
+                    record["paused"] = True
+                    db.save_video_record(video_id, record)
+                    record_stage_failed(video_id, "preparing_visuals", unconfigured_msg, db_client=db)
+                    release_slot_worker_lock(slot_index, video_id)
+                    return record
                 record = db.get_video_record(video_id) or record
+                record["project_path"] = str(project_dir.resolve())
                 record["production_status"] = "ASSETS_READY"
                 db.save_video_record(video_id, record)
 
             # 4. Headless Chrome Frame Rendering & FFmpeg Assembly
             logger.info(f"[{video_id}] Rendering frames to {output_mp4}...")
-            render_project_video(project_dir, output_mp4, resume=not force_rebuild, force_rebuild=force_rebuild)
+            try:
+                render_project_video(project_dir, output_mp4, resume=not force_rebuild, force_rebuild=force_rebuild)
+            except GenerationEngineNotConfiguredError as exc:
+                unconfigured_msg = f"Visual rendering engine not configured: {exc}"
+                logger.warning(f"[{video_id}] {unconfigured_msg}")
+                record["production_status"] = "ENGINE_NOT_CONFIGURED"
+                record["error"] = unconfigured_msg
+                record["paused"] = True
+                db.save_video_record(video_id, record)
+                record_stage_failed(video_id, "rendering_video", unconfigured_msg, db_client=db)
+                release_slot_worker_lock(slot_index, video_id)
+                return record
             record = db.get_video_record(video_id) or record
             record["local_video_path"] = str(output_mp4)
             record["production_status"] = "RENDERED"
@@ -495,9 +568,6 @@ def produce_single_video(
         record["qc_results"] = qc_report.to_dict()
         if qc_report.checks.get("duration_sec"):
             record["duration_sec"] = qc_report.checks["duration_sec"]
-
-        if qc_report.passed:
-            record_stage_complete(video_id, "running_qc", db_client=db)
 
         if not qc_report.passed:
             original_issues = list(qc_report.issues)
@@ -664,6 +734,7 @@ def produce_single_video(
         # 6. Record Local MP4 Storage URI
         record["storage_uri"] = str(output_mp4)
         db.save_video_record(video_id, {k: v for k, v in record.items() if k not in ("stage_progress", "lifecycle_stage")})
+        record_stage_complete(video_id, "running_qc", db_client=db)
         latest_final = db.get_video_record(video_id)
         if isinstance(latest_final, dict):
             record["stage_progress"] = latest_final.get("stage_progress", record.get("stage_progress"))
@@ -733,26 +804,18 @@ def run_daily_generation(
             return {
                 "topic": rec.get("topic"),
                 "category": rec.get("category", "Science"),
-                "style": rec.get("style", "inside-out"),
+                "style": rec.get("style", "cartoon_3d"),
                 "sources": rec.get("sources", []),
                 "claims": rec.get("claims", []),
+                "research_dossier": rec.get("research_dossier", {}),
                 "scores": rec.get("scores", {}),
             }
         return None
 
-    creator_choice, creator_payload = ("automatic", None)
-    if need_s2:
-        try:
-            from curiosity_engine.creator_series.pipeline_integration import get_slot2_content_choice
-            creator_choice, creator_payload = get_slot2_content_choice()
-        except Exception as e:
-            logger.warning(f"Creator series choice check failed ({e}); falling back to automatic.")
-            creator_choice, creator_payload = ("automatic", None)
-
     t1_info = _topic_from_record(v1_record) if (need_s1 and not force_rebuild) else None
-    t2_info = _topic_from_record(v2_record) if (need_s2 and not force_rebuild and creator_choice != "creator_series") else None
+    t2_info = _topic_from_record(v2_record) if (need_s2 and not force_rebuild) else None
 
-    if (need_s1 and not t1_info) or (need_s2 and not t2_info and creator_choice != "creator_series"):
+    if (need_s1 and not t1_info) or (need_s2 and not t2_info):
         used_today = set()
         if v1_record and v1_record.get("topic"):
             used_today.add(v1_record["topic"])
@@ -761,7 +824,7 @@ def run_daily_generation(
 
         for s_idx, v_id, needs_pick in (
             (1, video_1_id, need_s1 and not t1_info),
-            (2, video_2_id, need_s2 and not t2_info and creator_choice != "creator_series"),
+            (2, video_2_id, need_s2 and not t2_info),
         ):
             if needs_pick:
                 if not db.get_video_record(v_id):
@@ -777,7 +840,7 @@ def run_daily_generation(
         discovered_1, discovered_2 = select_daily_topics(target_date, exclude_topics=used_today)
         if need_s1 and not t1_info:
             t1_info = discovered_1
-        if need_s2 and not t2_info and creator_choice != "creator_series":
+        if need_s2 and not t2_info:
             t2_info = discovered_2 if discovered_2["topic"] != (t1_info or {}).get("topic") else discovered_1
 
     # Produce Video 1 independently if needed
@@ -790,19 +853,9 @@ def run_daily_generation(
             logger.error(f"Slot 1 production failed: {e}. Proceeding independently with remaining slots.")
             v1_record = db.get_video_record(video_1_id)
 
-    # Produce Video 2 independently if needed (prioritizes Creator Series if active)
+    # Automatic Studio always produces both daily videos. Creator episodes use their own queue.
     if need_s2:
-        if creator_choice == "creator_series" and creator_payload:
-            active_s, next_e = creator_payload
-            try:
-                from curiosity_engine.creator_series.pipeline_integration import produce_creator_series_slot
-                v2_record = produce_creator_series_slot(
-                    video_2_id, active_s, next_e, target_date=target_date, force_rebuild=force_rebuild
-                )
-            except Exception as e:
-                logger.error(f"Slot 2 Creator Series production failed: {e}. Halting sequence advancement.")
-                v2_record = db.get_video_record(video_2_id)
-        elif t2_info:
+        if t2_info:
             try:
                 v2_record = produce_single_video(
                     video_2_id, t2_info, slot_index=2, target_date=target_date, force_rebuild=force_rebuild
@@ -997,6 +1050,15 @@ def run_slot_publishing(
     effective_yt_mode = (force_yt_mode or YOUTUBE_PUBLISHING_MODE or "simulation").strip().lower()
     effective_ig_mode = (force_ig_mode or INSTAGRAM_PUBLISHING_MODE or "disabled").strip().lower()
 
+    if record.get("is_creator_series") and effective_yt_mode == "live":
+        allowed_rights = {"OWNED", "LICENSED", "PUBLIC_DOMAIN"}
+        rights = str(record.get("rights_status") or "UNVERIFIED_EVALUATION_ONLY").upper()
+        if rights not in allowed_rights:
+            raise PermissionError(
+                f"Creator Series rights status '{rights}' blocks live YouTube publishing. "
+                "Verify OWNED, LICENSED, or PUBLIC_DOMAIN rights first."
+            )
+
     # Check YouTube duplicate status:
     # A video with a real YouTube ID must NEVER be uploaded again.
     has_real_yt = is_real_youtube_upload(record)
@@ -1114,17 +1176,6 @@ def run_slot_publishing(
                 record_stage_complete(video_id, "scheduling_publication", db_client=db)
             yt_uploaded_now = True
 
-            if record.get("is_creator_series"):
-                try:
-                    from curiosity_engine.creator_series.series_db import series_db
-                    series_db.mark_episode_published(
-                        series_id=record.get("series_id"),
-                        episode_id=record.get("episode_id"),
-                        youtube_id=record.get("youtube_upload_id"),
-                        actual_publish_time=record.get("youtube_published_at"),
-                    )
-                except Exception as ex:
-                    logger.error(f"Failed to record creator series publication: {ex}")
         except Exception as yt_err:
             if record.get("is_creator_series"):
                 try:

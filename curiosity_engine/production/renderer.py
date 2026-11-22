@@ -6,26 +6,104 @@ validates rendered MP4 container/stream integrity before completion.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import shutil
 import subprocess
 import sys
 import time
-import wave
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from curiosity_engine.config import get_chrome_executable
-
 logger = logging.getLogger("curiosity_engine.renderer")
 
-CHECK_TIMEOUT_SEC = 600
-CUES_TIMEOUT_SEC = 180
-MIX_TIMEOUT_SEC = 180
-RENDER_TIMEOUT_SEC = 2400
-RENDER_STALL_TIMEOUT_SEC = 600
 MIN_VALID_MP4_BYTES = 100_000
+
+
+def resolve_ffprobe_executable() -> Optional[str]:
+    configured = os.environ.get("CURIOLOOP_FFPROBE", "").strip()
+    if configured:
+        resolved = shutil.which(configured) or (configured if Path(configured).is_file() else None)
+        if resolved:
+            return resolved
+    on_path = shutil.which("ffprobe")
+    if on_path:
+        return on_path
+    ffmpeg = shutil.which(os.environ.get("CURIOLOOP_FFMPEG", "ffmpeg"))
+    if ffmpeg:
+        sibling = Path(ffmpeg).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        if sibling.is_file():
+            return str(sibling)
+    return None
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _optional_project_asset_sha(project_dir: Path, relative: str) -> Optional[str]:
+    path = project_dir / relative
+    if path.is_symlink():
+        raise OSError(f"Project asset is a symbolic link: {relative}")
+    return _sha256(path) if path.is_file() else None
+
+
+def render_manifest_path(mp4_path: Path) -> Path:
+    return mp4_path.with_suffix(mp4_path.suffix + ".curioloop.json")
+
+
+def current_render_matches(mp4_path: Path, project_dir: Path) -> bool:
+    """Only reuse media when its exact project script and file hash match the manifest."""
+    try:
+        manifest_path = render_manifest_path(mp4_path)
+        marker_path = project_dir / ".curioloop_project.json"
+        script_path = project_dir / "script.json"
+        if any(path.is_symlink() for path in (mp4_path, manifest_path, marker_path, script_path)) or project_dir.is_symlink():
+            return False
+        project_hash = _sha256(project_dir / "script.json")
+        project = json.loads(marker_path.read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        audio_hash = _optional_project_asset_sha(project_dir, "data/mix.wav")
+        lines_hash = _optional_project_asset_sha(project_dir, "data/lines.json")
+        words_hash = _optional_project_asset_sha(project_dir, "data/words.json")
+        return bool(mp4_path.is_file() and project.get("project_id") == project_dir.name
+                    and manifest.get("project_id") == project.get("project_id")
+                    and manifest.get("renderer_version") == project.get("renderer_version")
+                    and manifest.get("project_script_sha256") == project_hash
+                    and manifest.get("source_audio_sha256") == audio_hash
+                    and manifest.get("source_lines_sha256") == lines_hash
+                    and manifest.get("source_words_sha256") == words_hash
+                    and manifest.get("mp4_sha256") == _sha256(mp4_path))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def write_render_manifest(mp4_path: Path, project_dir: Path, metadata: Dict[str, Any]) -> None:
+    """Atomically bind a verified MP4 to the exact normalized project script."""
+    marker_path = project_dir / ".curioloop_project.json"
+    final = render_manifest_path(mp4_path)
+    if any(path.is_symlink() for path in (mp4_path, marker_path, final)) or project_dir.is_symlink():
+        raise RuntimeError("Render output, manifest, or project marker cannot be a symbolic link.")
+    project = json.loads(marker_path.read_text(encoding="utf-8"))
+    if project.get("project_id") != project_dir.name:
+        raise RuntimeError("Render project ownership marker does not match its immutable project directory.")
+    manifest = {"project_id": project["project_id"], "renderer_version": project.get("renderer_version"),
+                "project_script_sha256": _sha256(project_dir / "script.json"), "mp4_sha256": _sha256(mp4_path),
+                "source_audio_sha256": _optional_project_asset_sha(project_dir, "data/mix.wav"),
+                "source_lines_sha256": _optional_project_asset_sha(project_dir, "data/lines.json"),
+                "source_words_sha256": _optional_project_asset_sha(project_dir, "data/words.json"),
+                "size_bytes": mp4_path.stat().st_size, "duration_sec": metadata.get("duration"),
+                "width": metadata.get("width"), "height": metadata.get("height"), "fps": metadata.get("fps"),
+                "verified_at": time.time()}
+    staged = final.with_name(f".{final.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    staged.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    os.replace(staged, final)
 
 
 def _win_creation_flags() -> int:
@@ -33,6 +111,101 @@ def _win_creation_flags() -> int:
     if sys.platform == "win32":
         return 0x08000000
     return 0
+
+
+def _terminate_subprocess_tree(proc: subprocess.Popen) -> None:
+    """Stop a timed-out worker and its descendants, including headless browsers."""
+    if sys.platform == "win32" and proc.poll() is None:
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                creationflags=_win_creation_flags(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def _run_subprocess_logged(
+    cmd: list[str],
+    cwd: Path,
+    env: Dict[str, str],
+    log_path: Path,
+    timeout_sec: int,
+    step_name: str,
+    stall_timeout_sec: Optional[int] = None,
+) -> None:
+    """Run a worker with a bounded timeout, stall detection, and process-tree cleanup.
+
+    Kept as a small utility for existing render orchestration and its watchdog tests.
+    The Cartoon 3D capture path uses the same timeout and cleanup rules in its engine.
+    """
+    timeout = max(1.0, float(timeout_sec))
+    stall_timeout = max(1.0, float(stall_timeout_sec)) if stall_timeout_sec is not None else None
+    if log_path.is_symlink():
+        raise RuntimeError(f"Refusing to follow a symbolic-link subprocess log: {log_path}")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8") as log_file:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(cwd),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            creationflags=_win_creation_flags(),
+        )
+        started = time.monotonic()
+        last_activity = started
+        last_size = -1
+        poll_interval = min(1.0, max(0.1, min(timeout, stall_timeout or timeout) / 10.0))
+        failure: Optional[str] = None
+        while proc.poll() is None:
+            time.sleep(poll_interval)
+            now = time.monotonic()
+            try:
+                size = log_path.stat().st_size
+            except OSError:
+                size = last_size
+            if size != last_size:
+                last_size = size
+                last_activity = now
+            if stall_timeout is not None and now - last_activity >= stall_timeout:
+                failure = f"{step_name} stalled with no progress for {stall_timeout:g}s"
+                break
+            if now - started >= timeout:
+                failure = f"{step_name} timed out after {timeout:g}s"
+                break
+        if failure:
+            _terminate_subprocess_tree(proc)
+        else:
+            proc.wait()
+
+    if failure:
+        try:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+        except OSError:
+            tail = ""
+        logger.error("%s: %s\n%s", step_name, failure, tail)
+        raise RuntimeError(f"{failure}: {tail}")
+    if proc.returncode != 0:
+        try:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+        except OSError:
+            tail = ""
+        logger.error("%s failed (exit=%s):\n%s", step_name, proc.returncode, tail)
+        raise RuntimeError(f"{step_name} failed (exit={proc.returncode}): {tail}")
 
 
 def _progress_call(fn_name: str, *args: Any, **kwargs: Any) -> None:
@@ -55,6 +228,8 @@ def validate_rendered_mp4(
     """
     if not mp4_path.exists() or not mp4_path.is_file():
         raise FileNotFoundError(f"Rendered MP4 missing: {mp4_path}")
+    if mp4_path.is_symlink():
+        raise RuntimeError(f"Rendered MP4 path is a symbolic link and cannot be validated: {mp4_path}")
 
     size_bytes = mp4_path.stat().st_size
     if size_bytes < min_bytes:
@@ -62,11 +237,14 @@ def validate_rendered_mp4(
             f"Rendered MP4 '{mp4_path.name}' is partial/corrupt ({size_bytes} bytes < {min_bytes} min bytes)."
         )
 
+    ffprobe = resolve_ffprobe_executable()
+    if not ffprobe:
+        raise RuntimeError("FFprobe is missing; install it beside FFmpeg or set CURIOLOOP_FFPROBE.")
     cmd = [
-        "ffprobe",
+        ffprobe,
         "-v", "error",
         "-show_entries", "format=duration,size",
-        "-show_entries", "stream=codec_name,codec_type,width,height",
+        "-show_entries", "stream=codec_name,codec_type,width,height,r_frame_rate,avg_frame_rate",
         "-of", "json",
         str(mp4_path),
     ]
@@ -114,145 +292,22 @@ def validate_rendered_mp4(
                 f"Rendered MP4 '{mp4_path.name}' duration {duration:.2f}s does not match expected {expected_duration:.2f}s (diff {diff:.2f}s)."
             )
 
+    fps_text = video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate") or "0/1"
+    try:
+        numerator, denominator = fps_text.split("/", 1)
+        fps = float(numerator) / float(denominator)
+    except (ValueError, ZeroDivisionError):
+        fps = 0.0
+
     return {
         "size_bytes": size_bytes,
         "duration": duration,
         "width": int(video_stream.get("width", 0)),
         "height": int(video_stream.get("height", 0)),
+        "fps": fps,
         "video_codec": video_stream.get("codec_name"),
         "audio_codec": audio_stream.get("codec_name"),
     }
-
-
-def _cleanup_partial_renders(project_dir: Path, output_mp4: Path, target_name: str) -> None:
-    """Remove partial or corrupt temporary render files."""
-    renders_dir = project_dir / "renders"
-    candidates = [
-        renders_dir / f".part_{target_name}",
-        output_mp4.with_suffix(".tmp.mp4"),
-    ]
-    # Also check if existing renders/<name>.mp4 is corrupt; remove it if invalid so re-render starts clean
-    render_target = renders_dir / target_name
-    if render_target.exists():
-        try:
-            validate_rendered_mp4(render_target)
-        except Exception:
-            candidates.append(render_target)
-
-    for cand in candidates:
-        if cand.exists():
-            try:
-                cand.unlink()
-                logger.info(f"Cleaned partial/corrupt render artifact: {cand}")
-            except Exception as e:
-                logger.warning(f"Could not delete partial render {cand}: {e}")
-
-
-def _is_valid_mix_wav(mix_path: Path, expected_dur: float) -> bool:
-    """Return True if data/mix.wav exists, parses cleanly, and matches expected duration."""
-    if not mix_path.exists() or mix_path.stat().st_size < 10_000:
-        return False
-    try:
-        with wave.open(str(mix_path), "rb") as wf:
-            frames = wf.getnframes()
-            rate = wf.getframerate()
-            if rate <= 0:
-                return False
-            wav_dur = frames / float(rate)
-            return abs(wav_dur - expected_dur) <= max(1.5, expected_dur * 0.1)
-    except Exception:
-        return False
-
-
-def _terminate_process_tree(proc: subprocess.Popen) -> None:
-    """Best-effort termination of a stalled/timed-out subprocess and its children (e.g. Chrome)."""
-    try:
-        if sys.platform == "win32" and proc.pid:
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=10,
-                creationflags=_win_creation_flags(),
-            )
-    except Exception:
-        pass
-    try:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait(timeout=5)
-    except Exception:
-        pass
-
-
-def _run_subprocess_logged(
-    cmd: list[str],
-    cwd: Path,
-    env: Dict[str, str],
-    log_path: Path,
-    timeout_sec: int,
-    step_name: str,
-    stall_timeout_sec: Optional[int] = None,
-) -> None:
-    """Execute a subprocess writing combined stdout/stderr to log_path, enforcing
-    overall timeout, optional zero-progress stall timeout, and clean process-tree teardown.
-    """
-    with open(log_path, "w", encoding="utf-8") as lf:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(cwd),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=lf,
-            stderr=subprocess.STDOUT,
-            creationflags=_win_creation_flags(),
-        )
-        start_at = time.monotonic()
-        last_activity_at = start_at
-        last_size = -1
-        poll_interval = min(
-            2.0,
-            max(0.1, min(timeout_sec, stall_timeout_sec or timeout_sec) / 10.0),
-        )
-        while proc.poll() is None:
-            time.sleep(poll_interval)
-            now = time.monotonic()
-            try:
-                cur_size = log_path.stat().st_size if log_path.exists() else 0
-            except OSError:
-                cur_size = last_size
-            if cur_size != last_size:
-                last_size = cur_size
-                last_activity_at = now
-
-            if stall_timeout_sec and (now - last_activity_at) >= stall_timeout_sec:
-                _terminate_process_tree(proc)
-                tail = (
-                    log_path.read_text(encoding="utf-8", errors="replace")[-1000:]
-                    if log_path.exists()
-                    else ""
-                )
-                logger.error(f"{step_name} stalled with no log progress for {stall_timeout_sec}s.\n{tail}")
-                raise RuntimeError(
-                    f"{step_name} stalled with no progress for {stall_timeout_sec}s: {tail}"
-                )
-
-            if (now - start_at) >= timeout_sec:
-                _terminate_process_tree(proc)
-                tail = (
-                    log_path.read_text(encoding="utf-8", errors="replace")[-1000:]
-                    if log_path.exists()
-                    else ""
-                )
-                logger.error(f"{step_name} timed out after {timeout_sec}s.\n{tail}")
-                raise RuntimeError(f"{step_name} timed out after {timeout_sec}s: {tail}")
-
-    if proc.returncode != 0:
-        err_text = ""
-        if log_path.exists():
-            err_text = log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
-        logger.error(f"{step_name} failed (exit={proc.returncode}):\n{err_text}")
-        raise RuntimeError(f"{step_name} failed (exit={proc.returncode}): {err_text}")
 
 
 def render_project_video(
@@ -261,177 +316,79 @@ def render_project_video(
     resume: bool = True,
     force_rebuild: bool = False,
 ) -> Path:
-    """Execute render pipeline: check -> cues -> mix -> video MP4 -> validate -> atomic copy.
-    When resume=True and not force_rebuild, safely reuses verified pre-render artifacts
-    (CHECK OK, valid cues.json, valid mix.wav, or already-valid renders/<name>.mp4).
+    """Execute render pipeline via the active VisualRenderingEngine.
+    When resume=True and not force_rebuild, safely reuses verified pre-render artifacts.
+    If no visual engine is configured, raises GenerationEngineNotConfiguredError.
     """
-    env = os.environ.copy()
-    chrome_bin = get_chrome_executable()
-    env["CHROME"] = chrome_bin
-    env["SOFTWARE_GL"] = "1"
+    from curiosity_engine.generation import (
+        GenerationEngineNotConfiguredError,
+        engine_registry,
+    )
 
     output_mp4.parent.mkdir(parents=True, exist_ok=True)
+    if output_mp4.exists() and not force_rebuild and not current_render_matches(output_mp4, project_dir):
+        raise RuntimeError(
+            f"Existing output {output_mp4} is not bound to this project script; it was preserved. "
+            "Choose a new output name or explicitly request a rebuild."
+        )
     relative_render_dest = f"renders/{output_mp4.name}"
     rendered_file = project_dir / relative_render_dest
-    log_dir = project_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Read duration from data/lines.json
+    # Read duration from data/lines.json if present
     lines_json_path = project_dir / "data" / "lines.json"
-    if not lines_json_path.exists():
-        raise FileNotFoundError(f"Missing lines.json in {project_dir}")
-    with open(lines_json_path, "r", encoding="utf-8") as f:
-        dur = float(json.load(f)["duration"])
+    dur = None
+    if lines_json_path.exists():
+        try:
+            with open(lines_json_path, "r", encoding="utf-8") as f:
+                dur = float(json.load(f)["duration"])
+        except Exception:
+            pass
 
-    # Clean partial staging/corrupt files before proceeding
-    _cleanup_partial_renders(project_dir, output_mp4, output_mp4.name)
+    # Reuse only a file bound to this exact normalized script and an unchanged file hash.
+    if resume and not force_rebuild and current_render_matches(output_mp4, project_dir):
+        try:
+            meta = validate_rendered_mp4(output_mp4, expected_duration=dur)
+            logger.info(
+                f"Reusing already-valid rendered MP4 at {output_mp4} "
+                f"({meta['size_bytes']:,} bytes, {meta['duration']:.2f}s)."
+            )
+            return output_mp4
+        except Exception:
+            pass
 
-    # Fast-path resume if rendered_file already exists AND passes strict MP4 validation
-    if resume and not force_rebuild and rendered_file.exists():
+    if resume and not force_rebuild and current_render_matches(rendered_file, project_dir):
         try:
             meta = validate_rendered_mp4(rendered_file, expected_duration=dur)
             logger.info(
                 f"Reusing already-valid rendered MP4 at {rendered_file} "
                 f"({meta['size_bytes']:,} bytes, {meta['duration']:.2f}s)."
             )
-            staging_mp4 = output_mp4.with_suffix(".tmp.mp4")
+            staging_mp4 = output_mp4.with_name(f".{output_mp4.stem}.{os.getpid()}.{uuid.uuid4().hex}.tmp.mp4")
             if rendered_file.resolve() != output_mp4.resolve():
-                shutil.copy2(rendered_file, staging_mp4)
-                validate_rendered_mp4(staging_mp4, expected_duration=dur)
-                staging_mp4.replace(output_mp4)
+                try:
+                    shutil.copy2(rendered_file, staging_mp4)
+                    copied_meta = validate_rendered_mp4(staging_mp4, expected_duration=dur)
+                    os.replace(staging_mp4, output_mp4)
+                    write_render_manifest(output_mp4, project_dir, copied_meta)
+                finally:
+                    staging_mp4.unlink(missing_ok=True)
             return output_mp4
         except Exception as e:
             logger.info(f"Existing rendered file not reusable ({e}); re-rendering.")
 
-    # Verify storyboard approval before full rendering
-    from curiosity_engine.production.storyboard_approval import StoryboardApprovalManager
-    approved, reason = StoryboardApprovalManager.is_approved(project_dir)
-    if not approved:
-        sb_path = project_dir / "storyboard.json"
-        if sb_path.exists():
-            try:
-                sb_data = json.loads(sb_path.read_text(encoding="utf-8"))
-                if sb_data.get("semantic_qc", {}).get("passed", False):
-                    StoryboardApprovalManager.approve_storyboard(project_dir, reviewer="SemanticQC_Gate")
-                    approved = True
-            except Exception:
-                pass
-        if not approved:
-            raise RuntimeError(f"Storyboard pre-render gate blocked {project_dir.name}: {reason}")
+    engine = engine_registry.get_visual_engine()
+    if not engine.is_configured():
+        raise GenerationEngineNotConfiguredError(
+            "Visual rendering engine is not configured. "
+            "Please register a VisualRenderingEngine with engine_registry."
+        )
 
-    # 1. Capture Check (reuse only if log confirms CHECK OK)
-    vid_id = project_dir.name
-    _progress_call("record_stage_start", vid_id, "preparing_visuals")
-    check_log = log_dir / "check.log"
-    check_reusable = (
-        resume
-        and not force_rebuild
-        and check_log.exists()
-        and "CHECK OK" in check_log.read_text(encoding="utf-8", errors="replace")
-        and "CHECK FAILED" not in check_log.read_text(encoding="utf-8", errors="replace")
+    rendered = engine.render_video(
+        project_dir=project_dir,
+        output_mp4=output_mp4,
+        resume=resume,
+        force_rebuild=force_rebuild,
     )
-    if check_reusable:
-        logger.info(f"Visual timeline previously verified (CHECK OK in {check_log}); reusing.")
-    else:
-        logger.info(f"Checking visual timeline in {project_dir}...")
-        _run_subprocess_logged(
-            ["node", "tools/capture.mjs", "check"],
-            cwd=project_dir,
-            env=env,
-            log_path=check_log,
-            timeout_sec=CHECK_TIMEOUT_SEC,
-            step_name="Visual check",
-        )
-        check_out = check_log.read_text(encoding="utf-8", errors="replace")
-        if "CHECK FAILED" in check_out or "CHECK OK" not in check_out:
-            raise RuntimeError(f"Visual check failed:\n{check_out[-1500:]}")
-        logger.info("Visual timeline verified (CHECK OK).")
-    _progress_call("record_stage_checkpoint", vid_id, "preparing_visuals", 0.55, "Visual timeline verified")
-
-    # 2. Extract sound cues
-    cues_json_path = project_dir / "data" / "cues.json"
-    cues_reusable = False
-    if resume and not force_rebuild and cues_json_path.exists():
-        try:
-            cues_data = json.loads(cues_json_path.read_text(encoding="utf-8"))
-            if isinstance(cues_data.get("cues"), list) and abs(float(cues_data.get("duration", 0)) - dur) < 1.0:
-                cues_reusable = True
-        except Exception:
-            cues_reusable = False
-
-    if cues_reusable:
-        logger.info("Valid data/cues.json already exists; reusing.")
-    else:
-        logger.info("Extracting procedural audio cues...")
-        _run_subprocess_logged(
-            ["node", "tools/capture.mjs", "cues"],
-            cwd=project_dir,
-            env=env,
-            log_path=log_dir / "cues.log",
-            timeout_sec=CUES_TIMEOUT_SEC,
-            step_name="Cue extraction",
-        )
-    _progress_call("record_stage_checkpoint", vid_id, "preparing_visuals", 0.75, "Audio cues extracted")
-
-    # 3. Procedural audio mix
-    mix_wav_path = project_dir / "data" / "mix.wav"
-    if resume and not force_rebuild and _is_valid_mix_wav(mix_wav_path, dur):
-        logger.info("Valid data/mix.wav already exists; reusing.")
-    else:
-        logger.info("Mixing audio bed, sound cues, and narration...")
-        _run_subprocess_logged(
-            [sys.executable, "tools/mix.py", "."],
-            cwd=project_dir,
-            env=env,
-            log_path=log_dir / "mix.log",
-            timeout_sec=MIX_TIMEOUT_SEC,
-            step_name="Audio mix",
-        )
-        if not _is_valid_mix_wav(mix_wav_path, dur):
-            raise RuntimeError(f"Audio mix completed without producing a valid mix.wav at {mix_wav_path}")
-    _progress_call("record_stage_checkpoint", vid_id, "preparing_visuals", 0.92, "Audio mix ready")
-    _progress_call("record_stage_complete", vid_id, "preparing_visuals")
-
-    # 4. Stream frames to FFmpeg
-    total_frames = max(1, int(round(dur * 30)))
-    _progress_call(
-        "record_stage_start",
-        vid_id,
-        "rendering_video",
-        detail={"expected_duration_sec": dur, "total_frames": total_frames},
-    )
-    logger.info(f"Rendering {dur:.2f}s video ({output_mp4.name})...")
-    staging_mp4 = output_mp4.with_suffix(".tmp.mp4")
-    effective_render_timeout = max(RENDER_TIMEOUT_SEC, int(dur * 55) + 300)
-    try:
-        _run_subprocess_logged(
-            ["node", "tools/capture.mjs", "video", relative_render_dest, "0", str(dur)],
-            cwd=project_dir,
-            env=env,
-            log_path=log_dir / "render.log",
-            timeout_sec=effective_render_timeout,
-            step_name="Video render",
-            stall_timeout_sec=RENDER_STALL_TIMEOUT_SEC,
-        )
-
-        # Strict MP4 validation before copying/replacing destination
-        meta = validate_rendered_mp4(rendered_file, expected_duration=dur)
-        if rendered_file.resolve() != output_mp4.resolve():
-            shutil.copy2(rendered_file, staging_mp4)
-            validate_rendered_mp4(staging_mp4, expected_duration=dur)
-            staging_mp4.replace(output_mp4)
-    except Exception:
-        if staging_mp4.exists():
-            try:
-                staging_mp4.unlink()
-            except Exception:
-                pass
-        _cleanup_partial_renders(project_dir, output_mp4, output_mp4.name)
-        raise
-
-    _progress_call("record_stage_complete", vid_id, "rendering_video", frames_count=total_frames)
-    logger.info(
-        f"Video successfully rendered & validated: {output_mp4} "
-        f"({meta['size_bytes']:,} bytes, {meta['duration']:.2f}s, {meta['width']}x{meta['height']})."
-    )
-    return output_mp4
+    meta = validate_rendered_mp4(rendered, expected_duration=dur)
+    write_render_manifest(rendered, project_dir, meta)
+    return rendered

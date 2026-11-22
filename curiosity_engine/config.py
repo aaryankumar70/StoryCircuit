@@ -21,12 +21,12 @@ if ENV_FILE.exists():
         _LAST_ENV_STATE = (str(ENV_FILE), ENV_FILE.stat().st_mtime)
     except OSError:
         _LAST_ENV_STATE = None
-MODELS_DIR = PROJECT_ROOT / "models"
+MODELS_DIR = Path(os.environ.get("CURIOLOOP_MODELS_DIR") or PROJECT_ROOT / "models").resolve()
 KOKORO_DIR = MODELS_DIR / "kokoro"
 WHISPER_DIR = MODELS_DIR / "whisper-small"
-OUTPUT_DIR = PROJECT_ROOT / "output"
+OUTPUT_DIR = Path(os.environ.get("CURIOLOOP_OUTPUT_DIR") or PROJECT_ROOT / "output").resolve()
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path(os.environ.get("CURIOLOOP_DATA_DIR") or PROJECT_ROOT / "data").resolve()
 
 for directory in [OUTPUT_DIR, DATA_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
@@ -44,7 +44,7 @@ MAX_TRUE_PEAK_DB = -0.5
 # Video Geometry & Timing Constraints
 MAX_DAILY_VIDEOS = 2
 MIN_DURATION_SEC = 20.0
-MAX_DURATION_SEC = 60.0
+MAX_DURATION_SEC = 180.0
 TARGET_DURATION_MIN_SEC = 25.0
 TARGET_DURATION_MAX_SEC = 45.0
 VIRAL_TARGET_DURATION_MIN_SEC = 42.0
@@ -79,25 +79,29 @@ CONTENT_PILLARS = [
     "Space",
 ]
 
-# Visual Style Mappings
+# Visual Style Mapping
+# Generation V1 has one supported visual renderer; narrative profiles are
+# selected by production.visual_style_selector from the script and category.
 STYLE_MAPPINGS = {
-    "MYSTERY": "cinematic-hybrid",
-    "HISTORY": "cinematic-hybrid",
-    "SPACE": "cinematic-hybrid",
-    "Mysteries": "cinematic-hybrid",
-    "History": "cinematic-hybrid",
-    "Space": "cinematic-hybrid",
-    "Unexplained events": "cinematic-hybrid",
-    "Survival": "cinematic-hybrid",
-    "Interesting discoveries": "cinematic-hybrid",
+    "MYSTERY": "cartoon_3d",
+    "HISTORY": "cartoon_3d",
+    "SPACE": "cartoon_3d",
+    "Mysteries": "cartoon_3d",
+    "History": "cartoon_3d",
+    "Space": "cartoon_3d",
+    "Unexplained events": "cartoon_3d",
+    "Survival": "cartoon_3d",
+    "Interesting discoveries": "cartoon_3d",
 }
 
-# Voice Configuration (Kokoro ONNX 82M)
+# Kept for existing voice selection consumers; these are voice profiles, not renderers.
 VOICE_MAP = {
-    "cinematic-hybrid": "bm_george",   # Deep, warm, resonant, authoritative documentary narrator
-    "inside-out": "am_michael",        # US male, steady explainer
-    "paper-atlas": "bm_george",        # UK male, documentary
-    "stick-story": "am_puck",          # US male, lively & engaging
+    "cartoon_3d": "bm_george",
+    "historical": "bm_george",
+    "mystery": "am_michael",
+    "space": "am_michael",
+    "science": "am_michael",
+    "fiction": "am_puck",
 }
 
 # Gemini API Settings (Free Tier: 15 RPM / 1M TPM)
@@ -278,6 +282,10 @@ def get_hidden_subprocess_kwargs() -> Dict[str, Any]:
 def get_chrome_executable() -> str:
     """Find available Chrome/Chromium/Edge binary."""
     for path in DEFAULT_CHROME_PATHS:
-        if path and Path(path).exists():
-            return str(path)
+        if path and Path(path).is_file():
+            return str(Path(path).resolve())
+        if path and Path(path).is_dir() and Path(path).name.lower().startswith("microsoftedge"):
+            for candidate in Path(path).glob("**/msedge.exe"):
+                if candidate.is_file():
+                    return str(candidate.resolve())
     return "google-chrome"

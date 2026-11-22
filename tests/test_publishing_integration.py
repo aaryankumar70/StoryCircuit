@@ -135,8 +135,9 @@ def test_token_manager_revocation_alert(tmp_path):
 # -----------------------------------------------------------------------------
 # 4. YouTube Publisher Dedicated Quota & No-Silent-Mock Rule
 # -----------------------------------------------------------------------------
-def test_youtube_publisher_simulation_mode():
-    sample_video = OUTPUT_DIR / "video_20261109_slot1.mp4"
+def test_youtube_publisher_simulation_mode(tmp_path):
+    sample_video = tmp_path / "simulation-fixture.mp4"
+    sample_video.write_bytes(b"offline video fixture")
     publisher = YouTubePublisher(mode="simulation")
 
     result = publisher.upload_short(
@@ -151,8 +152,9 @@ def test_youtube_publisher_simulation_mode():
     assert "#Shorts" in result["title"]
 
 
-def test_youtube_publisher_live_mode_rejects_missing_credentials():
-    sample_video = OUTPUT_DIR / "video_20261109_slot1.mp4"
+def test_youtube_publisher_live_mode_rejects_missing_credentials(tmp_path):
+    sample_video = tmp_path / "live-gate-fixture.mp4"
+    sample_video.write_bytes(b"offline video fixture")
     # Live mode with empty credentials must RAISE YouTubeAuthError, NEVER return simulated success!
     publisher = YouTubePublisher(
         client_id="",
@@ -170,8 +172,9 @@ def test_youtube_publisher_live_mode_rejects_missing_credentials():
     assert "OAuth credentials are not configured" in str(exc_info.value)
 
 
-def test_youtube_publisher_error_categorization():
-    sample_video = OUTPUT_DIR / "video_20261109_slot1.mp4"
+def test_youtube_publisher_error_categorization(tmp_path):
+    sample_video = tmp_path / "error-fixture.mp4"
+    sample_video.write_bytes(b"offline video fixture")
     publisher = YouTubePublisher(
         client_id="cid",
         client_secret="sec",

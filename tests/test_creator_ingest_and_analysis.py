@@ -24,6 +24,13 @@ from curiosity_engine.dashboard.app import app
 
 client = TestClient(app)
 
+
+@pytest.fixture(autouse=True)
+def isolate_creator_upload_storage(monkeypatch, tmp_path):
+    """Keep upload tests away from the user's production story archive."""
+    monkeypatch.setattr(CreatorStudioEngine, "UPLOAD_DIR", tmp_path / "creator_uploads")
+
+
 SAMPLE_CREATOR_STORY = (
     "# The Hollow Road\n\n"
     "I was only nine when our school bus broke down on the mountain pass during the autumn excursion. "
@@ -71,7 +78,8 @@ def test_ingest_md_file(tmp_path: Path):
     result = CreatorStudioEngine.ingest_document(md_file, file_type="md")
     assert result["title"] == "Whispers in the Wall"
     assert "scratching behind the plaster" in result["raw_text"]
-    assert result["word_count"] == 14
+    assert result["raw_text"] == "Something was scratching behind the plaster at 3 AM."
+    assert result["word_count"] == 9
     assert result["file_type"] == "md"
 
 

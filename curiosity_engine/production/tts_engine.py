@@ -8,12 +8,13 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.io import wavfile
 
-from curiosity_engine.config import KOKORO_DIR
+from curiosity_engine.config import KOKORO_DIR, MAX_DURATION_SEC, MAX_WORD_COUNT
+from curiosity_engine.generation.resource_lock import sequential_resource_stage
 
 logger = logging.getLogger("curiosity_engine.tts")
 
@@ -50,6 +51,7 @@ def silences(x: np.ndarray, thr: float = 0.012, min_len: float = 0.06) -> List[T
     return out
 
 
+@sequential_resource_stage
 def synthesize_narration(project_dir: Path) -> Path:
     """Read script.json in project_dir, synthesize narration.wav and data/lines.json."""
     script_path = project_dir / "script.json"
@@ -58,6 +60,14 @@ def synthesize_narration(project_dir: Path) -> Path:
 
     with open(script_path, "r", encoding="utf-8") as f:
         script = json.load(f)
+    lines = script.get("lines") or []
+    if not isinstance(lines, list) or not lines or len(lines) > 60:
+        raise ValueError("Narration must contain between 1 and 60 lines.")
+    word_count = sum(len(re.findall(r"\b[\w’'-]+\b", str(line.get("text") or ""))) for line in lines if isinstance(line, dict))
+    if word_count > MAX_WORD_COUNT:
+        raise ValueError(f"Narration contains {word_count} words; the Shorts limit is {MAX_WORD_COUNT}.")
+    if any(not isinstance(line, dict) or len(str(line.get("text") or "")) > 1200 for line in lines):
+        raise ValueError("Narration lines must be objects no longer than 1,200 characters.")
 
     # Locate Kokoro ONNX model files
     onnx_path = KOKORO_DIR / "kokoro-v1.0.onnx"
@@ -82,12 +92,17 @@ def synthesize_narration(project_dir: Path) -> Path:
     )
 
     voice = script.get("voice", "am_michael")
-    base_speed = float(script.get("speed", 1.0))
+    try:
+        base_speed = float(script.get("speed", 1.0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Narration speed must be numeric.") from exc
+    if not 0.75 <= base_speed <= 1.35:
+        raise ValueError("Narration speed must stay between 0.75x and 1.35x for intelligible local speech.")
     lang = "en-gb" if voice.startswith("b") else "en-us"
     use_storytelling = bool(script.get("storytelling_delivery", True))
 
     delivery_plan = get_storytelling_delivery_plan(
-        script["lines"], base_speed=base_speed, enable_storytelling=use_storytelling
+        lines, base_speed=base_speed, enable_storytelling=use_storytelling
     )
 
     def say(text: str, custom_speed: Optional[float] = None) -> np.ndarray:
@@ -98,16 +113,18 @@ def synthesize_narration(project_dir: Path) -> Path:
     # Group lines into whole sentences
     groups: List[List[int]] = []
     cur: List[int] = []
-    for i, ln in enumerate(script["lines"]):
+    for i, ln in enumerate(lines):
         cur.append(i)
-        if re.search(r'[.?!]["\')]*$', ln["text"].strip()) or ln.get("break") or i == len(script["lines"]) - 1:
+        if re.search(r'[.?!]["\')]*$', ln["text"].strip()) or ln.get("break") or i == len(lines) - 1:
             groups.append(cur)
             cur = []
 
     lead_sec = float(script.get("lead", 0.45))
+    if not 0 <= lead_sec <= 1.5:
+        raise ValueError("Narration lead padding must be between 0 and 1.5 seconds.")
     out_chunks = [np.zeros(int(lead_sec * SR))]
     t_cursor = len(out_chunks[0]) / SR
-    lines_meta: List[Dict[str, Any]] = [None] * len(script["lines"])
+    lines_meta: List[Dict[str, Any]] = [None] * len(lines)
 
     for g in groups:
         first_idx = g[0]
@@ -121,12 +138,12 @@ def synthesize_narration(project_dir: Path) -> Path:
             out_chunks.append(np.zeros(int(pre_pause * SR)))
             t_cursor += pre_pause
 
-        sentence_text = " ".join(smooth_storytelling_text(script["lines"][i]["text"]) for i in g)
+        sentence_text = " ".join(smooth_storytelling_text(lines[i]["text"]) for i in g)
         x = say(sentence_text, custom_speed=group_speed)
         cuts = [0.0]
 
         if len(g) > 1:
-            line_lens = np.array([len(say(smooth_storytelling_text(script["lines"][i]["text"]), custom_speed=group_speed)) for i in g], dtype=float)
+            line_lens = np.array([len(say(smooth_storytelling_text(lines[i]["text"]), custom_speed=group_speed)) for i in g], dtype=float)
             total_lens = line_lens.sum() if line_lens.sum() > 0 else 1.0
             pauses = silences(x)
             for c in np.cumsum(line_lens)[:-1] / total_lens * len(x) / SR:
@@ -143,22 +160,29 @@ def synthesize_narration(project_dir: Path) -> Path:
             b = n_sec if j == len(g) - 1 else cuts[j + 1][0]
             lines_meta[i] = {
                 "i": i,
-                "text": script["lines"][i]["text"],
+                "text": lines[i]["text"],
                 "start": round(t_cursor + a, 3),
                 "end": round(t_cursor + b, 3),
                 "delivery_mode": delivery_plan[i]["mode"],
                 "speed": delivery_plan[i]["speed"],
             }
 
-        gap_sec = float(delivery_plan[last_idx].get("gap_sec") or script["lines"][last_idx].get("gap", script.get("gap", 0.30)))
+        gap_sec = float(delivery_plan[last_idx].get("gap_sec") or lines[last_idx].get("gap", script.get("gap", 0.30)))
+        if not 0 <= gap_sec <= 1.25:
+            raise ValueError("Narration pauses must be between 0 and 1.25 seconds per spoken group.")
         out_chunks.append(x)
         out_chunks.append(np.zeros(int(gap_sec * SR)))
         t_cursor += n_sec + gap_sec
 
     # Outro padding
     outro_sec = float(script.get("outro", 0.9))
+    if not 0 <= outro_sec <= 2.0:
+        raise ValueError("Narration outro padding must be between 0 and 2 seconds.")
     out_chunks.append(np.zeros(int(outro_sec * SR)))
     total_audio = np.concatenate(out_chunks)
+    duration_sec = len(total_audio) / SR
+    if duration_sec > MAX_DURATION_SEC:
+        raise ValueError(f"Synthesized narration is {duration_sec:.1f}s, above the configured 180-second TTS safety limit.")
 
     data_dir = project_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -168,7 +192,7 @@ def synthesize_narration(project_dir: Path) -> Path:
 
     lines_json_out = data_dir / "lines.json"
     with open(lines_json_out, "w", encoding="utf-8") as f:
-        json.dump({"duration": round(len(total_audio) / SR, 3), "lines": lines_meta}, f, indent=2)
+        json.dump({"duration": round(duration_sec, 3), "lines": lines_meta}, f, indent=2)
 
-    logger.info(f"Synthesized {wav_out} ({round(len(total_audio) / SR, 2)}s, voice: {voice}).")
+    logger.info(f"Synthesized {wav_out} ({round(duration_sec, 2)}s, voice: {voice}).")
     return wav_out

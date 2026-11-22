@@ -348,7 +348,7 @@ class TestRecoveryFailureAndPipelineIntegration:
         out_dir.mkdir()
         vid_id = "video_20261112_slot1"
 
-        def _fake_prep(video_id, script_data):
+        def _fake_prep(video_id, script_data, **kwargs):
             record_stage_start(video_id, "generating_narration", db_client=iso_db)
             record_stage_complete(video_id, "generating_narration", db_client=iso_db)
             record_stage_start(video_id, "preparing_visuals", db_client=iso_db)
@@ -434,3 +434,33 @@ class TestRecoveryFailureAndPipelineIntegration:
         assert "phase-row" in html_txt
         assert "@media (max-width: 900px)" in html_txt
         assert "pollLoop" in html_txt
+
+def test_passed_qc_moves_lifecycle_to_ready_to_upload(tmp_path):
+    iso_db = DatabaseClient(custom_file=tmp_path / "db.json")
+    store = StageTimingStore(history_file=tmp_path / "timings.json")
+    vid_id = "video_20261122_slot1"
+    started = datetime(2026, 11, 22, 10, 0, tzinfo=timezone.utc)
+    iso_db.save_video_record(vid_id, {
+        "video_id": vid_id,
+        "production_status": "COMPLETED",
+        "qc_passed": True,
+        "stage_progress": {
+            "active_stage": "running_qc",
+            "stage_started_at": {"running_qc": started.isoformat()},
+            "completed_stages": [],
+        },
+    })
+
+    record_stage_complete(
+        vid_id,
+        "running_qc",
+        db_client=iso_db,
+        timing=store,
+        now_utc=started + timedelta(seconds=12),
+    )
+
+    rec = iso_db.get_video_record(vid_id)
+    assert rec["lifecycle_stage"] == "READY_TO_UPLOAD"
+    assert "running_qc" in rec["stage_progress"]["completed_stages"]
+    assert "running_qc" in rec["stage_progress"]["stage_completed_at"]
+
