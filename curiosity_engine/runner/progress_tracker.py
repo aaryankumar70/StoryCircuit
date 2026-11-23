@@ -390,12 +390,20 @@ def record_stage_failed(
 
 
 def parse_live_render_progress(video_id: str, output_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-    """Read tail of output/<video_id>/logs/render.log read-only to measure exact rendered frame progress."""
+    """Read tail of render.log read-only to measure exact rendered frame progress."""
     if not video_id:
         return None
     root = Path(output_dir) if output_dir else config.OUTPUT_DIR
-    log_file = root / Path(video_id).name / "logs" / "render.log"
-    if not log_file.is_file():
+    candidates = [
+        root / Path(video_id).name / "logs" / "render.log",
+        root / Path(video_id).name / "data" / "render.log",
+    ]
+    eng_proj = root / ".engine_projects" / Path(video_id).name
+    if eng_proj.is_dir():
+        for sub in eng_proj.glob("*/data/render.log"):
+            candidates.append(sub)
+    log_file = next((p for p in candidates if p.is_file()), None)
+    if not log_file:
         return None
     try:
         # Read only up to last 4KB so polling stays instant on disk
@@ -589,9 +597,14 @@ def _build_slot_progress_snapshot_core(
             sched_ist = dt.astimezone(IST).strftime("%Y-%m-%d %H:%M IST")
 
     # Infer completed stages accurately for legacy pre-tracker records
-    if video_rec.get("topic") and "selecting_topic" not in completed_set:
+    if active_hint != "selecting_topic" and video_rec.get("topic") and "selecting_topic" not in completed_set:
         completed_set.add("selecting_topic")
-    if (video_rec.get("script") or {}).get("lines") and "writing_script" not in completed_set and prod_status not in ("WRITING_SCRIPT",):
+    if (
+        active_hint not in ("selecting_topic", "writing_script")
+        and (video_rec.get("script") or {}).get("lines")
+        and "writing_script" not in completed_set
+        and prod_status not in ("WRITING_SCRIPT",)
+    ):
         completed_set.add("writing_script")
     if prod_status == "COMPLETED" and video_rec.get("qc_passed") is True:
         for k, _, _ in PRODUCTION_STAGE_ORDER:
@@ -796,7 +809,11 @@ def _build_slot_progress_snapshot_core(
         )
 
     # 7. Active Production Stage (Selecting Topic -> Running QC)
-    cur_stage = _resolve_active_production_stage(prod_status, active_hint, completed_set)
+    live_render = parse_live_render_progress(vid_id, output_dir=output_dir)
+    if live_render and live_render.get("frames_total", 0) > 0:
+        completed_set.update({"selecting_topic", "writing_script", "generating_narration", "preparing_visuals"})
+
+    cur_stage = _resolve_active_production_stage(prod_status, active_hint, completed_set, live_render=live_render)
     # Enforce monotonicity: nothing after cur_stage is marked completed in active normal production
     order_keys = [k for k, _, _ in PRODUCTION_STAGE_ORDER]
     if cur_stage in order_keys:
@@ -810,7 +827,6 @@ def _build_slot_progress_snapshot_core(
     stage_elapsed = max(0.0, (now - st_start).total_seconds()) if st_start else None
     job_elapsed = _compute_job_elapsed(video_rec, progress_rec, now, is_running=True)
 
-    live_render = parse_live_render_progress(vid_id, output_dir=output_dir) if cur_stage == "rendering_video" else None
     done_pct = sum(ALL_STAGE_WEIGHTS.get(k, 0) for k in completed_set)
 
     intra_pct: Optional[float] = None
@@ -857,21 +873,41 @@ def _build_slot_progress_snapshot_core(
     )
 
 
-def _resolve_active_production_stage(prod_status: str, active_hint: str, completed_set: set[str]) -> str:
-    if active_hint in ALL_STAGE_WEIGHTS:
+def _resolve_active_production_stage(
+    prod_status: str,
+    active_hint: str,
+    completed_set: set[str],
+    live_render: Optional[Dict[str, Any]] = None,
+) -> str:
+    if live_render and live_render.get("frames_total", 0) > 0:
+        return "rendering_video"
+
+    # If active_hint is explicitly provided and not yet completed, respect it
+    if active_hint in ALL_STAGE_WEIGHTS and active_hint not in completed_set:
         return active_hint
+
     mapping = {
         "STARTING": "selecting_topic" if "selecting_topic" not in completed_set else "writing_script",
         "SELECTING_TOPIC": "selecting_topic",
         "WRITING_SCRIPT": "writing_script",
         "SCRIPTED": "generating_narration",
-        "ASSETS_READY": "preparing_visuals",
+        "ASSETS_READY": "rendering_video" if "preparing_visuals" in completed_set else "preparing_visuals",
         "RENDERING": "rendering_video",
         "RENDERED": "running_qc",
         "QC_RUNNING": "running_qc",
         "RUNNING_QC": "running_qc",
     }
-    return mapping.get(prod_status, "selecting_topic")
+    stage_from_status = mapping.get(prod_status)
+    if stage_from_status:
+        return stage_from_status
+
+    if active_hint in ALL_STAGE_WEIGHTS:
+        return active_hint
+
+    for k, _, _ in PRODUCTION_STAGE_ORDER:
+        if k not in completed_set:
+            return k
+    return "running_qc"
 
 
 def _compute_job_elapsed(

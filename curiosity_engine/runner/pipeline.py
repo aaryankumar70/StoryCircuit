@@ -495,10 +495,12 @@ def produce_single_video(
             if not force_rebuild and _has_valid_project_assets(project_dir, expected_script_hash=cur_script_hash):
                 logger.info(f"[{video_id}] Resuming from valid existing ASSETS_READY project at {project_dir}.")
                 record_stage_complete(video_id, "generating_narration", db_client=db)
+                record_stage_complete(video_id, "preparing_visuals", db_client=db)
                 record["production_status"] = "ASSETS_READY"
                 db.save_video_record(video_id, record)
             else:
                 logger.info(f"[{video_id}] Preparing project assets, voice, and timing...")
+                record_stage_start(video_id, "generating_narration", db_client=db)
                 try:
                     project_dir = prepare_project(video_id, script_data, prepare_narration_assets=True)
                 except GenerationEngineNotConfiguredError as exc:
@@ -511,6 +513,8 @@ def produce_single_video(
                     record_stage_failed(video_id, "preparing_visuals", unconfigured_msg, db_client=db)
                     release_slot_worker_lock(slot_index, video_id)
                     return record
+                record_stage_complete(video_id, "generating_narration", db_client=db)
+                record_stage_complete(video_id, "preparing_visuals", db_client=db)
                 record = db.get_video_record(video_id) or record
                 record["project_path"] = str(project_dir.resolve())
                 record["production_status"] = "ASSETS_READY"
@@ -518,6 +522,9 @@ def produce_single_video(
 
             # 4. Headless Chrome Frame Rendering & FFmpeg Assembly
             logger.info(f"[{video_id}] Rendering frames to {output_mp4}...")
+            record["production_status"] = "RENDERING"
+            db.save_video_record(video_id, record)
+            record_stage_start(video_id, "rendering_video", db_client=db)
             try:
                 render_project_video(project_dir, output_mp4, resume=not force_rebuild, force_rebuild=force_rebuild)
             except GenerationEngineNotConfiguredError as exc:
@@ -530,6 +537,7 @@ def produce_single_video(
                 record_stage_failed(video_id, "rendering_video", unconfigured_msg, db_client=db)
                 release_slot_worker_lock(slot_index, video_id)
                 return record
+            record_stage_complete(video_id, "rendering_video", db_client=db)
             record = db.get_video_record(video_id) or record
             record["local_video_path"] = str(output_mp4)
             record["production_status"] = "RENDERED"
@@ -835,7 +843,7 @@ def run_daily_generation(
                         "production_status": "SELECTING_TOPIC",
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     })
-                record_stage_start(v_id, "selecting_topic", db_client=db)
+                    record_stage_start(v_id, "selecting_topic", db_client=db)
 
         discovered_1, discovered_2 = select_daily_topics(target_date, exclude_topics=used_today)
         if need_s1 and not t1_info:
