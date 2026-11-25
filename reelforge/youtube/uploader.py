@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from zoneinfo import ZoneInfo
 
 import requests
 from google.oauth2.credentials import Credentials
@@ -44,6 +45,77 @@ class YouTubeUploadError(RuntimeError):
 
 def _strip_links(text: str) -> str:
     return re.sub(r"[<>]+", "", re.sub(r"https?://\S+", "", text or "")).strip()
+
+
+def _resolve_auth_timestamp(has_refresh: bool) -> Optional[datetime]:
+    """Return UTC datetime of last YouTube OAuth authorization, seeding from .env mtime if missing."""
+    if not has_refresh:
+        return None
+    raw = (os.environ.get("YOUTUBE_AUTH_TS") or config.YOUTUBE_AUTH_TS or "").strip()
+    if raw:
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+        except Exception:
+            pass
+    # Backfill once from .env mtime when refresh token was authorized prior to YOUTUBE_AUTH_TS tracking
+    if config.ENV_FILE.exists():
+        try:
+            dt = datetime.fromtimestamp(config.ENV_FILE.stat().st_mtime, tz=timezone.utc)
+            iso = dt.isoformat()
+            config.save_env_values({"YOUTUBE_AUTH_TS": iso})
+            return dt
+        except Exception:
+            pass
+    dt = datetime.now(timezone.utc)
+    return dt
+
+
+def _build_reauth_telemetry(has_refresh: bool, state: str) -> Dict[str, Any]:
+    """Compute 7-day OAuth expiry countdown telemetry for Testing-mode Google OAuth apps."""
+    if not has_refresh:
+        return {
+            "auth_timestamp": None,
+            "reauth_expires_at": None,
+            "reauth_expires_local": "",
+            "reauth_remaining_seconds": 0,
+            "reauth_max_days": config.YOUTUBE_OAUTH_MAX_AGE_DAYS,
+            "reauth_state": "unconnected",
+        }
+    auth_dt = _resolve_auth_timestamp(has_refresh)
+    if not auth_dt:
+        return {
+            "auth_timestamp": None,
+            "reauth_expires_at": None,
+            "reauth_expires_local": "",
+            "reauth_remaining_seconds": 0,
+            "reauth_max_days": config.YOUTUBE_OAUTH_MAX_AGE_DAYS,
+            "reauth_state": "unconnected",
+        }
+    expires_dt = auth_dt + timedelta(days=config.YOUTUBE_OAUTH_MAX_AGE_DAYS)
+    now_utc = datetime.now(timezone.utc)
+    remaining = max(0, int((expires_dt - now_utc).total_seconds()))
+    try:
+        local_dt = expires_dt.astimezone(ZoneInfo(config.SCHEDULER_TIMEZONE))
+        local_str = local_dt.strftime("%b %d, %H:%M %Z")
+    except Exception:
+        local_str = expires_dt.strftime("%Y-%m-%d %H:%M UTC")
+
+    if state == "token_invalid" or remaining <= 0:
+        reauth_state = "expired"
+    elif remaining <= 48 * 3600:
+        reauth_state = "expiring_soon"
+    else:
+        reauth_state = "ok"
+
+    return {
+        "auth_timestamp": auth_dt.isoformat(),
+        "reauth_expires_at": expires_dt.isoformat(),
+        "reauth_expires_local": local_str,
+        "reauth_remaining_seconds": remaining,
+        "reauth_max_days": config.YOUTUBE_OAUTH_MAX_AGE_DAYS,
+        "reauth_state": reauth_state,
+    }
 
 
 class YouTubeUploader:
@@ -91,6 +163,8 @@ class YouTubeUploader:
         has_client = bool(self.client_id and self.client_secret)
         has_refresh = bool(self.refresh_token)
         info = self._client_info
+        cached_title = (os.environ.get("YOUTUBE_CHANNEL_TITLE") or config.YOUTUBE_CHANNEL_TITLE or "").strip()
+        cached_id = (os.environ.get("YOUTUBE_CHANNEL_ID") or config.YOUTUBE_CHANNEL_ID or "").strip()
         base: Dict[str, Any] = {
             "configured": has_client and has_refresh,
             "has_client_credentials": has_client,
@@ -102,10 +176,11 @@ class YouTubeUploader:
             "state": "missing_client",
             "mode": self.mode,
             "privacy_status": self.privacy_status,
-            "channel_title": "",
-            "channel_id": "",
+            "channel_title": cached_title if has_refresh else "",
+            "channel_id": cached_id if has_refresh else "",
             "last_checked_at": None,
             "message": "",
+            **_build_reauth_telemetry(has_refresh, "connected" if has_refresh else "unconnected"),
         }
 
         if not has_client:
@@ -127,12 +202,14 @@ class YouTubeUploader:
             out["client_json_present"] = bool(info)
             out["client_json_type"] = info["client_type"] if info else None
             out["client_id_masked"] = _mask_client_id(self.client_id)
+            out.update(_build_reauth_telemetry(has_refresh, str(out.get("state") or "connected")))
             return out
 
         if not verify_network:
             base["healthy"] = True
             base["state"] = "connected"
-            base["message"] = "OAuth credentials connected."
+            base["message"] = f"Connected to {cached_title}" if cached_title else "OAuth credentials connected."
+            base.update(_build_reauth_telemetry(has_refresh, "connected"))
             return base
 
         try:
@@ -162,20 +239,29 @@ class YouTubeUploader:
                             base["channel_title"] = str((items[0].get("snippet") or {}).get("title") or "")
                             if base["channel_title"]:
                                 base["message"] = f"Connected to {base['channel_title']}"
+                                config.save_env_values(
+                                    {
+                                        "YOUTUBE_CHANNEL_TITLE": base["channel_title"],
+                                        "YOUTUBE_CHANNEL_ID": base["channel_id"],
+                                    }
+                                )
                 except Exception as exc:
                     logger.debug("Channel lookup failed after token refresh: %s", exc)
+                base.update(_build_reauth_telemetry(has_refresh, "connected"))
                 _HEALTH_CACHE["ts"] = now_ts
                 _HEALTH_CACHE["data"] = dict(base)
                 return base
 
             base["state"] = "token_invalid"
             base["message"] = f"OAuth refresh rejected ({resp.status_code}); reconnect YouTube OAuth."
+            base.update(_build_reauth_telemetry(has_refresh, "token_invalid"))
             _HEALTH_CACHE["ts"] = now_ts
             _HEALTH_CACHE["data"] = dict(base)
             return base
         except Exception as exc:
             base["state"] = "token_invalid"
             base["message"] = str(exc)
+            base.update(_build_reauth_telemetry(has_refresh, "token_invalid"))
             return base
 
     def check_health(self) -> Dict[str, Any]:

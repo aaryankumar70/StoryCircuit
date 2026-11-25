@@ -197,16 +197,26 @@ class YouTubeOAuthManager:
                         "No refresh token returned. Revoke prior app access in Google Account and reconnect."
                     )
 
+                auth_ts = _utc_now()
                 config.save_env_values(
                     {
                         "YOUTUBE_CLIENT_ID": client_id,
                         "YOUTUBE_CLIENT_SECRET": client_secret,
                         "YOUTUBE_REFRESH_TOKEN": creds.refresh_token,
+                        "YOUTUBE_AUTH_TS": auth_ts,
                     }
                 )
                 clear_health_cache()
                 health = YouTubeUploader().get_connection_status(verify_network=True)
                 ch_title = health.get("channel_title") or ""
+                ch_id = health.get("channel_id") or ""
+                if ch_title or ch_id:
+                    config.save_env_values(
+                        {
+                            "YOUTUBE_CHANNEL_TITLE": ch_title,
+                            "YOUTUBE_CHANNEL_ID": ch_id,
+                        }
+                    )
                 self._set_state(
                     status="succeeded",
                     message=f"Connected to YouTube{f' ({ch_title})' if ch_title else ''}.",
@@ -234,7 +244,14 @@ class YouTubeOAuthManager:
         return self.get_status()
 
     def disconnect(self) -> Dict[str, Any]:
-        config.save_env_values({"YOUTUBE_REFRESH_TOKEN": ""})
+        config.save_env_values(
+            {
+                "YOUTUBE_REFRESH_TOKEN": "",
+                "YOUTUBE_AUTH_TS": "",
+                "YOUTUBE_CHANNEL_TITLE": "",
+                "YOUTUBE_CHANNEL_ID": "",
+            }
+        )
         clear_health_cache()
         self._set_state(
             status="idle",

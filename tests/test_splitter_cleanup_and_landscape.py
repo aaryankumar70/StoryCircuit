@@ -303,3 +303,24 @@ def test_llm_failsafe_falls_back_from_gemini_to_local_ollama(tmp_path, monkeypat
     assert res == {"ok": True, "source": "local_ollama"}
     assert calls[0] == ("gemini", "fake-bad-key")
     assert calls[1] == ("ollama", "qwen2.5:3b-instruct")
+
+
+def test_youtube_7day_reauth_timer_states(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setattr(config, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(config, "CLIENT_SECRET_PATH", tmp_path / "missing_secret.json")
+
+    now = datetime.now(timezone.utc)
+    for delta_hours, expected_state in [(10, "ok"), (140, "expiring_soon"), (180, "expired")]:
+        ts = (now - timedelta(hours=delta_hours)).isoformat()
+        monkeypatch.setenv("YOUTUBE_AUTH_TS", ts)
+        monkeypatch.setattr(config, "YOUTUBE_AUTH_TS", ts)
+        up = YouTubeUploader(client_id="cid", client_secret="csec", refresh_token="rtok")
+        st = up.get_connection_status(verify_network=False)
+        assert st["reauth_state"] == expected_state
+        assert st["reauth_expires_at"] is not None
+        if expected_state == "expired":
+            assert st["reauth_remaining_seconds"] == 0
+        else:
+            assert st["reauth_remaining_seconds"] > 0

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import os
 import sys
 from pathlib import Path
@@ -70,6 +71,7 @@ def main(scope_mode: str = "narrow") -> None:
     set_key(str(env_file), "YOUTUBE_CLIENT_ID", client_id)
     set_key(str(env_file), "YOUTUBE_CLIENT_SECRET", client_secret)
     set_key(str(env_file), "YOUTUBE_REFRESH_TOKEN", creds.refresh_token)
+    set_key(str(env_file), "YOUTUBE_AUTH_TS", datetime.now(timezone.utc).isoformat())
     print("Saved YouTube OAuth credentials to .env! Flip YOUTUBE_PUBLISHING_MODE=live when ready.")
 
 

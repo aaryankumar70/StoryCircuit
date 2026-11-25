@@ -79,6 +79,10 @@ YOUTUBE_PRIVACY_STATUS = os.environ.get("YOUTUBE_PRIVACY_STATUS", "private").str
 YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID", "").strip()
 YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
 YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", "").strip()
+YOUTUBE_AUTH_TS = os.environ.get("YOUTUBE_AUTH_TS", "").strip()
+YOUTUBE_CHANNEL_TITLE = os.environ.get("YOUTUBE_CHANNEL_TITLE", "").strip()
+YOUTUBE_CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID", "").strip()
+YOUTUBE_OAUTH_MAX_AGE_DAYS = int(os.environ.get("YOUTUBE_OAUTH_MAX_AGE_DAYS", "7"))
 YOUTUBE_CATEGORY_ID = os.environ.get("YOUTUBE_CATEGORY_ID", "27").strip()
 CLIENT_SECRET_PATH = Path(os.environ.get("YOUTUBE_CLIENT_SECRET_PATH") or (DATA_DIR / "client_secret.json")).resolve()
 
@@ -97,6 +101,7 @@ def save_env_values(updates: Dict[str, str]) -> None:
     """Persist key=value settings to `.env` and refresh in-memory config attributes."""
     global YOUTUBE_PUBLISHING_MODE, YOUTUBE_PRIVACY_STATUS
     global YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN
+    global YOUTUBE_AUTH_TS, YOUTUBE_CHANNEL_TITLE, YOUTUBE_CHANNEL_ID
     global GEMINI_API_KEY, GEMINI_MODEL
     env_path = ensure_env_file()
     for key, val in updates.items():
@@ -108,6 +113,9 @@ def save_env_values(updates: Dict[str, str]) -> None:
     YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID", YOUTUBE_CLIENT_ID).strip()
     YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", YOUTUBE_CLIENT_SECRET).strip()
     YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", YOUTUBE_REFRESH_TOKEN).strip()
+    YOUTUBE_AUTH_TS = os.environ.get("YOUTUBE_AUTH_TS", YOUTUBE_AUTH_TS).strip()
+    YOUTUBE_CHANNEL_TITLE = os.environ.get("YOUTUBE_CHANNEL_TITLE", YOUTUBE_CHANNEL_TITLE).strip()
+    YOUTUBE_CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID", YOUTUBE_CHANNEL_ID).strip()
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY).strip()
     GEMINI_MODEL = os.environ.get("GEMINI_MODEL", GEMINI_MODEL).strip() or "gemini-3-flash-preview"
 

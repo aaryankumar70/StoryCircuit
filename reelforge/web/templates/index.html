@@ -469,6 +469,20 @@
           </div>
           <div id="ytConnMsg" class="subtle-note" style="margin-top:4px; color:var(--text-muted);">Loading OAuth status...</div>
 
+          <div id="reauthTimerBox" class="slot-prog-wrap hidden" style="margin-top:9px; padding:8px 10px;">
+            <div class="slot-prog-top">
+              <span style="color:var(--text-muted);">7-DAY OAUTH REAUTH TIMER</span>
+              <span id="reauthStateBadge" class="badge badge-ok">ACTIVE</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-top:4px; flex-wrap:wrap;">
+              <span id="reauthCountdown" class="mono" style="font-size:15px; font-weight:700; color:#fff;">--d --h --m --s</span>
+              <span id="reauthExpiresAt" class="subtle-note mono"></span>
+            </div>
+            <div class="progress-track" style="margin:6px 0 2px; height:5px;">
+              <div id="reauthProgressFill" class="progress-fill ok" style="width:100%;"></div>
+            </div>
+          </div>
+
           <input id="clientJsonInput" type="file" accept=".json,application/json" class="hidden" onchange="uploadClientJsonFile(this.files[0])" />
           <div id="clientDropzone" class="dropzone" style="margin-top:10px;" onclick="document.getElementById('clientJsonInput').click()">
             <div style="min-width:0;">
@@ -737,6 +751,54 @@ let _ytSettingsSynced = false;
 let _jobsById = {};
 let _analyzeTimer = null;
 let _lastSplitAnalysis = null;
+let _reauthExpiresMs = null;
+let _reauthMaxDays = 7;
+let _reauthTokenInvalid = false;
+
+function formatCountdown(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const rem = s % 60;
+  return `${d}d ${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m ${String(rem).padStart(2, '0')}s`;
+}
+
+function updateReauthTimerTick() {
+  const box = document.getElementById('reauthTimerBox');
+  const cd = document.getElementById('reauthCountdown');
+  const badge = document.getElementById('reauthStateBadge');
+  const bar = document.getElementById('reauthProgressFill');
+  if (!box || _reauthExpiresMs === null) {
+    if (box) box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+  const remSec = _reauthTokenInvalid ? 0 : Math.max(0, Math.floor((_reauthExpiresMs - Date.now()) / 1000));
+  const totalSec = Math.max(1, (_reauthMaxDays || 7) * 86400);
+  const pct = Math.max(0, Math.min(100, Math.round((remSec / totalSec) * 100)));
+  bar.style.width = `${pct}%`;
+
+  if (remSec <= 0 || _reauthTokenInvalid) {
+    cd.innerText = 'EXPIRED — Reconnect Now';
+    cd.style.color = 'var(--danger)';
+    badge.className = 'badge badge-red';
+    badge.innerText = 'REAUTH NOW';
+    bar.className = 'progress-fill red';
+  } else if (remSec <= 48 * 3600) {
+    cd.innerText = formatCountdown(remSec);
+    cd.style.color = 'var(--amber)';
+    badge.className = 'badge badge-amber';
+    badge.innerText = 'REAUTH SOON';
+    bar.className = 'progress-fill amber';
+  } else {
+    cd.innerText = formatCountdown(remSec);
+    cd.style.color = '#6EE7B7';
+    badge.className = 'badge badge-ok';
+    badge.innerText = '7D ACTIVE';
+    bar.className = 'progress-fill ok';
+  }
+}
 
 function escHtml(raw) {
   return String(raw ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -1123,6 +1185,17 @@ function renderYouTubeCard(yt, oauth) {
   authBtn.disabled = !yt.has_client_credentials || (oauth && oauth.status === 'running');
   discBtn.classList.toggle('hidden', !yt.has_refresh_token);
 
+  if (yt.has_refresh_token && yt.reauth_expires_at) {
+    _reauthExpiresMs = Date.parse(yt.reauth_expires_at);
+    _reauthMaxDays = Number(yt.reauth_max_days || 7);
+    _reauthTokenInvalid = yt.state === 'token_invalid';
+    document.getElementById('reauthExpiresAt').innerText = yt.reauth_expires_local ? `Due ${yt.reauth_expires_local}` : '';
+  } else {
+    _reauthExpiresMs = null;
+    _reauthTokenInvalid = false;
+  }
+  updateReauthTimerTick();
+
   if (!_ytSettingsSynced) {
     document.getElementById('ytPrivacySelect').value = yt.privacy_status || 'private';
     _ytSettingsSynced = true;
@@ -1214,13 +1287,23 @@ async function refreshAll() {
 
   const yt = st.youtube || {};
   const ytChipCls = yt.healthy ? 'ok' : (yt.has_client_credentials ? 'warn' : 'bad');
+  let reauthPill = '';
+  if (yt.has_refresh_token && yt.reauth_expires_at) {
+    const remSec = yt.state === 'token_invalid' ? 0 : Math.max(0, Number(yt.reauth_remaining_seconds || 0));
+    const remDays = Math.floor(remSec / 86400);
+    const remHrs = Math.floor((remSec % 86400) / 3600);
+    const rCls = remSec <= 0 ? 'bad' : (remSec <= 48 * 3600 ? 'warn' : 'ok');
+    const rTxt = remSec <= 0 ? 'REAUTH EXPIRED' : `REAUTH IN ${remDays}d ${remHrs}h`;
+    reauthPill = `<span class="pill-chip ${rCls}">${rTxt}</span>`;
+  }
   document.getElementById('statusPills').innerHTML = [
-    `<span class="pill-chip ${ytChipCls}">YOUTUBE: ${escHtml(String(yt.state || 'unknown').replace('_', ' ').toUpperCase())}</span>`,
+    `<span class="pill-chip ${ytChipCls}">YOUTUBE: ${escHtml(String(yt.channel_title || yt.state || 'unknown').toUpperCase())}</span>`,
+    reauthPill,
     `<span class="pill-chip ${st.ollama_online ? 'ok' : 'warn'}">OLLAMA: ${st.ollama_online ? 'ONLINE' : 'FALLBACK'}</span>`,
     `<span class="pill-chip ${st.gemini_configured ? 'ok' : ''}">GEMINI: ${st.gemini_configured ? 'ON' : 'OFF'}</span>`,
     `<span class="pill-chip ${st.worker_busy ? 'accent' : ''}">${st.worker_busy ? '<span class="pulse-dot"></span>' : ''}WORKER: ${st.worker_busy ? 'RUNNING' : 'IDLE'}</span>`,
     `<span class="pill-chip">DATE: ${escHtml(st.today)}</span>`
-  ].join('');
+  ].filter(Boolean).join('');
 
   const runBtn = document.getElementById('runDailyBtn');
   if (runBtn) runBtn.disabled = Boolean(st.daily_running);
@@ -1484,6 +1567,7 @@ document.getElementById('s-start-date').value = todayIso;
 loadPlan();
 refreshAll();
 schedulePoll(5000);
+setInterval(updateReauthTimerTick, 1000);
 </script>
 </body>
 </html>
