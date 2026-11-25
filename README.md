@@ -173,8 +173,3 @@
 
 ---
 
-## OAuth Branding Website (`docs/`)
-
-Static public pages used for the Google OAuth consent screen (`GitHub Pages` on branch `main`, `/docs` folder):
-- **Homepage:** `docs/index.html` ([https://aaryankumar70.github.io/StoryCircuit/](https://aaryankumar70.github.io/StoryCircuit/))
-- **Privacy Policy:** `docs/privacy.html` ([https://aaryankumar70.github.io/StoryCircuit/privacy.html](https://aaryankumar70.github.io/StoryCircuit/privacy.html))
