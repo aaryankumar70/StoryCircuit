@@ -180,7 +180,7 @@ class ReelDatabase:
         allowed = {
             "status", "video_path", "qc_json", "progress_json", "youtube_id", "youtube_url",
             "publish_at", "simulated", "error", "scheduled_date", "slot_num",
-            "storyboard_json", "title", "style", "video_format", "cleaned_at",
+            "storyboard_json", "title", "category", "style", "script_text", "video_format", "cleaned_at",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:

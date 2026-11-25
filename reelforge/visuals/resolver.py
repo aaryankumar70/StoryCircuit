@@ -259,7 +259,7 @@ def resolve_all_visuals(
     total = len(plan.beats)
     consecutive_pollinations_misses = 0
     for idx, beat in enumerate(plan.beats, start=1):
-        skip_poll = consecutive_pollinations_misses >= 3
+        skip_poll = consecutive_pollinations_misses >= 2
         resolve_beat_visual(plan, beat, visuals_dir, visual_mode=visual_mode, skip_pollinations=skip_poll)
         if beat.resolved_source == "pollinations":
             consecutive_pollinations_misses = 0

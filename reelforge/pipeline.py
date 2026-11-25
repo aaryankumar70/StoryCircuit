@@ -42,30 +42,18 @@ def run_generation_job(
     completed_stages: List[str] = []
     current_stage = "selecting_topic"
 
-    director = StoryDirector()
-    plan = director.build_story(
-        db,
-        mode=mode,
-        topic=topic,
-        category=category,
-        style=style,
-        custom_script=custom_script,
-        facts=facts,
-    )
-    completed_stages.extend(["selecting_topic", "writing_script"])
-    current_stage = "generating_narration"
-
+    init_title = topic.strip() or ("Custom Script" if mode == SourceMode.CUSTOM_SCRIPT else "Discovering fresh AI topic...")
     job_id = db.create_job(
         source_mode=mode.value,
-        title=plan.title,
-        category=plan.category,
-        style=plan.style.value,
-        script_text=plan.full_script,
-        storyboard=plan.model_dump(mode="json"),
+        title=init_title,
+        category=category if category != "auto" else "story",
+        style=style if style != "auto" else "editorial_dark",
+        script_text="",
+        storyboard={"beats": []},
         scheduled_date=scheduled_date,
         slot_num=slot_num,
         status="rendering",
-        video_format=plan.video_format.value,
+        video_format="short",
     )
 
     def _report(stage: str, label: str, pct: int, detail: str = "", failed: Optional[str] = None) -> None:
@@ -87,6 +75,27 @@ def run_generation_job(
     output_mp4 = work_dir / "final.mp4"
 
     try:
+        _report("selecting_topic", "Selecting fresh non-repeating topic", 6, f"Slot {slot_num}" if slot_num else mode.value)
+        director = StoryDirector()
+        plan = director.build_story(
+            db,
+            mode=mode,
+            topic=topic,
+            category=category,
+            style=style,
+            custom_script=custom_script,
+            facts=facts,
+        )
+        completed_stages.extend(["selecting_topic", "writing_script"])
+        db.update_job(
+            job_id,
+            title=plan.title,
+            category=plan.category,
+            style=plan.style.value,
+            script_text=plan.full_script,
+            storyboard_json=plan.model_dump(mode="json"),
+        )
+        current_stage = "generating_narration"
         _report("generating_narration", "Synthesizing voice & word timing", 22, f"{len(plan.beats)} beats")
         narration_wav, words, duration_sec = synthesize_story_audio(plan, work_dir)
         completed_stages.append("generating_narration")

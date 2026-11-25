@@ -246,13 +246,12 @@ def pick_fresh_topic(
     avoid_all = list(dict.fromkeys([*history_titles, *(avoid_extra or [])]))
     avoid_lower = {t.lower().strip() for t in avoid_all}
 
-    # 1. AI-discovered unique topic (when LLM is configured/online)
-    for _ in range(2):
-        ai_cand = _llm_discover_topic(llm, category, avoid_all)
-        if ai_cand and ai_cand["topic"].lower().strip() not in avoid_lower:
-            is_dup, _ = db.check_duplicate_topic(ai_cand["topic"], ai_cand["facts"])
-            if not is_dup:
-                return ai_cand
+    # 1. AI-discovered unique topic (single fast attempt when LLM is configured/online)
+    ai_cand = _llm_discover_topic(llm, category, avoid_all)
+    if ai_cand and ai_cand["topic"].lower().strip() not in avoid_lower:
+        is_dup, _ = db.check_duplicate_topic(ai_cand["topic"], ai_cand["facts"])
+        if not is_dup:
+            return ai_cand
 
     # 2. Fresh Wikipedia random real-world summary
     if category in ("auto", "story", "history", "science", "nature"):

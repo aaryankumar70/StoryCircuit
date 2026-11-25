@@ -57,7 +57,7 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 # Visuals
 VISUAL_MODE = os.environ.get("VISUAL_MODE", "auto").strip().lower()
 POLLINATIONS_MODEL = os.environ.get("POLLINATIONS_MODEL", "flux").strip()
-POLLINATIONS_TIMEOUT_SEC = int(os.environ.get("POLLINATIONS_TIMEOUT_SEC", "45"))
+POLLINATIONS_TIMEOUT_SEC = int(os.environ.get("POLLINATIONS_TIMEOUT_SEC", "18"))
 
 # TTS
 TTS_ENGINE = os.environ.get("TTS_ENGINE", "edge").strip().lower()

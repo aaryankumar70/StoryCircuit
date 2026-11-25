@@ -108,9 +108,7 @@ class ZeroCostLLM:
         if not key:
             return None
         primary = self._gemini_model()
-        candidates = list(
-            dict.fromkeys([primary, "gemini-3-flash-preview", "gemini-flash-latest", "gemini-3.1-flash-lite"])
-        )
+        candidates = list(dict.fromkeys([primary, "gemini-3-flash-preview", "gemini-flash-latest"]))[:2]
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
@@ -129,7 +127,7 @@ class ZeroCostLLM:
                     url,
                     headers={"x-goog-api-key": key, "Content-Type": "application/json"},
                     json=payload,
-                    timeout=45,
+                    timeout=18,
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -166,6 +164,8 @@ class ZeroCostLLM:
             "options": {
                 "temperature": temperature,
                 "num_ctx": 4096,
+                "repeat_penalty": 1.18,
+                "num_predict": 1100,
             },
         }
         try:
