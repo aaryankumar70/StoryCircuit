@@ -87,7 +87,7 @@
 - **espeak-ng** (recommended offline fallback if Edge-TTS cannot reach the network)
 - **Optional Free AI Backends** (works offline with deterministic fallbacks even if neither is configured):
   - **Local Ollama** (`OLLAMA_MODEL=qwen2.5:3b-instruct` at `http://127.0.0.1:11434`)
-  - **Gemini Free Tier** (`GEMINI_API_KEY`, model `gemini-2.5-flash`)
+  - **Gemini Free Tier** (`GEMINI_API_KEY`, model `gemini-3-flash-preview`)
 
 ---
 
@@ -155,7 +155,7 @@
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
 | `OLLAMA_HOST` / `OLLAMA_MODEL` | `http://127.0.0.1:11434` / `qwen2.5:3b-instruct` | Local zero-cost script & cue LLM |
-| `GEMINI_API_KEY` / `GEMINI_MODEL` | `""` / `gemini-2.5-flash` | Optional free-tier cloud LLM |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | `""` / `gemini-3-flash-preview` | Optional free-tier cloud LLM |
 | `VISUAL_MODE` | `auto` | `auto`, `pollinations`, `archival`, or `cards_only` |
 | `TTS_ENGINE` / `TTS_RATE` | `edge` / `+4%` | Edge-TTS primary & secondary voices |
 | `SCHEDULER_TIMEZONE` | `Asia/Kolkata` | Local timezone for daily slots, scheduling, and cleanup |

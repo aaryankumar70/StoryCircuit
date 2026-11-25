@@ -145,7 +145,7 @@ class YouTubeSettingsRequest(BaseModel):
 
 class LLMSettingsRequest(BaseModel):
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3-flash-preview"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -261,7 +261,7 @@ def api_llm_settings(req: LLMSettingsRequest) -> Dict[str, Any]:
     config.save_env_values(
         {
             "GEMINI_API_KEY": req.gemini_api_key.strip(),
-            "GEMINI_MODEL": req.gemini_model.strip() or "gemini-2.5-flash",
+            "GEMINI_MODEL": req.gemini_model.strip() or "gemini-3-flash-preview",
         }
     )
     llm = ZeroCostLLM()

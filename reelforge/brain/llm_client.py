@@ -49,7 +49,7 @@ class ZeroCostLLM:
 
     @staticmethod
     def _gemini_model() -> str:
-        return (os.environ.get("GEMINI_MODEL") or config.GEMINI_MODEL or "gemini-2.5-flash").strip()
+        return (os.environ.get("GEMINI_MODEL") or config.GEMINI_MODEL or "gemini-3-flash-preview").strip()
 
     def _list_ollama_models(self) -> List[str]:
         try:
@@ -107,9 +107,9 @@ class ZeroCostLLM:
         key = api_key if api_key is not None else self._gemini_key()
         if not key:
             return None
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{self._gemini_model()}:generateContent"
+        primary = self._gemini_model()
+        candidates = list(
+            dict.fromkeys([primary, "gemini-3-flash-preview", "gemini-flash-latest", "gemini-3.1-flash-lite"])
         )
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -119,23 +119,33 @@ class ZeroCostLLM:
                 "responseMimeType": "application/json",
             },
         }
-        try:
-            resp = requests.post(
-                url,
-                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-                json=payload,
-                timeout=45,
+        for model_name in candidates:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model_name}:generateContent"
             )
-            if resp.status_code != 200:
-                logger.warning("Gemini API returned %s: %s", resp.status_code, resp.text[:240])
-                return None
-            data = resp.json()
-            parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-            raw = "".join(str(p.get("text", "")) for p in parts)
-            return extract_json_object(raw)
-        except Exception as exc:
-            logger.warning("Gemini call failed, falling back to local Ollama: %s", exc)
-            return None
+            try:
+                resp = requests.post(
+                    url,
+                    headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=45,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                    raw = "".join(str(p.get("text", "")) for p in parts)
+                    parsed = extract_json_object(raw)
+                    if parsed is not None:
+                        return parsed
+                    continue
+                logger.warning("Gemini model '%s' returned %s: %s", model_name, resp.status_code, resp.text[:200])
+                if resp.status_code in {401, 403, 429}:
+                    # Auth/quota failure applies to all models; immediately fall back to Ollama
+                    return None
+            except Exception as exc:
+                logger.warning("Gemini model '%s' call failed: %s", model_name, exc)
+        return None
 
     def _call_ollama(
         self,

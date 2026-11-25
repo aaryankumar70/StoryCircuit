@@ -52,7 +52,7 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/"
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
 OLLAMA_TIMEOUT_SEC = int(os.environ.get("OLLAMA_TIMEOUT_SEC", "120"))
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 
 # Visuals
 VISUAL_MODE = os.environ.get("VISUAL_MODE", "auto").strip().lower()
@@ -109,7 +109,7 @@ def save_env_values(updates: Dict[str, str]) -> None:
     YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", YOUTUBE_CLIENT_SECRET).strip()
     YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", YOUTUBE_REFRESH_TOKEN).strip()
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY).strip()
-    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", GEMINI_MODEL).strip() or "gemini-2.5-flash"
+    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", GEMINI_MODEL).strip() or "gemini-3-flash-preview"
 
 
 def parse_client_secret_payload(data: Any) -> Dict[str, Any]:
