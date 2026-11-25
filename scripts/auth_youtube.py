@@ -1,10 +1,4 @@
-"""Interactive CLI Authorization Helper for YouTube Data API v3.
-Guides the user through Google OAuth 2.0 consent setup and permanent token generation.
-
-CRITICAL POLICY REQUIREMENT:
-To prevent refresh tokens from expiring after 7 days, the OAuth Consent Screen
-in Google Cloud Console MUST be published to 'In production' status.
-"""
+"""Interactive YouTube OAuth 2.0 setup script for ReelForge (StoryCircuit)."""
 from __future__ import annotations
 
 import argparse
@@ -12,17 +6,13 @@ import os
 import sys
 from pathlib import Path
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+from dotenv import set_key
+from google_auth_oauthlib.flow import InstalledAppFlow
 
-from curiosity_engine.config import (
-    ENV_FILE,
-    YOUTUBE_CLIENT_ID,
-    YOUTUBE_CLIENT_SECRET,
-    YOUTUBE_REFRESH_TOKEN,
-)
-from curiosity_engine.distribution.token_manager import token_manager
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from reelforge import config  # noqa: E402
 
 NARROW_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -38,178 +28,49 @@ FULL_SCOPES = [
 SCOPES = NARROW_SCOPES
 
 
-def print_step(title: str) -> None:
-    print(f"\n{'='*70}\n{title}\n{'='*70}")
-
-
-def verify_granted_scopes(access_token: str) -> list[str]:
-    """Query Google tokeninfo endpoint without logging credentials."""
-    import requests
-
-    try:
-        resp = requests.get(
-            "https://oauth2.googleapis.com/tokeninfo",
-            params={"access_token": access_token},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            scope_str = resp.json().get("scope", "")
-            return [s for s in scope_str.split() if s]
-    except Exception as e:
-        print(f"[WARNING] Could not query tokeninfo for granted scopes: {e}")
-    return []
-
-
-def run_youtube_oauth_flow(scope_mode: str = "narrow", force: bool = False, yes: bool = False) -> None:
+def main(scope_mode: str = "narrow") -> None:
+    env_file = config.ensure_env_file()
     requested_scopes = FULL_SCOPES if scope_mode == "full" else NARROW_SCOPES
 
-    print_step("CURIOSITY ENGINE • YOUTUBE OAUTH 2.0 AUTHORIZATION WIZARD")
-    print(
-        "This wizard authorizes the existing Desktop OAuth client for automated\n"
-        "YouTube Shorts uploads & scheduled publishing with offline access.\n"
-    )
-
-    print("STEP 1: OAUTH CONSENT SCREEN CONFIGURATION (PREVENT 7-DAY EXPIRATION)")
-    print("-" * 70)
-    print("1. Open Google Cloud Console -> APIs & Services -> OAuth consent screen.")
-    print("2. Ensure User Type is 'External'.")
-    print("3. CRITICAL: Publishing status MUST be 'In production' ('PUBLISH APP').")
-    print("   * Tokens minted while 'Testing' expire after 7 days.")
-    print("   * After switching to 'In production', authorize once here to persist")
-    print("     a long-lived refresh token.")
-    print("-" * 70)
-
-    print("\nSTEP 2: OAUTH CLIENT CREDENTIALS")
-    print("-" * 70)
-
-    client_id = (YOUTUBE_CLIENT_ID or os.environ.get("YOUTUBE_CLIENT_ID") or "").strip()
-    client_secret = (YOUTUBE_CLIENT_SECRET or os.environ.get("YOUTUBE_CLIENT_SECRET") or "").strip()
-    if not client_id:
-        client_id = input("\nEnter your YouTube Client ID: ").strip()
+    info = config.load_client_secret_info()
+    if info:
+        client_id = info["client_id"]
+        client_secret = info["client_secret"]
+        client_config = info["raw"]
     else:
-        print(f"[OK] Reusing configured Desktop OAuth Client ID: {client_id}")
-    if not client_secret:
-        client_secret = input("Enter your YouTube Client Secret: ").strip()
-    else:
-        print("[OK] Reusing configured Desktop OAuth Client Secret: [REDACTED]")
-
-    if not client_id or not client_secret:
-        print("\n[ERROR] Client ID and Client Secret are required. Aborting.")
-        sys.exit(1)
-
-    if not force and YOUTUBE_REFRESH_TOKEN:
-        health = token_manager.check_youtube_health(client_id, client_secret, YOUTUBE_REFRESH_TOKEN)
-        existing_scopes = set(health.get("scopes", []))
-        if health.get("healthy") and set(requested_scopes).issubset(existing_scopes):
-            print("\n[OK] Existing refresh token is HEALTHY and already grants all requested scopes:")
-            for s in sorted(existing_scopes):
-                print(f"     - {s}")
-            print("     Pass '--force' if you are switching consent screen from Testing -> Production")
-            print("     and explicitly want to mint a replacement Production refresh token.")
-            return
-
-    print("\nSTEP 3: LAUNCHING BROWSER FOR AUTHORIZATION")
-    print(f"Requested Scopes ({scope_mode}):")
-    for s in requested_scopes:
-        print(f"  - {s}")
-    print("-" * 70)
-
-    try:
-        from google_auth_oauthlib.flow import InstalledAppFlow
-    except ImportError:
-        print("[ERROR] 'google_auth_oauthlib' is required. Run 'pip install google-auth-oauthlib'.")
-        sys.exit(1)
-
-    client_config = {
-        "installed": {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": ["http://localhost:8080/"],
-        }
-    }
-
-    try:
-        flow = InstalledAppFlow.from_client_config(client_config, scopes=requested_scopes)
-        # prompt='consent' and access_type='offline' ensure a refresh_token is returned
-        credentials = flow.run_local_server(
-            port=8080,
-            prompt="consent",
-            access_type="offline",
-            success_message="Authorization complete! You may return to the Curiosity Engine terminal.",
+        client_id = (
+            os.environ.get("YOUTUBE_CLIENT_ID")
+            or config.YOUTUBE_CLIENT_ID
+            or input("YouTube OAuth Client ID: ").strip()
         )
-    except Exception as e:
-        print(f"\n[ERROR] Local server OAuth flow failed ({e}).")
-        print("Falling back to console-based authorization...")
-        flow = InstalledAppFlow.from_client_config(client_config, scopes=requested_scopes)
-        credentials = flow.run_console(access_type="offline", prompt="consent")
-
-    refresh_token = credentials.refresh_token
-    if not refresh_token:
-        print("\n[WARNING] Google did not return a new refresh token.")
-        print("Revoke prior consent at https://myaccount.google.com/permissions and rerun.")
-        sys.exit(1)
-
-    granted = verify_granted_scopes(credentials.token) if credentials.token else list(credentials.scopes or [])
-
-    print_step("AUTHORIZATION SUCCESSFUL!")
-    print(f"Refresh Token Obtained: [REDACTED len={len(refresh_token)}]")
-    print("Verified Granted Scopes:")
-    for s in granted:
-        print(f"  - {s}")
-
-    # Persist to local .env file
-    save_env = "y" if yes else input("\nSave these credentials to your local .env file? [Y/n]: ").strip().lower()
-    if save_env in ("", "y", "yes"):
-        lines = []
-        if ENV_FILE.exists():
-            lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
-
-        keys_to_set = {
-            "YOUTUBE_CLIENT_ID": client_id,
-            "YOUTUBE_CLIENT_SECRET": client_secret,
-            "YOUTUBE_REFRESH_TOKEN": refresh_token,
+        client_secret = (
+            os.environ.get("YOUTUBE_CLIENT_SECRET")
+            or config.YOUTUBE_CLIENT_SECRET
+            or input("YouTube OAuth Client Secret: ").strip()
+        )
+        if not client_id or not client_secret:
+            print("Client ID and Client Secret are required.")
+            sys.exit(1)
+        client_config = {
+            "installed": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": ["http://localhost"],
+            }
         }
 
-        updated_keys = set()
-        new_lines = []
-        for line in lines:
-            matched = False
-            for k, v in keys_to_set.items():
-                if line.startswith(f"{k}="):
-                    new_lines.append(f"{k}={v}")
-                    updated_keys.add(k)
-                    matched = True
-                    break
-            if not matched:
-                new_lines.append(line)
+    flow = InstalledAppFlow.from_client_config(client_config, requested_scopes)
+    creds = flow.run_local_server(port=0, access_type="offline", prompt="consent")
+    if not creds.refresh_token:
+        print("No refresh token returned. Revoke app access in Google Account and re-run with prompt=consent.")
+        sys.exit(1)
 
-        for k, v in keys_to_set.items():
-            if k not in updated_keys:
-                new_lines.append(f"{k}={v}")
-
-        ENV_FILE.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        try:
-            from curiosity_engine import config
-            from curiosity_engine.runner.automation_state import AutomationStateManager
-            from curiosity_engine.notifications.telegram_notifier import get_telegram_notifier
-
-            config.sync_env_if_updated(force=True)
-            token_manager.record_youtube_authorization(refresh_token)
-            yt_health = token_manager.check_youtube_health(client_id, client_secret, refresh_token)
-            if yt_health.get("healthy") and yt_health.get("can_upload") and yt_health.get("can_update_schedule", True):
-                resumed = AutomationStateManager().resume_after_oauth()
-                get_telegram_notifier().notify_reauth_success(
-                    scopes=yt_health.get("scopes", granted),
-                    estimated_reauth_ist=yt_health.get("estimated_reauth_date_ist", "7 days"),
-                    resumed_automation=resumed,
-                )
-        except Exception as hook_exc:
-            print(f"[WARNING] Post-authorization validation hook warning: {hook_exc}")
-        print(f"[OK] Saved credentials safely to {ENV_FILE} and updated token_state.json.")
-
-    print("\nNext step: Verify token status in the Studio Dashboard.")
+    set_key(str(env_file), "YOUTUBE_CLIENT_ID", client_id)
+    set_key(str(env_file), "YOUTUBE_CLIENT_SECRET", client_secret)
+    set_key(str(env_file), "YOUTUBE_REFRESH_TOKEN", creds.refresh_token)
+    print("Saved YouTube OAuth credentials to .env! Flip YOUTUBE_PUBLISHING_MODE=live when ready.")
 
 
 if __name__ == "__main__":
@@ -220,7 +81,7 @@ if __name__ == "__main__":
         default="narrow",
         help="narrow = youtube.upload + youtube.readonly; full = adds youtube.force-ssl",
     )
-    parser.add_argument("--force", action="store_true", help="Force re-authorization even if existing token is healthy")
-    parser.add_argument("--yes", "-y", action="store_true", help="Automatically save new credentials to .env without prompting")
+    parser.add_argument("--force", action="store_true", help="Force re-authorization")
+    parser.add_argument("--yes", "-y", action="store_true", help="Non-interactive save")
     args = parser.parse_args()
-    run_youtube_oauth_flow(scope_mode=args.scope_mode, force=args.force, yes=args.yes)
+    main(scope_mode=args.scope_mode)

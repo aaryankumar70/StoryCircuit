@@ -57,7 +57,7 @@ templates/*/logs/
 *.tmp
 *.part
 
-# Upstream Reference Archives (not part of CurioLoop release)
+# Upstream Reference Archives
 upstream/
 
 # OS & Editor Files
