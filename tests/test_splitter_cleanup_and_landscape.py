@@ -8,6 +8,7 @@ from reelforge import config
 from reelforge.brain.metadata import build_youtube_tags, clean_youtube_title, enrich_story_metadata
 from reelforge.brain.splitter import analyze_and_split_script
 from reelforge.audio.underscore import generate_ambient_underscore
+from reelforge.brain.llm_client import ZeroCostLLM
 from reelforge.models import BeatSpec, SourceMode, StoryPlan, VideoFormat, VisualStyle, WordTiming
 from reelforge.qc.gatekeeper import verify_video
 from reelforge.storage.cleanup import cleanup_ended_day_videos
@@ -275,3 +276,30 @@ def test_real_ffmpeg_landscape_render_and_qc(tmp_path):
     assert qc.passed, f"QC failed: {qc.issues} ({qc.checks})"
     assert qc.checks["resolution"] == "1920x1080"
     assert qc.checks["true_peak_db"] <= 0.0
+
+
+def test_llm_failsafe_falls_back_from_gemini_to_local_ollama(tmp_path, monkeypatch):
+    """When Gemini fails (429/error/offline), ZeroCostLLM falls back to local Ollama automatically."""
+    monkeypatch.setattr(config, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-bad-key")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "fake-bad-key")
+
+    llm = ZeroCostLLM()
+    calls = []
+
+    def fake_gemini(sys_p, usr_p, temp, *, api_key=None):
+        calls.append(("gemini", api_key))
+        return None  # Simulate quota/429/network failure
+
+    def fake_ollama(sys_p, usr_p, temp, *, model_name=None):
+        calls.append(("ollama", model_name))
+        return {"ok": True, "source": "local_ollama"}
+
+    monkeypatch.setattr(llm, "_call_gemini", fake_gemini)
+    monkeypatch.setattr(llm, "_list_ollama_models", lambda: ["qwen2.5:3b-instruct"])
+    monkeypatch.setattr(llm, "_call_ollama", fake_ollama)
+
+    res = llm.generate_json("sys", "user")
+    assert res == {"ok": True, "source": "local_ollama"}
+    assert calls[0] == ("gemini", "fake-bad-key")
+    assert calls[1] == ("ollama", "qwen2.5:3b-instruct")

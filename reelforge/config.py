@@ -13,9 +13,14 @@ ENV_EXAMPLE_FILE = PROJECT_ROOT / ".env.example"
 
 
 def reload_env() -> None:
-    """Load or reload `.env` without clobbering explicit process overrides."""
+    """Load `.env`, refreshing keys that are unset or empty in the current process."""
     if ENV_FILE.exists():
+        from dotenv import dotenv_values
+
         load_dotenv(dotenv_path=ENV_FILE, override=False)
+        for k, v in dotenv_values(ENV_FILE).items():
+            if v is not None and not os.environ.get(k, "").strip() and str(v).strip():
+                os.environ[k] = str(v)
 
 
 reload_env()
@@ -92,6 +97,7 @@ def save_env_values(updates: Dict[str, str]) -> None:
     """Persist key=value settings to `.env` and refresh in-memory config attributes."""
     global YOUTUBE_PUBLISHING_MODE, YOUTUBE_PRIVACY_STATUS
     global YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN
+    global GEMINI_API_KEY, GEMINI_MODEL
     env_path = ensure_env_file()
     for key, val in updates.items():
         clean_val = str(val)
@@ -102,6 +108,8 @@ def save_env_values(updates: Dict[str, str]) -> None:
     YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID", YOUTUBE_CLIENT_ID).strip()
     YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", YOUTUBE_CLIENT_SECRET).strip()
     YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", YOUTUBE_REFRESH_TOKEN).strip()
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY).strip()
+    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", GEMINI_MODEL).strip() or "gemini-2.5-flash"
 
 
 def parse_client_secret_payload(data: Any) -> Dict[str, Any]:

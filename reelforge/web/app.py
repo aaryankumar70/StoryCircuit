@@ -143,6 +143,11 @@ class YouTubeSettingsRequest(BaseModel):
     privacy_status: str = Field(default="private", pattern="^(private|unlisted|public)$")
 
 
+class LLMSettingsRequest(BaseModel):
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     return templates.TemplateResponse(
@@ -193,7 +198,8 @@ def api_status() -> Dict[str, Any]:
         "daily_running": _DAILY_RUNNING,
         "ollama_online": llm.is_ollama_available(),
         "ollama_model": config.OLLAMA_MODEL,
-        "gemini_configured": bool(config.GEMINI_API_KEY),
+        "gemini_configured": bool(llm._gemini_key()),
+        "gemini_model": llm._gemini_model(),
         "youtube": yt.get_connection_status(verify_network=False),
         "oauth": _OAUTH.get_status(),
         "visual_mode": config.VISUAL_MODE,
@@ -248,6 +254,23 @@ def api_youtube_settings(req: YouTubeSettingsRequest) -> Dict[str, Any]:
     config.save_env_values(updates)
     clear_health_cache()
     return {"youtube": YouTubeUploader().get_connection_status(verify_network=False)}
+
+
+@app.post("/api/llm/settings")
+def api_llm_settings(req: LLMSettingsRequest) -> Dict[str, Any]:
+    config.save_env_values(
+        {
+            "GEMINI_API_KEY": req.gemini_api_key.strip(),
+            "GEMINI_MODEL": req.gemini_model.strip() or "gemini-2.5-flash",
+        }
+    )
+    llm = ZeroCostLLM()
+    return {
+        "gemini_configured": bool(llm._gemini_key()),
+        "gemini_model": llm._gemini_model(),
+        "ollama_online": llm.is_ollama_available(),
+        "ollama_model": config.OLLAMA_MODEL,
+    }
 
 
 @app.get("/api/jobs")

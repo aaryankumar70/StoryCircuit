@@ -1,10 +1,11 @@
-"""Zero-cost LLM client supporting local Ollama and optional Gemini free tier."""
+"""Zero-cost LLM client with automatic failsafe: Gemini Free Tier -> Local Ollama -> Offline."""
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -39,9 +40,32 @@ def extract_json_object(raw_text: str) -> Optional[Dict[str, Any]]:
 
 
 class ZeroCostLLM:
-    """Routes structured JSON prompts to Gemini free tier (if configured) or local Ollama."""
+    """Routes structured JSON prompts to Gemini free tier (if configured), falling back to local Ollama."""
+
+    @staticmethod
+    def _gemini_key() -> str:
+        config.reload_env()
+        return (os.environ.get("GEMINI_API_KEY") or config.GEMINI_API_KEY or "").strip()
+
+    @staticmethod
+    def _gemini_model() -> str:
+        return (os.environ.get("GEMINI_MODEL") or config.GEMINI_MODEL or "gemini-2.5-flash").strip()
+
+    def _list_ollama_models(self) -> List[str]:
+        try:
+            resp = requests.get(f"{config.OLLAMA_HOST}/api/tags", timeout=3)
+            if resp.status_code != 200:
+                return []
+            models = resp.json().get("models") or []
+            return [str(m.get("name")) for m in models if m.get("name")]
+        except Exception:
+            return []
 
     def is_ollama_available(self) -> bool:
+        return len(self._list_ollama_models()) > 0 or self._ping_ollama()
+
+    @staticmethod
+    def _ping_ollama() -> bool:
         try:
             resp = requests.get(f"{config.OLLAMA_HOST}/api/tags", timeout=3)
             return resp.status_code == 200
@@ -54,13 +78,19 @@ class ZeroCostLLM:
         user_prompt: str,
         temperature: float = 0.65,
     ) -> Optional[Dict[str, Any]]:
-        if config.GEMINI_API_KEY:
-            res = self._call_gemini(system_prompt, user_prompt, temperature)
+        api_key = self._gemini_key()
+        if api_key:
+            res = self._call_gemini(system_prompt, user_prompt, temperature, api_key=api_key)
             if res is not None:
                 return res
+            logger.warning("Gemini request failed or returned invalid JSON; falling back to local Ollama.")
 
-        if self.is_ollama_available():
-            res = self._call_ollama(system_prompt, user_prompt, temperature)
+        local_models = self._list_ollama_models()
+        if local_models or self._ping_ollama():
+            model_name = config.OLLAMA_MODEL
+            if local_models and model_name not in local_models:
+                model_name = local_models[0]
+            res = self._call_ollama(system_prompt, user_prompt, temperature, model_name=model_name)
             if res is not None:
                 return res
 
@@ -71,10 +101,15 @@ class ZeroCostLLM:
         system_prompt: str,
         user_prompt: str,
         temperature: float,
+        *,
+        api_key: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
+        key = api_key if api_key is not None else self._gemini_key()
+        if not key:
+            return None
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{config.GEMINI_MODEL}:generateContent"
+            f"{self._gemini_model()}:generateContent"
         )
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -87,7 +122,7 @@ class ZeroCostLLM:
         try:
             resp = requests.post(
                 url,
-                headers={"x-goog-api-key": config.GEMINI_API_KEY, "Content-Type": "application/json"},
+                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
                 json=payload,
                 timeout=45,
             )
@@ -107,9 +142,11 @@ class ZeroCostLLM:
         system_prompt: str,
         user_prompt: str,
         temperature: float,
+        *,
+        model_name: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         payload = {
-            "model": config.OLLAMA_MODEL,
+            "model": model_name or config.OLLAMA_MODEL,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

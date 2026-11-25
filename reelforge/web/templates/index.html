@@ -696,16 +696,23 @@
         <!-- Pipeline Readiness -->
         <div class="card">
           <div class="card-header">
-            <div class="card-title">Pipeline Readiness</div>
+            <div class="card-title">Pipeline Readiness &amp; AI Key</div>
             <span id="workerBadge" class="badge">IDLE</span>
           </div>
           <div class="kv-list" id="readinessKv">
-            <div class="kv-row"><span class="kv-k">Local LLM (Ollama)</span><span class="kv-v" id="kvOllama">--</span></div>
+            <div class="kv-row"><span class="kv-k">Local Fallback LLM</span><span class="kv-v" id="kvOllama">--</span></div>
             <div class="kv-row"><span class="kv-k">Gemini Free Tier</span><span class="kv-v" id="kvGemini">--</span></div>
             <div class="kv-row"><span class="kv-k">Format Rule</span><span class="kv-v">≤2m: 9:16 • &gt;2m: 16:9</span></div>
             <div class="kv-row"><span class="kv-k">Daily Schedule</span><span class="kv-v" id="kvSched">{{ slot1 }} &amp; {{ slot2 }} {{ tz }}</span></div>
             <div class="kv-row"><span class="kv-k">Disk Output</span><span class="kv-v" id="kvStorage">--</span></div>
             <div class="kv-row"><span class="kv-k">YouTube Auth</span><span class="kv-v" id="kvYt">--</span></div>
+          </div>
+          <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
+            <label style="margin-top:0;">Gemini API Key (saved to .env — falls back to local Ollama if quota/network fails)</label>
+            <div style="display:grid; grid-template-columns:1fr auto; gap:7px; align-items:center;">
+              <input id="geminiKeyInput" type="password" placeholder="AIza... (paste Gemini key or leave blank for Ollama)" />
+              <button class="btn btn-sm btn-primary" onclick="saveGeminiKey()">Save Key</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1305,6 +1312,20 @@ async function saveYouTubeSettings() {
   if (!res.ok) { showToast('Failed to save YouTube settings', 'red'); return; }
   _ytSettingsSynced = false;
   showToast(`Saved YouTube privacy preference: ${privacy_status.toUpperCase()}.`, 'ok');
+  await refreshAll();
+}
+
+async function saveGeminiKey() {
+  const key = document.getElementById('geminiKeyInput').value.trim();
+  const res = await fetch('/api/llm/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gemini_api_key: key })
+  });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.detail || 'Could not save Gemini key', 'red'); return; }
+  document.getElementById('geminiKeyInput').value = '';
+  showToast(data.gemini_configured ? 'Saved Gemini API key to .env (with local Ollama failsafe).' : 'Cleared Gemini key — using local Ollama.', 'ok');
   await refreshAll();
 }
 
