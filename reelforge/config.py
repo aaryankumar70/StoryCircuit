@@ -146,9 +146,9 @@ def load_client_secret_info() -> Optional[Dict[str, Any]]:
                 continue
     return None
 
-# Dashboard
+# Dashboard (dedicated port 8090 to avoid conflicts with ClipSnip:8000 and GiggleBeats:8080)
 DASHBOARD_HOST = os.environ.get("DASHBOARD_HOST", "127.0.0.1")
-DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", "8080"))
+DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", "8090"))
 
 # Quality Control
 MIN_DURATION_SEC = float(os.environ.get("MIN_DURATION_SEC", "18.0"))

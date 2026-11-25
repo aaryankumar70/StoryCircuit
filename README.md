@@ -101,12 +101,14 @@
    cp .env.example .env
    ```
 
-2. **Start the Web Dashboard:**
-   ```bash
-   ./start_dashboard.sh
-   # or: .venv/bin/python -m reelforge web
-   ```
-   Open [http://127.0.0.1:8080](http://127.0.0.1:8080).
+2. **Start the Desktop App or Web Dashboard:**
+   - **Desktop App Launcher:** Open **StoryCircuit** from your app launcher (`Super + Space`) or run `storycircuit` in a terminal.
+   - **Or start manually:**
+     ```bash
+     ./start_dashboard.sh
+     # or: .venv/bin/python -m reelforge web
+     ```
+   Open [http://127.0.0.1:8090](http://127.0.0.1:8090) *(dedicated port `8090` so it never collides with ClipSnip on `8000` or GiggleBeats on `8080`)*.
 
 3. **Connect YouTube OAuth (once):**
    - **In the Dashboard:** Drag & drop your Google Cloud `client_secret.json` (Desktop App OAuth client with **YouTube Data API v3** enabled) into the **YouTube Connection & Auto-Schedule** card, then click **Connect YouTube OAuth**.
@@ -123,7 +125,7 @@
 ## CLI Commands
 
 ```bash
-# Start web dashboard (default 127.0.0.1:8080)
+# Start web dashboard (default 127.0.0.1:8090)
 .venv/bin/python -m reelforge web
 
 # Generate one video (random | plan | custom_script)
