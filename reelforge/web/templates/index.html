@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>StoryCircuit Studio • Automated Shorts Control</title>
+  <title>StoryCircuit Studio • Autonomous YouTube Production</title>
   <style>
     :root {
       --bg: #0B0F17;
@@ -13,7 +13,6 @@
       --border: #1F2A3C;
       --border-strong: #2E3D56;
 
-      /* New Cobalt & Electric Cyan Studio Theme */
       --accent: #22D3EE;
       --accent-hover: #67E8F9;
       --accent-dim: rgba(34, 211, 238, 0.13);
@@ -60,7 +59,6 @@
 
     .container { max-width: 1460px; margin: 0 auto; }
 
-    /* Header */
     header {
       display: flex;
       justify-content: space-between;
@@ -88,17 +86,8 @@
       box-shadow: 0 0 12px rgba(34, 211, 238, 0.8);
       display: inline-block;
     }
-    .brand-sub {
-      font-size: 12.5px;
-      color: var(--text-muted);
-      margin-top: 3px;
-    }
-    .status-strip {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 7px;
-      margin-top: 10px;
-    }
+    .brand-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
+    .status-strip { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
     .pill-chip {
       font-family: var(--mono);
       font-size: 11px;
@@ -117,15 +106,8 @@
     .pill-chip.warn { border-color: var(--amber-border); color: var(--amber); background: var(--amber-dim); }
     .pill-chip.bad { border-color: var(--danger-border); color: var(--danger); background: var(--danger-dim); }
 
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      justify-content: flex-end;
-    }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
 
-    /* Buttons */
     .btn {
       height: 34px;
       padding: 0 13px;
@@ -154,21 +136,12 @@
       font-weight: 700;
     }
     .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-    .btn-ok {
-      background: var(--ok-dim);
-      border-color: var(--ok-border);
-      color: #6EE7B7;
-    }
+    .btn-ok { background: var(--ok-dim); border-color: var(--ok-border); color: #6EE7B7; }
     .btn-ok:hover { background: rgba(16, 185, 129, 0.24); }
-    .btn-danger {
-      background: var(--danger-dim);
-      border-color: var(--danger-border);
-      color: #FDA4AF;
-    }
+    .btn-danger { background: var(--danger-dim); border-color: var(--danger-border); color: #FDA4AF; }
     .btn-danger:hover { background: rgba(244, 63, 94, 0.24); }
     .btn-sm { height: 28px; padding: 0 10px; font-size: 11px; border-radius: 7px; }
 
-    /* Alerts / Toast */
     .alert-box {
       padding: 10px 13px;
       border-radius: 9px;
@@ -185,7 +158,6 @@
     .alert-red { border-color: var(--danger-border); background: var(--danger-dim); color: #FFE4E6; }
     .hidden { display: none !important; }
 
-    /* Uniform Cards & KPI Row */
     .card {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -217,16 +189,8 @@
       flex-wrap: wrap;
     }
     .kpi-grid .card-header { margin-bottom: 8px; }
-    .card-title {
-      font-size: 14px;
-      font-weight: 700;
-      color: #FFFFFF;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+    .card-title { font-size: 14px; font-weight: 700; color: #FFFFFF; display: flex; align-items: center; gap: 8px; }
 
-    /* Badges */
     .badge {
       font-family: var(--mono);
       font-size: 10px;
@@ -259,14 +223,8 @@
       gap: 10px;
       flex-wrap: wrap;
     }
-    .big-metric small {
-      font-family: var(--mono);
-      font-size: 11.5px;
-      font-weight: 500;
-      color: var(--text-muted);
-    }
+    .big-metric small { font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--text-muted); }
 
-    /* Progress Bars */
     .progress-track {
       height: 7px;
       background: #1B2436;
@@ -299,137 +257,35 @@
       100% { transform: translateX(420%); }
     }
 
-    .mini-stats {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-    }
-    .mini-stat {
-      background: var(--surface-sub);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 8px 10px;
-    }
+    .mini-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .mini-stat { background: var(--surface-sub); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
     .mini-stat-label { font-size: 10px; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.04em; }
     .mini-stat-val { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--text); margin-top: 2px; }
     .subtle-note { font-size: 11.5px; color: var(--text-soft); }
     .mono { font-family: var(--mono); }
 
-    /* Stage Progress Card Block (StoryCircuit Style) */
-    .slot-prog-wrap {
-      padding: 10px 12px;
-      background: var(--surface-sub);
-      border: 1px solid var(--border);
-      border-radius: 9px;
-    }
-    .slot-prog-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      font-family: var(--mono);
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .slot-prog-stage {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      color: #FFFFFF;
-      min-width: 0;
-    }
-    .pulse-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--accent);
-      flex-shrink: 0;
-      animation: slotPulse 1.3s ease-in-out infinite;
-    }
-    @keyframes slotPulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.35; transform: scale(0.75); }
-    }
-    .slot-time-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      font-family: var(--mono);
-      font-size: 10.5px;
-      color: var(--text-muted);
-    }
+    .slot-prog-wrap { padding: 10px 12px; background: var(--surface-sub); border: 1px solid var(--border); border-radius: 9px; }
+    .slot-prog-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; font-weight: 700; }
+    .slot-prog-stage { display: inline-flex; align-items: center; gap: 6px; color: #FFFFFF; min-width: 0; }
+    .pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; animation: slotPulse 1.3s ease-in-out infinite; }
+    @keyframes slotPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.75); } }
+    .slot-time-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--mono); font-size: 10.5px; color: var(--text-muted); }
 
-    .phase-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-top: 8px;
-      padding-top: 7px;
-      border-top: 1px solid var(--border);
-      flex-wrap: wrap;
-    }
-    .phase-label {
-      font-family: var(--mono);
-      font-size: 9.5px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-soft);
-      min-width: 36px;
-    }
+    .phase-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+    .phase-label { font-family: var(--mono); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-soft); min-width: 36px; }
     .stage-steps { display: flex; flex-wrap: wrap; gap: 4px; }
-    .stage-pip {
-      font-family: var(--mono);
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: #141C2B;
-      border: 1px solid var(--border);
-      color: var(--text-soft);
-    }
+    .stage-pip { font-family: var(--mono); font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #141C2B; border: 1px solid var(--border); color: var(--text-soft); }
     .stage-pip.done { color: #6EE7B7; border-color: var(--ok-border); background: var(--ok-dim); }
     .stage-pip.active { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); font-weight: 700; }
     .stage-pip.waiting { color: #C7D2FE; border-color: var(--indigo-border); background: var(--indigo-dim); }
     .stage-pip.fail { color: #FDA4AF; border-color: var(--danger-border); background: var(--danger-dim); font-weight: 700; }
 
-    /* Dual-Slot Timeline */
-    .timeline-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-    }
+    .timeline-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     @media (max-width: 900px) { .timeline-grid { grid-template-columns: 1fr; } }
-    .slot-box {
-      background: var(--surface-sub);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .slot-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 8px;
-    }
-    .slot-foot {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      padding-top: 7px;
-      border-top: 1px solid var(--border);
-      font-family: var(--mono);
-      font-size: 10.5px;
-      color: var(--text-soft);
-    }
+    .slot-box { background: var(--surface-sub); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .slot-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .slot-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 7px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 10.5px; color: var(--text-soft); }
 
-    /* YouTube Auth & Client JSON */
     .dropzone {
       border: 1px dashed var(--border-strong);
       border-radius: 9px;
@@ -442,47 +298,17 @@
       cursor: pointer;
       transition: border-color 0.15s ease, background 0.15s ease;
     }
-    .dropzone:hover, .dropzone.dragover {
-      border-color: var(--accent);
-      background: var(--accent-dim);
-    }
-    .yt-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 7px;
-    }
-    .yt-mode-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr auto;
-      gap: 7px;
-      margin-top: 8px;
-      align-items: center;
-    }
+    .dropzone:hover, .dropzone.dragover { border-color: var(--accent); background: var(--accent-dim); }
+    .yt-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+    .yt-mode-row { display: grid; grid-template-columns: 1fr auto; gap: 7px; margin-top: 8px; align-items: center; }
 
-    /* Main StoryCircuit Home Grid (Left: 2 Video Cards + Archive | Right: Controls + Readiness) */
-    .main-grid {
-      display: grid;
-      grid-template-columns: 1.55fr 1fr;
-      gap: 16px;
-      align-items: start;
-    }
+    .main-grid { display: grid; grid-template-columns: 1.45fr 1.1fr; gap: 16px; align-items: start; }
     @media (max-width: 1120px) { .main-grid { grid-template-columns: 1fr; } }
 
-    .videos-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-    }
+    .videos-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     @media (max-width: 700px) { .videos-row { grid-template-columns: 1fr; } }
 
-    .video-card {
-      background: var(--surface-sub);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
+    .video-card { background: var(--surface-sub); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
     .video-preview-wrapper {
       width: 100%;
       aspect-ratio: 9 / 16;
@@ -494,54 +320,15 @@
       border-bottom: 1px solid var(--border);
       position: relative;
     }
-    .video-preview-wrapper video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      background: #000;
-    }
-    .preview-placeholder {
-      padding: 22px;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 12px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-    }
-    .video-info {
-      padding: 13px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      flex: 1;
-    }
-    .video-title {
-      font-size: 14px;
-      font-weight: 700;
-      color: #FFFFFF;
-      line-height: 1.3;
-    }
+    .video-preview-wrapper.landscape { aspect-ratio: 16 / 9; max-height: 260px; }
+    .video-preview-wrapper video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .preview-placeholder { padding: 22px; text-align: center; color: var(--text-muted); font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .video-info { padding: 13px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+    .video-title { font-size: 14px; font-weight: 700; color: #FFFFFF; line-height: 1.3; }
     .tag-row { display: flex; flex-wrap: wrap; gap: 4px; }
-    .tag-pill {
-      font-family: var(--mono);
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: var(--panel-elev);
-      color: var(--text-muted);
-      border: 1px solid var(--border);
-    }
-    .video-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 7px;
-      margin-top: auto;
-      padding-top: 6px;
-    }
+    .tag-pill { font-family: var(--mono); font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--panel-elev); color: var(--text-muted); border: 1px solid var(--border); }
+    .video-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: auto; padding-top: 6px; }
 
-    /* Right Panel Forms */
     .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
     .tab {
       background: var(--panel-elev);
@@ -554,21 +341,8 @@
       font-size: 11.5px;
       font-family: inherit;
     }
-    .tab.active {
-      background: var(--accent);
-      color: var(--accent-ink);
-      border-color: var(--accent);
-      font-weight: 700;
-    }
-    label {
-      display: block;
-      font-size: 10.5px;
-      color: var(--text-muted);
-      margin: 9px 0 4px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      font-weight: 600;
-    }
+    .tab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+    label { display: block; font-size: 10.5px; color: var(--text-muted); margin: 9px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
     input, select, textarea {
       width: 100%;
       background: var(--surface-sub);
@@ -582,19 +356,27 @@
     select { height: 34px; }
     .yt-mode-row select { height: 28px; padding: 0 8px; font-size: 11px; }
     input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-border); }
-    textarea { min-height: 108px; resize: vertical; }
+    textarea { min-height: 110px; resize: vertical; }
     .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
-    /* KV List & Archive Table */
-    .kv-list { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
-    .kv-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid var(--border);
+    .split-preview-box {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 9px;
+      border: 1px solid var(--accent-border);
+      background: rgba(34, 211, 238, 0.05);
     }
+    .split-part-card {
+      padding: 8px 10px;
+      margin-top: 7px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-sub);
+    }
+
+    .kv-list { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+    .kv-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
     .kv-row:last-child { border-bottom: none; padding-bottom: 0; }
     .kv-k { color: var(--text-muted); }
     .kv-v { font-family: var(--mono); color: var(--text); font-weight: 600; text-align: right; }
@@ -602,54 +384,21 @@
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { text-align: left; padding: 8px 7px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-    th {
-      color: var(--text-soft);
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      font-weight: 600;
-    }
+    th { color: var(--text-soft); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
 
-    /* Modals */
-    .modal-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(5, 8, 15, 0.84);
-      z-index: 999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .modal-card {
-      background: var(--panel);
-      border: 1px solid var(--border-strong);
-      border-radius: 12px;
-      max-width: 720px;
-      width: 100%;
-      padding: 20px;
-      max-height: 88vh;
-      overflow-y: auto;
-    }
-    .beat-row {
-      padding: 8px 10px;
-      background: var(--surface-sub);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      margin-bottom: 7px;
-      font-size: 12px;
-    }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(5, 8, 15, 0.84); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .modal-card { background: var(--panel); border: 1px solid var(--border-strong); border-radius: 12px; max-width: 740px; width: 100%; padding: 20px; max-height: 88vh; overflow-y: auto; }
+    .beat-row { padding: 8px 10px; background: var(--surface-sub); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 7px; font-size: 12px; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
   <div class="container">
-    <!-- HEADER -->
     <header>
       <div class="brand-block">
         <h1><span class="brand-dot"></span> StoryCircuit Studio</h1>
-        <p class="brand-sub">Zero-Cost Scene-Matched Shorts • 2 Daily Slots ({{ slot1 }} &amp; {{ slot2 }} {{ tz }})</p>
+        <p class="brand-sub">Autonomous AI Shorts &amp; Auto-Landscape YouTube Studio • Daily Slots ({{ slot1 }} &amp; {{ slot2 }} {{ tz }})</p>
         <div class="status-strip" id="statusPills">
           <span class="pill-chip">Connecting...</span>
         </div>
@@ -657,15 +406,14 @@
 
       <div class="toolbar">
         <button class="btn" onclick="refreshAll()">Refresh</button>
-        <button class="btn" onclick="testYouTubeConnection()">Check YouTube</button>
-        <button class="btn btn-primary" onclick="runDaily()">Run Today's 2-Video Cycle</button>
+        <button id="runDailyBtn" class="btn btn-primary" onclick="runDaily()">Generate Today's 2 Videos</button>
       </div>
     </header>
 
     <div id="toastBanner" class="alert-box alert-info hidden"></div>
     <div id="oauthStatusBanner" class="alert-box alert-info hidden"></div>
 
-    <!-- TOP KPI GRID (3 Uniform Cards) -->
+    <!-- TOP KPI GRID -->
     <div class="kpi-grid">
       <!-- 1. Daily Publishing Progress -->
       <div class="card">
@@ -689,7 +437,7 @@
             <div class="mini-stat"><div class="mini-stat-label">Scheduled</div><div id="statSched" class="mini-stat-val">0</div></div>
             <div class="mini-stat"><div class="mini-stat-label">Remaining</div><div id="statRem" class="mini-stat-val">2</div></div>
           </div>
-          <p class="subtle-note" style="margin-top:8px;">Slot 1 &amp; Slot 2 targets with local QC verification before upload.</p>
+          <p class="subtle-note" style="margin-top:8px;">AI picks non-repeating topics (or Custom Plan items) and schedules automatically on YouTube.</p>
         </div>
       </div>
 
@@ -701,7 +449,7 @@
             <span id="activePhaseBadge" class="badge">IDLE</span>
           </div>
           <div id="activeJobTitle" style="font-size:13px; font-weight:600; color:#FFFFFF; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:8px;">
-            Idle — start a Short or 2-Video Cycle
+            Idle — click "Generate Today's 2 Videos" to start
           </div>
           <div id="activeJobBar"></div>
         </div>
@@ -712,7 +460,7 @@
       <div class="card">
         <div>
           <div class="card-header">
-            <div class="card-title">YouTube Connection &amp; Auth</div>
+            <div class="card-title">YouTube Connection &amp; Auto-Schedule</div>
             <span id="ytConnBadge" class="badge">CHECKING</span>
           </div>
           <div class="big-metric" style="font-size:19px;">
@@ -734,18 +482,13 @@
         <div>
           <div class="yt-actions">
             <button id="ytAuthBtn" class="btn btn-primary btn-sm" onclick="startYouTubeOAuth()">Connect YouTube OAuth</button>
-            <button class="btn btn-sm" onclick="testYouTubeConnection()">Test Connection</button>
             <button id="ytDisconnectBtn" class="btn btn-danger btn-sm hidden" onclick="disconnectYouTubeOAuth()">Disconnect</button>
           </div>
           <div class="yt-mode-row">
-            <select id="ytModeSelect" title="Publishing mode">
-              <option value="simulation">Mode: Simulation</option>
-              <option value="live">Mode: Live Upload</option>
-            </select>
-            <select id="ytPrivacySelect" title="Privacy">
-              <option value="private">Privacy: Private</option>
-              <option value="unlisted">Privacy: Unlisted</option>
-              <option value="public">Privacy: Public</option>
+            <select id="ytPrivacySelect" title="Default upload privacy">
+              <option value="private">Schedule Privacy: Private (Auto-Public at Slot Time)</option>
+              <option value="unlisted">Immediate Fallback Privacy: Unlisted</option>
+              <option value="public">Immediate Fallback Privacy: Public</option>
             </select>
             <button class="btn btn-sm" onclick="saveYouTubeSettings()">Save</button>
           </div>
@@ -765,25 +508,23 @@
       </div>
     </div>
 
-    <!-- MAIN HOME WORKSPACE: 2 VIDEO CARDS + ARCHIVE (LEFT) | STUDIO CONTROLS + SYSTEM (RIGHT) -->
+    <!-- MAIN WORKSPACE -->
     <div class="main-grid">
       <!-- LEFT COLUMN -->
       <div>
-        <!-- Today's 2 Video Cards Showcase -->
         <div class="card">
           <div class="card-header">
             <div class="card-title">Today's Shorts &amp; Preview</div>
-            <span id="showcaseSubtitle" class="badge badge-accent">2-SLOT SHOWCASE</span>
+            <span id="showcaseSubtitle" class="badge badge-accent">9:16 SHORTS &amp; AUTO 16:9 LONG</span>
           </div>
           <div class="videos-row" id="videosContainer">
             <div class="subtle-note" style="padding:24px; text-align:center; grid-column:span 2;">Loading video cards...</div>
           </div>
         </div>
 
-        <!-- Recent Video Archive Table -->
         <div class="card">
           <div class="card-header">
-            <div class="card-title">Recent Video Archive</div>
+            <div class="card-title">Video Archive</div>
             <span id="archiveCountBadge" class="badge">0 JOBS</span>
           </div>
           <div class="table-wrap" id="archiveTable">
@@ -794,31 +535,121 @@
 
       <!-- RIGHT COLUMN -->
       <div>
-        <!-- Generator & Multi-Day Planner -->
         <div class="card">
           <div class="card-header">
             <div class="card-title">Studio Controls</div>
-            <span class="badge">ZERO-COST PIPELINE</span>
+            <span class="badge">AUTO-CONVERT &gt;2m TO 16:9</span>
           </div>
 
           <div class="tabs">
-            <button class="tab active" onclick="switchTab('random', this)">Quick Generate</button>
-            <button class="tab" onclick="switchTab('plan', this)">Multi-Day Plan</button>
-            <button class="tab" onclick="switchTab('custom', this)">Custom Script</button>
-            <button class="tab" onclick="switchTab('history', this)">Anti-Repeat</button>
+            <button class="tab active" onclick="switchTab('plan', this)">Custom Total Plan</button>
+            <button class="tab" onclick="switchTab('custom', this)">Script Splitter (1–2m)</button>
+            <button class="tab" onclick="switchTab('random', this)">Quick Generate</button>
+            <button class="tab" onclick="switchTab('history', this)">Anti-Repeat &amp; Cleanup</button>
           </div>
 
-          <div id="tab-random">
-            <div class="row2">
+          <!-- 1. Custom Total Plan -->
+          <div id="tab-plan">
+            <div class="row3">
+              <div><label>Date</label><input type="date" id="p-date" /></div>
+              <div><label>Publish Time</label><input type="time" id="p-time" value="{{ slot1 }}" /></div>
+              <div>
+                <label>Slot</label>
+                <select id="p-slot" onchange="syncPlanSlotTime()">
+                  <option value="1">Slot 1 ({{ slot1 }})</option>
+                  <option value="2">Slot 2 ({{ slot2 }})</option>
+                </select>
+              </div>
+            </div>
+            <div class="row3">
+              <div><label>Topic</label><input id="p-topic" placeholder="Topic (or auto from script)" /></div>
               <div>
                 <label>Category</label>
-                <select id="r-cat">
-                  <option value="auto">Auto (Fresh Topic)</option>
+                <select id="p-cat">
                   <option value="story">Story</option>
                   <option value="history">History</option>
                   <option value="mystery">Mystery</option>
                   <option value="space">Space</option>
                   <option value="science">Science</option>
+                  <option value="nature">Nature</option>
+                  <option value="tech">Tech</option>
+                </select>
+              </div>
+              <div>
+                <label>Visual Style</label>
+                <select id="p-style">
+                  <option value="auto">Auto (Rotate)</option>
+                  {% for s in styles %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+                </select>
+              </div>
+            </div>
+            <label>Custom Script (optional — &gt;2 min auto-converts to 16:9 Landscape)</label>
+            <textarea id="p-script" oninput="updatePlanScriptEstimate()" placeholder="Paste your exact narration or [Alex]: / [Maya]: dialogue, or leave blank for AI script..."></textarea>
+            <div id="p-estimate" class="subtle-note" style="margin-top:4px;"></div>
+            <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="addPlanItem()">Add to Custom Total Plan</button>
+            <div class="table-wrap" style="margin-top:12px;">
+              <table>
+                <thead><tr><th>Date &amp; Time</th><th>Topic &amp; Mode</th><th>Status</th><th style="text-align:right;">Actions</th></tr></thead>
+                <tbody id="planRows"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 2. Script Splitter (1-2 min Shorts) & Long-Video Renderer -->
+          <div id="tab-custom" class="hidden">
+            <div class="row3">
+              <div><label>Title (optional)</label><input id="c-title" oninput="debouncedAnalyzeScript()" placeholder="Story title" /></div>
+              <div>
+                <label>Category</label>
+                <select id="c-cat" onchange="debouncedAnalyzeScript()">
+                  <option value="story">Story</option>
+                  <option value="history">History</option>
+                  <option value="mystery">Mystery</option>
+                  <option value="space">Space</option>
+                  <option value="science">Science</option>
+                  <option value="nature">Nature</option>
+                  <option value="tech">Tech</option>
+                </select>
+              </div>
+              <div>
+                <label>Visual Style</label>
+                <select id="c-style">
+                  <option value="auto">Auto (Rotate)</option>
+                  {% for s in styles %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+                </select>
+              </div>
+            </div>
+            <label>Long or Custom Script (auto-splits into 1–2 min Shorts, or renders as 16:9 Landscape if &gt;2 min)</label>
+            <textarea id="c-script" style="min-height:145px;" oninput="debouncedAnalyzeScript()" placeholder="Paste a long script here. StoryCircuit calculates how many 1-to-2 minute Shorts can be made, splits cleanly at sentence/paragraph breaks, and writes SEO descriptions &amp; tags for each part..."></textarea>
+
+            <div id="splitSummaryBox" class="split-preview-box hidden"></div>
+
+            <div class="row3" style="margin-top:10px;">
+              <div><label>Plan Start Date</label><input type="date" id="s-start-date" /></div>
+              <div><label>Slot 1 Time</label><input type="time" id="s-time1" value="{{ slot1 }}" /></div>
+              <div><label>Slot 2 Time</label><input type="time" id="s-time2" value="{{ slot2 }}" /></div>
+            </div>
+            <div class="row2" style="margin-top:10px;">
+              <button class="btn btn-primary" onclick="queueSplitShortsToPlan()">Split &amp; Queue Shorts to Plan</button>
+              <button class="btn" onclick="submitGenerate('custom_script')">Render Single Video Now</button>
+            </div>
+            <p class="subtle-note" style="margin-top:6px;">Tip: "Render Single Video Now" automatically outputs 9:16 Short (≤2 min) or 16:9 Landscape Long-Format (&gt;2 min) with zero duration failure.</p>
+          </div>
+
+          <!-- 3. Quick Generate -->
+          <div id="tab-random" class="hidden">
+            <div class="row2">
+              <div>
+                <label>Category</label>
+                <select id="r-cat">
+                  <option value="auto">Auto (AI Fresh Topic)</option>
+                  <option value="story">Story</option>
+                  <option value="history">History</option>
+                  <option value="mystery">Mystery</option>
+                  <option value="space">Space</option>
+                  <option value="science">Science</option>
+                  <option value="nature">Nature</option>
+                  <option value="tech">Tech</option>
                 </select>
               </div>
               <div>
@@ -830,64 +661,29 @@
               </div>
             </div>
             <label>Topic Override (optional)</label>
-            <input id="r-topic" placeholder="Leave blank for automatic non-repeating topic" />
+            <input id="r-topic" placeholder="Leave blank for automatic non-repeating AI topic" />
             <label>Visual Source</label>
             <select id="r-vis">
               <option value="">Auto (Per-Beat AI + Archival + Cards)</option>
               <option value="pollinations">AI Illustrations + Cards</option>
               <option value="archival">Archival Photos + Cards</option>
-              <option value="cards_only">100% Offline Editorial Cards</option>
+              <option value="cards_only">Offline Editorial Cards</option>
             </select>
-            <button class="btn btn-primary" style="width:100%; margin-top:12px;" onclick="submitGenerate('random')">Generate &amp; QC Short</button>
+            <button class="btn btn-primary" style="width:100%; margin-top:12px;" onclick="submitGenerate('random')">Generate &amp; Schedule Video</button>
           </div>
 
-          <div id="tab-plan" class="hidden">
-            <div class="row2">
-              <div><label>Date</label><input type="date" id="p-date" /></div>
-              <div>
-                <label>Slot</label>
-                <select id="p-slot"><option value="1">Slot 1 ({{ slot1 }})</option><option value="2">Slot 2 ({{ slot2 }})</option></select>
-              </div>
-            </div>
-            <div class="row2">
-              <div><label>Topic</label><input id="p-topic" placeholder="Topic for this slot" /></div>
-              <div>
-                <label>Style</label>
-                <select id="p-style">
-                  <option value="auto">Auto (Rotate)</option>
-                  {% for s in styles %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
-                </select>
-              </div>
-            </div>
-            <label>Optional Custom Script</label>
-            <textarea id="p-script" placeholder="Leave empty to auto-write script..."></textarea>
-            <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="addPlanItem()">Queue into Multi-Day Plan</button>
-            <div class="table-wrap" style="margin-top:12px;">
-              <table>
-                <thead><tr><th>Date</th><th>Slot</th><th>Topic</th><th>Status</th><th></th></tr></thead>
-                <tbody id="planRows"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <div id="tab-custom" class="hidden">
-            <div class="row2">
-              <div><label>Title (optional)</label><input id="c-title" placeholder="Short title" /></div>
-              <div>
-                <label>Visual Style</label>
-                <select id="c-style">
-                  <option value="auto">Auto</option>
-                  {% for s in styles %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
-                </select>
-              </div>
-            </div>
-            <label>Exact Script (supports [Alex]: / [Maya]: two-voice dialogue)</label>
-            <textarea id="c-script" placeholder="Paste your narration or dialogue. Each sentence becomes a visual beat..."></textarea>
-            <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="submitGenerate('custom_script')">Render Custom Script</button>
-          </div>
-
+          <!-- 4. Anti-Repeat & Garbage Remover -->
           <div id="tab-history" class="hidden">
-            <p class="subtle-note" style="margin-bottom:8px;">Topics logged here are blocked from repeating via keyword + 3-gram similarity.</p>
+            <div class="slot-prog-wrap" style="margin-bottom:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <div>
+                  <div style="font-weight:700; color:#fff; font-size:12.5px;">End-of-Day Garbage Remover</div>
+                  <div id="cleanupStatusText" class="subtle-note">Automatically deletes ended-day video files after midnight ({{ tz }}).</div>
+                </div>
+                <button class="btn btn-sm" onclick="runCleanupNow()">Clean Ended Days</button>
+              </div>
+            </div>
+            <p class="subtle-note" style="margin-bottom:8px;">Topics below are permanently blocked from repeating (even after video files are cleaned up).</p>
             <div class="table-wrap">
               <table>
                 <thead><tr><th>Title</th><th>Category</th><th>Created</th></tr></thead>
@@ -897,7 +693,7 @@
           </div>
         </div>
 
-        <!-- System & Pipeline Readiness -->
+        <!-- Pipeline Readiness -->
         <div class="card">
           <div class="card-header">
             <div class="card-title">Pipeline Readiness</div>
@@ -906,8 +702,9 @@
           <div class="kv-list" id="readinessKv">
             <div class="kv-row"><span class="kv-k">Local LLM (Ollama)</span><span class="kv-v" id="kvOllama">--</span></div>
             <div class="kv-row"><span class="kv-k">Gemini Free Tier</span><span class="kv-v" id="kvGemini">--</span></div>
-            <div class="kv-row"><span class="kv-k">Visual Mode</span><span class="kv-v" id="kvVisual">--</span></div>
+            <div class="kv-row"><span class="kv-k">Format Rule</span><span class="kv-v">≤2m: 9:16 • &gt;2m: 16:9</span></div>
             <div class="kv-row"><span class="kv-k">Daily Schedule</span><span class="kv-v" id="kvSched">{{ slot1 }} &amp; {{ slot2 }} {{ tz }}</span></div>
+            <div class="kv-row"><span class="kv-k">Disk Output</span><span class="kv-v" id="kvStorage">--</span></div>
             <div class="kv-row"><span class="kv-k">YouTube Auth</span><span class="kv-v" id="kvYt">--</span></div>
           </div>
         </div>
@@ -915,7 +712,7 @@
     </div>
   </div>
 
-  <!-- Beats / QC / Preview Modal -->
+  <!-- Details / SEO / Preview Modal -->
   <div id="detailModal" class="modal-backdrop hidden" onclick="if(event.target===this) closeModal()">
     <div class="modal-card">
       <div class="card-header" style="margin-bottom:10px;">
@@ -931,6 +728,8 @@ let _pollTimer = null;
 let _currentPollMs = 5000;
 let _ytSettingsSynced = false;
 let _jobsById = {};
+let _analyzeTimer = null;
+let _lastSplitAnalysis = null;
 
 function escHtml(raw) {
   return String(raw ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -943,7 +742,7 @@ function showToast(msg, kind = 'info') {
   el.className = `alert-box alert-${kind}`;
   el.innerText = msg;
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.add('hidden'), 5000);
+  el._t = setTimeout(() => el.classList.add('hidden'), 5500);
 }
 
 function switchTab(name, btn) {
@@ -955,10 +754,101 @@ function switchTab(name, btn) {
   if (name === 'history') loadHistory();
 }
 
+function syncPlanSlotTime() {
+  const slot = document.getElementById('p-slot').value;
+  document.getElementById('p-time').value = slot === '2' ? '{{ slot2 }}' : '{{ slot1 }}';
+}
+
+function updatePlanScriptEstimate() {
+  const txt = document.getElementById('p-script').value.trim();
+  const el = document.getElementById('p-estimate');
+  if (!txt) { el.innerText = ''; return; }
+  const words = txt.split(/\s+/).filter(Boolean).length;
+  const est = Math.round(words / 2.55 + 1.5);
+  const fmt = est > 120 ? 'Auto 16:9 Landscape Long-Format (>2m)' : '9:16 YouTube Short (≤2m)';
+  el.innerText = `~${words} words • ~${est}s estimated → ${fmt}`;
+}
+
+function debouncedAnalyzeScript() {
+  clearTimeout(_analyzeTimer);
+  _analyzeTimer = setTimeout(analyzeLongScript, 320);
+}
+
+async function analyzeLongScript() {
+  const script = document.getElementById('c-script').value.trim();
+  const box = document.getElementById('splitSummaryBox');
+  if (!script) {
+    _lastSplitAnalysis = null;
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  const res = await fetch('/api/scripts/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      script,
+      title: document.getElementById('c-title').value,
+      category: document.getElementById('c-cat').value
+    })
+  });
+  if (!res.ok) return;
+  const data = await res.json();
+  _lastSplitAnalysis = data;
+  const parts = data.parts || [];
+  const mins = Math.floor((data.estimated_total_sec || 0) / 60);
+  const secs = Math.round((data.estimated_total_sec || 0) % 60);
+  const durStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <strong style="color:#fff;">Possible 1–2 min Shorts: <span style="color:var(--accent);">${data.possible_videos} video(s)</span></strong>
+      <span class="badge ${data.exceeds_short_limit ? 'badge-indigo' : 'badge-ok'}">
+        ${data.total_words} words • ~${durStr} total${data.exceeds_short_limit ? ' (or 1 Landscape 16:9)' : ''}
+      </span>
+    </div>
+    ${parts.map(p => `
+      <div class="split-part-card">
+        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+          <strong style="color:#fff; font-size:12px;">Part ${p.part_number}/${p.total_parts}: ${escHtml(p.title)}</strong>
+          <span class="badge badge-accent">~${p.estimated_duration_sec}s • ${p.word_count}w</span>
+        </div>
+        <div class="subtle-note" style="margin-top:3px;">${escHtml(p.preview)}</div>
+      </div>
+    `).join('')}
+  `;
+}
+
+async function queueSplitShortsToPlan() {
+  const script = document.getElementById('c-script').value.trim();
+  if (!script) { showToast('Paste a script first.', 'amber'); return; }
+  const res = await fetch('/api/scripts/queue-split', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      script,
+      title: document.getElementById('c-title').value,
+      category: document.getElementById('c-cat').value,
+      style: document.getElementById('c-style').value,
+      start_date: document.getElementById('s-start-date').value,
+      slot1_time: document.getElementById('s-time1').value,
+      slot2_time: document.getElementById('s-time2').value,
+      videos_per_day: 2
+    })
+  });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.detail || 'Could not queue split Shorts', 'red'); return; }
+  showToast(`Queued ${data.queued_count} balanced 1–2 min Short(s) into Custom Total Plan!`, 'ok');
+  document.getElementById('c-script').value = '';
+  document.getElementById('c-title').value = '';
+  document.getElementById('splitSummaryBox').classList.add('hidden');
+  loadPlan();
+}
+
 function phaseBadgeMeta(phase) {
   if (phase === 'completed') return { cls: 'badge-ok', tag: 'COMPLETE', bar: 'ok' };
   if (phase === 'waiting_schedule') return { cls: 'badge-indigo', tag: 'SCHEDULED', bar: 'indigo' };
-  if (phase === 'waiting_distribution') return { cls: 'badge-accent', tag: 'READY TO UPLOAD', bar: '' };
+  if (phase === 'waiting_distribution') return { cls: 'badge-accent', tag: 'READY TO PUBLISH', bar: '' };
   if (phase === 'production' || phase === 'distribution') return { cls: 'badge-accent', tag: 'RUNNING', bar: '' };
   if (phase === 'failed') return { cls: 'badge-red', tag: 'FAILED', bar: 'red' };
   return { cls: '', tag: 'IDLE', bar: '' };
@@ -1015,14 +905,14 @@ function renderSlotCard(s) {
   const prodPips = (s.production_stages || []).map(renderStagePip).join('');
   const distPips = (s.distribution_stages || []).map(renderStagePip).join('');
   const durTxt = s.duration_sec != null ? `${Number(s.duration_sec).toFixed(1)}s` : '--';
-  const ytTxt = s.youtube_id ? `YT ${s.youtube_id}${s.simulated ? ' (SIM)' : ''}` : 'YT --';
+  const ytTxt = s.youtube_id ? `YT ${s.youtube_id}` : 'YT --';
   return `
     <div class="slot-box">
       <div class="slot-head">
         <div style="min-width:0; flex:1;">
           <strong style="font-size:13px; color:#fff;">${escHtml(s.slot_label)} • ${escHtml(s.target_time)}</strong>
           <div class="subtle-note" style="margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-            ${s.title ? escHtml(s.title) : 'No topic generated yet for this slot'}
+            ${s.title ? escHtml(s.title) : 'No video generated yet for this slot'}
           </div>
         </div>
         <span class="badge ${meta.cls}">${meta.tag}</span>
@@ -1040,7 +930,6 @@ function renderSlotCard(s) {
 }
 
 function renderVideoShowcaseCards(todayJobs, allJobs, slots) {
-  // Always render 2 balanced cards like StoryCircuit: prefer today's Slot 1 & Slot 2, fill remaining with latest jobs
   const bySlot = {};
   for (const j of (todayJobs || [])) {
     if (j.slot_num === 1 || j.slot_num === 2) bySlot[j.slot_num] = j;
@@ -1054,7 +943,7 @@ function renderVideoShowcaseCards(todayJobs, allJobs, slots) {
     let slotTag = `Slot ${slotNum} • ${slotTime}`;
     if (!job && fallbackPool.length > 0) {
       job = fallbackPool.shift();
-      slotTag = job.slot_num ? `Slot ${job.slot_num} • ${job.scheduled_date || 'Recent'}` : `Latest Run • ${job.source_mode}`;
+      slotTag = job.slot_num ? `Slot ${job.slot_num} • ${job.scheduled_date || 'Recent'}` : `Run • ${job.source_mode}`;
     }
 
     if (!job) {
@@ -1063,8 +952,8 @@ function renderVideoShowcaseCards(todayJobs, allJobs, slots) {
           <div class="video-preview-wrapper">
             <div class="preview-placeholder">
               <span class="badge">SLOT ${slotNum} EMPTY</span>
-              <div>No Short rendered for ${escHtml(slotTag)} yet.</div>
-              <button class="btn btn-primary btn-sm" onclick="submitGenerate('random')">Generate Short</button>
+              <div>No video rendered for ${escHtml(slotTag)} yet.</div>
+              <button class="btn btn-primary btn-sm" onclick="runDaily()">Generate Today's 2 Videos</button>
             </div>
           </div>
           <div class="video-info">
@@ -1073,7 +962,7 @@ function renderVideoShowcaseCards(todayJobs, allJobs, slots) {
               <span class="badge">PENDING</span>
             </div>
             <div class="video-title" style="color:var(--text-muted);">Waiting for production</div>
-            <div class="subtle-note">Click "Run Today's 2-Video Cycle" or "Generate Short" to create this video.</div>
+            <div class="subtle-note">Click "Generate Today's 2 Videos" to create &amp; schedule automatically.</div>
           </div>
         </div>
       `;
@@ -1082,9 +971,10 @@ function renderVideoShowcaseCards(todayJobs, allJobs, slots) {
     const qc = job.qc || {};
     const checks = qc.checks || {};
     const sb = job.storyboard || {};
-    const tags = (sb.tags || []).slice(0, 5);
+    const tags = (sb.tags || []).slice(0, 6);
+    const isLong = (job.video_format === 'long') || (sb.video_format === 'long');
     const isBusy = ['rendering', 'uploading'].includes(job.status);
-    const canUpload = job.status === 'qc_passed';
+    const canUpload = job.status === 'qc_passed' && Boolean(job.video_path);
     const canRetry = ['failed', 'qc_failed'].includes(job.status);
     const hasVideo = Boolean(job.video_path && job.status !== 'failed');
 
@@ -1092,36 +982,38 @@ function renderVideoShowcaseCards(todayJobs, allJobs, slots) {
       ? `<video controls playsinline preload="metadata" src="/api/jobs/${encodeURIComponent(job.id)}/video"></video>`
       : `<div class="preview-placeholder">
           ${isBusy ? '<span class="pulse-dot"></span>' : ''}
-          <div>${isBusy ? escHtml((job.progress && job.progress.stage_label) || 'Rendering Short...') : 'MP4 not available'}</div>
+          <div>${isBusy ? escHtml((job.progress && job.progress.stage_label) || 'Rendering...') : (job.cleaned_at ? 'Cleaned up after day ended' : 'MP4 not available')}</div>
           ${isBusy ? `<span class="badge badge-accent">${Number((job.progress && job.progress.percent) || 0)}%</span>` : ''}
         </div>`;
 
     const durBadge = checks.duration_sec != null ? `<span class="badge">${Number(checks.duration_sec).toFixed(1)}s</span>` : '';
+    const fmtBadge = `<span class="badge ${isLong ? 'badge-indigo' : 'badge-accent'}">${isLong ? 'LONG 16:9' : 'SHORT 9:16'}</span>`;
     const qcBadge = qc.passed === true
       ? '<span class="badge badge-ok">QC PASS</span>'
       : (qc.passed === false ? '<span class="badge badge-red">QC FAIL</span>' : '');
 
     return `
       <div class="video-card">
-        <div class="video-preview-wrapper">${previewHtml}</div>
+        <div class="video-preview-wrapper ${isLong ? 'landscape' : ''}">${previewHtml}</div>
         <div class="video-info">
           <div style="display:flex; gap:5px; flex-wrap:wrap; align-items:center;">
             <span class="badge badge-accent">${escHtml(slotTag)}</span>
+            ${fmtBadge}
             ${qcBadge}
             ${renderJobStatusBadge(job.status)}
             ${durBadge}
           </div>
           <div class="video-title">${escHtml(job.title)}</div>
           <div class="subtle-note mono">
-            ${escHtml(job.category)} • ${escHtml(job.style)}${job.youtube_id ? ` • ${escHtml(job.youtube_id)}${job.simulated ? ' (SIM)' : ''}` : ''}
+            ${escHtml(job.category)} • ${escHtml(job.style)}${job.youtube_id ? ` • ${escHtml(job.youtube_id)}` : ''}
           </div>
           ${tags.length ? `<div class="tag-row">${tags.map(t => `<span class="tag-pill">${escHtml(t)}</span>`).join('')}</div>` : ''}
           ${job.error ? `<div class="alert-box alert-red" style="margin:0;">${escHtml(String(job.error).slice(0, 160))}</div>` : ''}
           <div class="video-actions">
-            ${canUpload ? `<button class="btn btn-ok btn-sm" onclick="uploadJob('${escHtml(job.id)}')">Upload / Simulate</button>` : ''}
-            ${(!canUpload && job.youtube_url) ? `<a class="btn btn-sm" href="${escHtml(job.youtube_url)}" target="_blank" rel="noopener">YouTube Link</a>` : ''}
+            ${canUpload ? `<button class="btn btn-ok btn-sm" onclick="uploadJob('${escHtml(job.id)}')">Publish &amp; Schedule</button>` : ''}
+            ${(!canUpload && job.youtube_url) ? `<a class="btn btn-sm" href="${escHtml(job.youtube_url)}" target="_blank" rel="noopener">Open on YouTube</a>` : ''}
             ${canRetry ? `<button class="btn btn-danger btn-sm" onclick="retryJob('${escHtml(job.id)}')">Retry Job</button>` : ''}
-            <button class="btn btn-sm" onclick="openJobModal('${escHtml(job.id)}')">Beats &amp; QC</button>
+            <button class="btn btn-sm" onclick="openJobModal('${escHtml(job.id)}')">Beats &amp; SEO</button>
             ${(!canUpload && !job.youtube_url && !canRetry) ? `<button class="btn btn-danger btn-sm" onclick="deleteJob('${escHtml(job.id)}')">Delete</button>` : ''}
           </div>
         </div>
@@ -1144,32 +1036,33 @@ function renderArchiveTable(jobs) {
       <thead>
         <tr>
           <th>Title</th>
-          <th>Mode</th>
+          <th>Format</th>
           <th>Dur</th>
           <th>Status</th>
           <th style="text-align:right;">Actions</th>
         </tr>
       </thead>
       <tbody>
-        ${jobs.slice(0, 15).map(j => {
+        ${jobs.slice(0, 18).map(j => {
           const checks = (j.qc && j.qc.checks) || {};
           const dur = checks.duration_sec != null ? `${Number(checks.duration_sec).toFixed(1)}s` : '--';
-          const canUpload = j.status === 'qc_passed';
+          const isLong = (j.video_format === 'long') || ((j.storyboard || {}).video_format === 'long');
+          const canUpload = j.status === 'qc_passed' && Boolean(j.video_path);
           const canRetry = ['failed', 'qc_failed'].includes(j.status);
           const isBusy = ['rendering', 'uploading'].includes(j.status);
           return `
             <tr>
               <td>
                 <div style="font-weight:600; color:#fff;">${escHtml(j.title)}</div>
-                <div class="subtle-note mono">${escHtml(j.id)} • ${escHtml(j.style)}</div>
+                <div class="subtle-note mono">${escHtml(j.scheduled_date || '')}${j.slot_num ? ` • Slot ${j.slot_num}` : ''} • ${escHtml(j.style)}</div>
               </td>
-              <td class="mono">${escHtml(j.slot_num ? `Slot ${j.slot_num}` : j.source_mode)}</td>
+              <td class="mono"><span class="badge ${isLong ? 'badge-indigo' : 'badge-accent'}">${isLong ? '16:9' : '9:16'}</span></td>
               <td class="mono">${escHtml(dur)}</td>
               <td>${renderJobStatusBadge(j.status)}</td>
               <td style="text-align:right; white-space:nowrap;">
                 ${j.video_path && j.status !== 'failed' ? `<button class="btn btn-sm" onclick="openPreviewModal('${escHtml(j.id)}')">Watch</button>` : ''}
-                <button class="btn btn-sm" onclick="openJobModal('${escHtml(j.id)}')">Beats</button>
-                ${canUpload ? `<button class="btn btn-ok btn-sm" onclick="uploadJob('${escHtml(j.id)}')">Upload</button>` : ''}
+                <button class="btn btn-sm" onclick="openJobModal('${escHtml(j.id)}')">SEO</button>
+                ${canUpload ? `<button class="btn btn-ok btn-sm" onclick="uploadJob('${escHtml(j.id)}')">Publish</button>` : ''}
                 ${canRetry ? `<button class="btn btn-sm" onclick="retryJob('${escHtml(j.id)}')">Retry</button>` : ''}
                 ${!isBusy ? `<button class="btn btn-danger btn-sm" onclick="deleteJob('${escHtml(j.id)}')">✕</button>` : ''}
               </td>
@@ -1201,7 +1094,7 @@ function renderYouTubeCard(yt, oauth) {
   badge.className = 'badge ' + sm.cls;
   badge.innerText = sm.label;
 
-  chName.innerText = yt.channel_title || (yt.healthy ? 'YouTube Authorized' : (yt.has_client_credentials ? 'Ready to Authorize' : 'Not Connected'));
+  chName.innerText = yt.channel_title || (yt.healthy ? 'YouTube Connected' : (yt.has_client_credentials ? 'Ready to Authorize' : 'Not Connected'));
   maskEl.innerText = yt.client_id_masked || '';
   msgEl.innerText = yt.message || '';
 
@@ -1224,7 +1117,6 @@ function renderYouTubeCard(yt, oauth) {
   discBtn.classList.toggle('hidden', !yt.has_refresh_token);
 
   if (!_ytSettingsSynced) {
-    document.getElementById('ytModeSelect').value = yt.mode || 'simulation';
     document.getElementById('ytPrivacySelect').value = yt.privacy_status || 'private';
     _ytSettingsSynced = true;
   }
@@ -1257,16 +1149,20 @@ function openJobModal(jobId) {
   const beats = sb.beats || [];
   const qc = j.qc || {};
   const checks = qc.checks || {};
-  document.getElementById('modalTitle').innerText = `${j.title} • Beats & QC`;
+  const tags = sb.tags || [];
+  document.getElementById('modalTitle').innerText = `${j.title} • Beats & SEO`;
   document.getElementById('modalBody').innerHTML = `
     <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
       ${renderJobStatusBadge(j.status)}
+      <span class="badge">${escHtml((j.video_format || 'short').toUpperCase())}</span>
       <span class="badge">${escHtml(j.style)}</span>
       <span class="badge">${escHtml(j.category)}</span>
+      ${checks.resolution ? `<span class="badge">${escHtml(checks.resolution)}</span>` : ''}
       ${checks.duration_sec != null ? `<span class="badge">${escHtml(checks.duration_sec)}s</span>` : ''}
       ${checks.integrated_lufs != null ? `<span class="badge">${escHtml(checks.integrated_lufs)} LUFS</span>` : ''}
     </div>
-    ${sb.description ? `<div class="alert-box alert-info" style="margin-bottom:10px;"><strong>Description:</strong> ${escHtml(sb.description)}</div>` : ''}
+    ${sb.description ? `<div class="alert-box alert-info" style="margin-bottom:10px; white-space:pre-line;"><strong>SEO Description:</strong>\n${escHtml(sb.description)}</div>` : ''}
+    ${tags.length ? `<div class="tag-row" style="margin-bottom:12px;">${tags.map(t => `<span class="tag-pill">${escHtml(t)}</span>`).join('')}</div>` : ''}
     ${beats.length ? beats.map(b => `
       <div class="beat-row">
         <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
@@ -1285,7 +1181,7 @@ function openPreviewModal(jobId) {
   if (!j) return;
   document.getElementById('modalTitle').innerText = j.title;
   document.getElementById('modalBody').innerHTML = `
-    <video controls autoplay playsinline style="width:100%; max-height:65vh; border-radius:10px; background:#000;" src="/api/jobs/${encodeURIComponent(jobId)}/video"></video>
+    <video controls autoplay playsinline style="width:100%; max-height:68vh; border-radius:10px; background:#000;" src="/api/jobs/${encodeURIComponent(jobId)}/video"></video>
   `;
   document.getElementById('detailModal').classList.remove('hidden');
 }
@@ -1312,16 +1208,16 @@ async function refreshAll() {
   const yt = st.youtube || {};
   const ytChipCls = yt.healthy ? 'ok' : (yt.has_client_credentials ? 'warn' : 'bad');
   document.getElementById('statusPills').innerHTML = [
-    `<span class="pill-chip ${yt.mode === 'live' ? 'accent' : ''}">YT: ${escHtml(String(yt.mode || 'simulation').toUpperCase())} (${escHtml(String(yt.privacy_status || 'private').toUpperCase())})</span>`,
-    `<span class="pill-chip ${ytChipCls}">OAUTH: ${escHtml(String(yt.state || 'unknown').replace('_', ' ').toUpperCase())}</span>`,
-    `<span class="pill-chip ${yt.client_json_present ? 'accent' : 'warn'}">CLIENT JSON: ${yt.client_json_present ? 'OK' : 'MISSING'}</span>`,
+    `<span class="pill-chip ${ytChipCls}">YOUTUBE: ${escHtml(String(yt.state || 'unknown').replace('_', ' ').toUpperCase())}</span>`,
     `<span class="pill-chip ${st.ollama_online ? 'ok' : 'warn'}">OLLAMA: ${st.ollama_online ? 'ONLINE' : 'FALLBACK'}</span>`,
     `<span class="pill-chip ${st.gemini_configured ? 'ok' : ''}">GEMINI: ${st.gemini_configured ? 'ON' : 'OFF'}</span>`,
     `<span class="pill-chip ${st.worker_busy ? 'accent' : ''}">${st.worker_busy ? '<span class="pulse-dot"></span>' : ''}WORKER: ${st.worker_busy ? 'RUNNING' : 'IDLE'}</span>`,
     `<span class="pill-chip">DATE: ${escHtml(st.today)}</span>`
   ].join('');
 
-  // KPI 1: Daily Progress
+  const runBtn = document.getElementById('runDailyBtn');
+  if (runBtn) runBtn.disabled = Boolean(st.daily_running);
+
   const ds = st.daily_summary || { target: 2, completed: 0, ready_or_done: 0, qc_passed: 0, uploaded: 0, scheduled: 0, remaining: 2, percent: 0 };
   document.getElementById('dailyBadge').innerText = `${ds.ready_or_done} / ${ds.target} READY`;
   document.getElementById('dailyFrac').innerText = `${ds.completed} / ${ds.target}`;
@@ -1332,13 +1228,12 @@ async function refreshAll() {
   document.getElementById('statSched').innerText = ds.scheduled;
   document.getElementById('statRem').innerText = ds.remaining;
 
-  // KPI 2: Live Production Progress
   const aj = st.active_job || { phase: 'idle', percent: 0, stage_label: 'Waiting for run', production_stages: [], distribution_stages: [] };
   const ajMeta = phaseBadgeMeta(aj.phase);
   const ajBadge = document.getElementById('activePhaseBadge');
   ajBadge.className = 'badge ' + ajMeta.cls;
   ajBadge.innerText = ajMeta.tag;
-  document.getElementById('activeJobTitle').innerText = aj.title || 'Idle — trigger a Short or 2-video cycle';
+  document.getElementById('activeJobTitle').innerText = aj.title || 'Idle — click "Generate Today\'s 2 Videos"';
   document.getElementById('activeJobBar').innerHTML = renderProgressBarBlock(aj);
   const ajProd = (aj.production_stages || []).map(renderStagePip).join('');
   const ajDist = (aj.distribution_stages || []).map(renderStagePip).join('');
@@ -1346,26 +1241,29 @@ async function refreshAll() {
     (ajProd ? `<div class="phase-row"><span class="phase-label">Prod</span><div class="stage-steps">${ajProd}</div></div>` : '') +
     (ajDist ? `<div class="phase-row"><span class="phase-label">Dist</span><div class="stage-steps">${ajDist}</div></div>` : '');
 
-  // KPI 3: YouTube Connection Card
   renderYouTubeCard(yt, st.oauth);
 
-  // Dual-Slot Timeline
   if (Array.isArray(st.slot_timeline) && st.slot_timeline.length) {
     document.getElementById('slotTimelineContainer').innerHTML = st.slot_timeline.map(renderSlotCard).join('');
   }
 
-  // 2 Video Cards + Archive Table
   renderVideoShowcaseCards(st.today_jobs || [], jobs, st.slots || { slot1: '12:30', slot2: '20:30' });
   renderArchiveTable(jobs);
 
-  // Readiness Card
   const wb = document.getElementById('workerBadge');
   wb.className = 'badge ' + (st.worker_busy ? 'badge-accent' : '');
   wb.innerText = st.worker_busy ? 'ACTIVE' : 'IDLE';
   document.getElementById('kvOllama').innerText = st.ollama_online ? `Online (${st.ollama_model})` : 'Offline (Fallback)';
   document.getElementById('kvGemini').innerText = st.gemini_configured ? 'Configured' : 'Off';
-  document.getElementById('kvVisual').innerText = st.visual_mode || 'auto';
-  document.getElementById('kvYt').innerText = `${String(yt.state || '').toUpperCase()} (${yt.mode || 'simulation'})`;
+  const storage = st.storage || {};
+  document.getElementById('kvStorage').innerText = `${storage.total_mb ?? 0} MB (${storage.folder_count ?? 0} folders)`;
+  document.getElementById('kvYt').innerText = String(yt.state || '').replace('_', ' ').toUpperCase();
+
+  const lc = st.last_cleanup;
+  if (lc) {
+    document.getElementById('cleanupStatusText').innerText =
+      `Auto-cleanup ON • Last run (${lc.current_date}): removed ${lc.deleted_count} ended-day folder(s), freed ${lc.freed_mb} MB.`;
+  }
 
   const fastMode = Boolean(st.worker_busy || (st.oauth && st.oauth.status === 'running'));
   schedulePoll(fastMode ? 1500 : 5000);
@@ -1390,15 +1288,6 @@ async function startYouTubeOAuth() {
   await refreshAll();
 }
 
-async function testYouTubeConnection() {
-  const res = await fetch('/api/youtube/check', { method: 'POST' });
-  const data = await res.json();
-  if (!res.ok) { showToast(data.detail || 'Connection check failed', 'red'); return; }
-  const yt = data.youtube || {};
-  showToast(yt.message || 'Checked YouTube connection.', yt.healthy ? 'ok' : 'amber');
-  await refreshAll();
-}
-
 async function disconnectYouTubeOAuth() {
   if (!confirm('Disconnect stored YouTube refresh token?')) return;
   await fetch('/api/youtube/oauth/disconnect', { method: 'POST' });
@@ -1407,21 +1296,15 @@ async function disconnectYouTubeOAuth() {
 }
 
 async function saveYouTubeSettings() {
-  const mode = document.getElementById('ytModeSelect').value;
   const privacy_status = document.getElementById('ytPrivacySelect').value;
-  if (mode === 'live' && !confirm('Switch YouTube publishing mode to LIVE? Future uploads will go to your real YouTube channel.')) {
-    _ytSettingsSynced = false;
-    await refreshAll();
-    return;
-  }
   const res = await fetch('/api/youtube/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode, privacy_status })
+    body: JSON.stringify({ mode: 'live', privacy_status })
   });
   if (!res.ok) { showToast('Failed to save YouTube settings', 'red'); return; }
   _ytSettingsSynced = false;
-  showToast(`Saved YouTube settings: ${mode.toUpperCase()} (${privacy_status}).`, 'ok');
+  showToast(`Saved YouTube privacy preference: ${privacy_status.toUpperCase()}.`, 'ok');
   await refreshAll();
 }
 
@@ -1431,26 +1314,30 @@ async function submitGenerate(mode) {
     topic: document.getElementById('r-topic').value,
     category: document.getElementById('r-cat').value,
     style: document.getElementById('r-style').value,
-    visual_mode: document.getElementById('r-vis').value || null
+    visual_mode: document.getElementById('r-vis').value || null,
+    auto_upload: true
   } : {
     mode: 'custom_script',
     topic: document.getElementById('c-title').value,
+    category: document.getElementById('c-cat').value,
     style: document.getElementById('c-style').value,
-    custom_script: document.getElementById('c-script').value
+    custom_script: document.getElementById('c-script').value,
+    auto_upload: true
   };
   const res = await fetch('/api/generate', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
   });
   const data = await res.json();
   if (!res.ok) { showToast(data.detail || 'Error queuing generation', 'red'); return; }
-  showToast('Generation queued on local worker.', 'info');
+  showToast(data.message || 'Generation & YouTube scheduling queued.', 'info');
   schedulePoll(1500);
   refreshAll();
 }
 
 async function runDaily() {
-  await fetch('/api/run-daily', { method: 'POST' });
-  showToast('Daily 2-video cycle queued.', 'info');
+  const res = await fetch('/api/run-daily', { method: 'POST' });
+  const data = await res.json();
+  showToast(data.message || "Today's 2-video cycle started.", data.already_running ? 'amber' : 'info');
   schedulePoll(1500);
   refreshAll();
 }
@@ -1458,8 +1345,8 @@ async function runDaily() {
 async function uploadJob(id) {
   const res = await fetch(`/api/jobs/${encodeURIComponent(id)}/upload`, { method: 'POST' });
   const data = await res.json();
-  if (!res.ok) { showToast(data.detail || 'Upload failed', 'red'); return; }
-  showToast('Upload / simulation complete.', 'ok');
+  if (!res.ok) { showToast(data.detail || 'YouTube upload failed', 'red'); return; }
+  showToast('Published & scheduled on YouTube!', 'ok');
   refreshAll();
 }
 
@@ -1483,33 +1370,57 @@ async function deleteJob(id) {
 async function addPlanItem() {
   const payload = {
     planned_date: document.getElementById('p-date').value,
+    publish_time: document.getElementById('p-time').value,
     slot_num: Number(document.getElementById('p-slot').value),
     topic: document.getElementById('p-topic').value,
+    category: document.getElementById('p-cat').value,
     style: document.getElementById('p-style').value,
     custom_script: document.getElementById('p-script').value
   };
   const res = await fetch('/api/plan', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
   });
-  if (!res.ok) { showToast('Invalid plan item', 'red'); return; }
+  const data = await res.json();
+  if (!res.ok) { showToast(data.detail || 'Invalid plan item', 'red'); return; }
   document.getElementById('p-topic').value = '';
   document.getElementById('p-script').value = '';
-  showToast('Added item to multi-day plan.', 'ok');
+  document.getElementById('p-estimate').innerText = '';
+  showToast('Added to Custom Total Plan.', 'ok');
   loadPlan();
 }
 
 async function loadPlan() {
   const res = await fetch('/api/plan');
   const data = await res.json();
-  document.getElementById('planRows').innerHTML = data.items.map(it => `
+  const items = data.items || [];
+  if (!items.length) {
+    document.getElementById('planRows').innerHTML = '<tr><td colspan="4" class="subtle-note">No planned items yet. Add upcoming days &amp; custom scripts above.</td></tr>';
+    return;
+  }
+  document.getElementById('planRows').innerHTML = items.map(it => `
     <tr>
-      <td class="mono">${escHtml(it.planned_date)}</td>
-      <td class="mono">${escHtml(it.slot_num)}</td>
-      <td>${escHtml(it.topic)}</td>
-      <td><span class="badge">${escHtml(it.status)}</span></td>
-      <td><button class="btn btn-danger btn-sm" onclick="delPlan('${escHtml(it.id)}')">✕</button></td>
+      <td class="mono">${escHtml(it.planned_date)}<div class="subtle-note">${escHtml(it.publish_time || `Slot ${it.slot_num}`)}</div></td>
+      <td>
+        <div style="font-weight:600; color:#fff;">${escHtml(it.topic)}</div>
+        <div class="subtle-note">${it.custom_script ? 'Custom Script' : 'AI Script'} • ${escHtml(it.style)}${it.notes ? ` • ${escHtml(it.notes)}` : ''}</div>
+      </td>
+      <td><span class="badge ${it.status === 'completed' ? 'badge-ok' : (it.status === 'failed' ? 'badge-red' : '')}">${escHtml(it.status)}</span></td>
+      <td style="text-align:right; white-space:nowrap;">
+        ${it.status === 'pending' ? `<button class="btn btn-ok btn-sm" onclick="runPlanItem('${escHtml(it.id)}')">Run</button>` : ''}
+        <button class="btn btn-danger btn-sm" onclick="delPlan('${escHtml(it.id)}')">✕</button>
+      </td>
     </tr>
   `).join('');
+}
+
+async function runPlanItem(id) {
+  const res = await fetch(`/api/plan/${encodeURIComponent(id)}/run`, { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.detail || 'Could not start planned item', 'red'); return; }
+  showToast(data.message || 'Planned video started.', 'info');
+  schedulePoll(1500);
+  refreshAll();
+  loadPlan();
 }
 
 async function delPlan(id) {
@@ -1520,9 +1431,16 @@ async function delPlan(id) {
 async function loadHistory() {
   const res = await fetch('/api/history');
   const data = await res.json();
-  document.getElementById('historyRows').innerHTML = data.history.map(h => `
+  document.getElementById('historyRows').innerHTML = (data.history || []).map(h => `
     <tr><td>${escHtml(h.title)}</td><td>${escHtml(h.category)}</td><td class="mono">${escHtml(String(h.created_at || '').slice(0, 10))}</td></tr>
-  `).join('');
+  `).join('') || '<tr><td colspan="3" class="subtle-note">No topic history recorded yet.</td></tr>';
+}
+
+async function runCleanupNow() {
+  const res = await fetch('/api/cleanup', { method: 'POST' });
+  const data = await res.json();
+  showToast(`Cleaned ${data.deleted_count} ended-day folder(s), freed ${data.freed_mb} MB.`, 'ok');
+  refreshAll();
 }
 
 const dz = document.getElementById('clientDropzone');
@@ -1539,7 +1457,10 @@ dz.addEventListener('drop', e => {
   if (file) uploadClientJsonFile(file);
 });
 
-document.getElementById('p-date').value = new Date().toISOString().slice(0, 10);
+const todayIso = new Date().toISOString().slice(0, 10);
+document.getElementById('p-date').value = todayIso;
+document.getElementById('s-start-date').value = todayIso;
+loadPlan();
 refreshAll();
 schedulePoll(5000);
 </script>

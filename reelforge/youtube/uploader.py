@@ -1,20 +1,22 @@
-"""YouTube Data API v3 uploader with safe simulation/private defaults and duplicate protection."""
+"""YouTube Data API v3 uploader for 9:16 Shorts and 16:9 Long-Format videos with safe scheduling."""
 from __future__ import annotations
 
 import logging
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 import requests
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from reelforge import config
+from reelforge.brain.metadata import clean_youtube_title, fit_tags_within_budget
 
 logger = logging.getLogger("reelforge.youtube.uploader")
 
@@ -41,11 +43,11 @@ class YouTubeUploadError(RuntimeError):
 
 
 def _strip_links(text: str) -> str:
-    return re.sub(r"https?://\S+", "", text or "").strip()
+    return re.sub(r"[<>]+", "", re.sub(r"https?://\S+", "", text or "")).strip()
 
 
 class YouTubeUploader:
-    """Official YouTube Data API v3 Shorts uploader."""
+    """Official YouTube Data API v3 uploader for Shorts (9:16) and Long-Format (16:9)."""
 
     def __init__(
         self,
@@ -61,7 +63,7 @@ class YouTubeUploader:
         self.client_id = client_id if client_id is not None else (os.environ.get("YOUTUBE_CLIENT_ID") or config.YOUTUBE_CLIENT_ID or fallback_id)
         self.client_secret = client_secret if client_secret is not None else (os.environ.get("YOUTUBE_CLIENT_SECRET") or config.YOUTUBE_CLIENT_SECRET or fallback_sec)
         self.refresh_token = refresh_token if refresh_token is not None else (os.environ.get("YOUTUBE_REFRESH_TOKEN") or config.YOUTUBE_REFRESH_TOKEN)
-        self.mode = (mode or os.environ.get("YOUTUBE_PUBLISHING_MODE") or config.YOUTUBE_PUBLISHING_MODE).strip().lower()
+        self.mode = (mode or os.environ.get("YOUTUBE_PUBLISHING_MODE") or config.YOUTUBE_PUBLISHING_MODE or "live").strip().lower()
         self.privacy_status = (os.environ.get("YOUTUBE_PRIVACY_STATUS") or config.YOUTUBE_PRIVACY_STATUS or "private").strip().lower()
         self._client_info = info
         self._service = None
@@ -130,7 +132,7 @@ class YouTubeUploader:
         if not verify_network:
             base["healthy"] = True
             base["state"] = "connected"
-            base["message"] = "OAuth credentials present (click Test Connection to verify)."
+            base["message"] = "OAuth credentials connected."
             return base
 
         try:
@@ -179,7 +181,13 @@ class YouTubeUploader:
     def check_health(self) -> Dict[str, Any]:
         return self.get_connection_status(verify_network=True)
 
-    def _reconcile_existing(self, target_title: str, exclude_ids: Optional[Set[str]] = None) -> Optional[Dict[str, Any]]:
+    def _reconcile_existing(
+        self,
+        target_title: str,
+        *,
+        exclude_ids: Optional[Set[str]] = None,
+        is_long: bool = False,
+    ) -> Optional[Dict[str, Any]]:
         svc = self._get_service()
         if not svc:
             return None
@@ -197,10 +205,11 @@ class YouTubeUploader:
                 if vid and vid in excluded:
                     continue
                 if snip.get("title", "").strip() == target_title.strip():
+                    url = f"https://www.youtube.com/watch?v={vid}" if is_long else f"https://www.youtube.com/shorts/{vid}"
                     return {
                         "success": True,
                         "video_id": vid,
-                        "url": f"https://www.youtube.com/shorts/{vid}",
+                        "url": url,
                         "title": target_title,
                         "reconciled": True,
                         "simulated": False,
@@ -220,35 +229,40 @@ class YouTubeUploader:
         publish_at: Optional[datetime] = None,
         force_mode: Optional[str] = None,
         exclude_youtube_ids: Optional[Set[str]] = None,
+        is_long: bool = False,
     ) -> Dict[str, Any]:
         if not video_path.exists():
             raise FileNotFoundError(f"Video not found: {video_path}")
 
         effective_mode = (force_mode or self.mode).strip().lower()
-        privacy = (privacy_status or config.YOUTUBE_PRIVACY_STATUS or "private").strip().lower()
+        privacy = (privacy_status or self.privacy_status or config.YOUTUBE_PRIVACY_STATUS or "private").strip().lower()
         if privacy not in {"private", "unlisted", "public"}:
             privacy = "private"
 
-        clean_title = re.sub(r"\s*#[A-Za-z0-9_]+\b", "", _strip_links(title)).strip(" -|")
-        yt_title = f"{clean_title[:84].rstrip()} #Shorts" if clean_title else "ReelForge Short #Shorts"
+        yt_title = clean_youtube_title(title, is_long=is_long)
         safe_desc = _strip_links(description)
-        if "#shorts" not in safe_desc.lower():
+        if not is_long and "#shorts" not in safe_desc.lower():
             safe_desc = f"{safe_desc}\n\n#Shorts".strip()
-        clean_tags = [t.replace("#", "").strip() for t in tags if t.strip()][:15]
+        safe_desc = safe_desc[:4900]
+        clean_tags = fit_tags_within_budget(tags, max_chars=470, max_count=15)
 
         publish_iso = None
         if publish_at is not None:
             dt_utc = publish_at.astimezone(timezone.utc) if publish_at.tzinfo else publish_at.replace(tzinfo=timezone.utc)
+            min_future = datetime.now(timezone.utc) + timedelta(minutes=16)
+            if dt_utc < min_future:
+                dt_utc = min_future
             publish_iso = dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
-            # YouTube requires privacyStatus='private' when scheduling publishAt
+            # YouTube Data API v3 requires privacyStatus='private' when scheduling publishAt
             privacy = "private"
 
-        if effective_mode != "live":
+        if effective_mode == "simulation":
             sim_id = f"sim_{video_path.parent.name}"
+            url = f"https://www.youtube.com/watch?v={sim_id}" if is_long else f"https://www.youtube.com/shorts/{sim_id}"
             return {
                 "success": True,
                 "video_id": sim_id,
-                "url": f"https://www.youtube.com/shorts/{sim_id}",
+                "url": url,
                 "title": yt_title,
                 "privacy_status": privacy,
                 "publish_at": publish_iso,
@@ -258,11 +272,10 @@ class YouTubeUploader:
         svc = self._get_service()
         if not svc:
             raise YouTubeUploadError(
-                "Live YouTube upload requested, but OAuth credentials are missing. "
-                "Run `.venv/bin/python scripts/auth_youtube.py` first."
+                "YouTube OAuth is not connected yet. Upload client_secret.json and click Connect YouTube OAuth first."
             )
 
-        reconciled = self._reconcile_existing(yt_title, exclude_ids=exclude_youtube_ids)
+        reconciled = self._reconcile_existing(yt_title, exclude_ids=exclude_youtube_ids, is_long=is_long)
         if reconciled:
             return reconciled
 
@@ -283,23 +296,43 @@ class YouTubeUploader:
             "status": status_body,
         }
 
-        media = MediaFileUpload(str(video_path), chunksize=1024 * 1024, resumable=True)
+        media = MediaFileUpload(str(video_path), chunksize=2 * 1024 * 1024, resumable=True)
         request = svc.videos().insert(part="snippet,status", body=body, media_body=media)
+
         response = None
+        retries = 0
         while response is None:
-            _, response = request.next_chunk()
+            try:
+                _, response = request.next_chunk()
+                retries = 0
+            except HttpError as exc:
+                status_code = getattr(exc.resp, "status", 0)
+                if status_code in {429, 500, 502, 503, 504} and retries < 3:
+                    retries += 1
+                    time.sleep(2 ** retries)
+                    continue
+                raise YouTubeUploadError(f"YouTube API error ({status_code}): {exc}") from exc
+            except Exception as exc:
+                if retries < 3:
+                    retries += 1
+                    time.sleep(2 ** retries)
+                    continue
+                raise YouTubeUploadError(f"YouTube upload interrupted: {exc}") from exc
 
         vid = str(response.get("id") or "")
         if not vid:
             raise YouTubeUploadError("YouTube upload finished without returning a video ID.")
 
         resp_status = response.get("status", {})
+        url = f"https://www.youtube.com/watch?v={vid}" if is_long else f"https://www.youtube.com/shorts/{vid}"
         return {
             "success": True,
             "video_id": vid,
-            "url": f"https://www.youtube.com/shorts/{vid}",
+            "url": url,
             "title": yt_title,
             "privacy_status": resp_status.get("privacyStatus", privacy),
             "publish_at": resp_status.get("publishAt") or publish_iso,
             "simulated": False,
         }
+
+    upload_video = upload_short

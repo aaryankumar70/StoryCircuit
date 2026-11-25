@@ -23,6 +23,12 @@ def test_web_endpoints(tmp_path, monkeypatch):
     assert "Today's Shorts &amp; Preview" in r_home.text
     assert "Dual-Slot Production &amp; Publishing Timeline" in r_home.text
     assert "client_secret.json" in r_home.text
+    assert "Generate Today's 2 Videos" in r_home.text
+    # Ensure test/demo buttons are removed from dashboard
+    assert "Test Connection" not in r_home.text
+    assert "Check YouTube" not in r_home.text
+    assert "Upload / Simulate" not in r_home.text
+    assert "Mode: Simulation" not in r_home.text
 
     r_status = client.get("/api/status")
     assert r_status.status_code == 200
@@ -31,12 +37,14 @@ def test_web_endpoints(tmp_path, monkeypatch):
     assert len(st["slot_timeline"]) == 2
     assert "youtube" in st
     assert "oauth" in st
+    assert "storage" in st
 
     r_plan = client.post(
         "/api/plan",
         json={
             "planned_date": "2026-11-26",
             "slot_num": 1,
+            "publish_time": "14:15",
             "topic": "Flannan Isles Lighthouse",
             "style": "graphic_noir",
         },
@@ -46,7 +54,22 @@ def test_web_endpoints(tmp_path, monkeypatch):
 
     r_list = client.get("/api/plan")
     assert r_list.status_code == 200
-    assert any(it["id"] == pid for it in r_list.json()["items"])
+    assert any(it["id"] == pid and it["publish_time"] == "14:15" for it in r_list.json()["items"])
+
+    r_analyze = client.post(
+        "/api/scripts/analyze",
+        json={
+            "title": "Long Mystery",
+            "category": "mystery",
+            "script": " ".join([f"Sentence {i} reveals another strange clue inside the archive." for i in range(40)]),
+        },
+    )
+    assert r_analyze.status_code == 200
+    assert r_analyze.json()["possible_videos"] >= 2
+
+    r_cleanup = client.post("/api/cleanup")
+    assert r_cleanup.status_code == 200
+    assert "deleted_count" in r_cleanup.json()
 
     r_del = client.delete(f"/api/plan/{pid}")
     assert r_del.status_code == 200

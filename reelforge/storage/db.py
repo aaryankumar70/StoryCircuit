@@ -94,6 +94,14 @@ class ReelDatabase:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
             if "progress_json" not in cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN progress_json TEXT")
+            if "video_format" not in cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN video_format TEXT NOT NULL DEFAULT 'short'")
+            if "cleaned_at" not in cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN cleaned_at TEXT")
+
+            pcols = {r["name"] for r in conn.execute("PRAGMA table_info(plan_items)").fetchall()}
+            if "publish_time" not in pcols:
+                conn.execute("ALTER TABLE plan_items ADD COLUMN publish_time TEXT NOT NULL DEFAULT ''")
 
     # ------------------------------------------------------------------
     # Anti-repeat history
@@ -147,6 +155,7 @@ class ReelDatabase:
         slot_num: Optional[int] = None,
         status: str = "planned",
         job_id: Optional[str] = None,
+        video_format: str = "short",
     ) -> str:
         jid = job_id or f"rf_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         now = _utc_now()
@@ -155,12 +164,12 @@ class ReelDatabase:
                 """
                 INSERT INTO jobs (
                     id, scheduled_date, slot_num, source_mode, title, category, style,
-                    script_text, storyboard_json, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    script_text, storyboard_json, status, video_format, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     jid, scheduled_date, slot_num, source_mode, title, category, style,
-                    script_text, json.dumps(storyboard, ensure_ascii=False), status, now, now,
+                    script_text, json.dumps(storyboard, ensure_ascii=False), status, video_format, now, now,
                 ),
             )
         return jid
@@ -171,7 +180,7 @@ class ReelDatabase:
         allowed = {
             "status", "video_path", "qc_json", "progress_json", "youtube_id", "youtube_url",
             "publish_at", "simulated", "error", "scheduled_date", "slot_num",
-            "storyboard_json", "title", "style",
+            "storyboard_json", "title", "style", "video_format", "cleaned_at",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
@@ -203,6 +212,30 @@ class ReelDatabase:
     def delete_job(self, job_id: str) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+
+    def mark_job_cleaned(self, job_id: str) -> None:
+        now = _utc_now()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE jobs SET video_path = NULL, cleaned_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, job_id),
+            )
+
+    def recover_interrupted_jobs(self) -> int:
+        """Reset any jobs left in active state by an unexpected crash/restart."""
+        now = _utc_now()
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE jobs
+                SET status = 'failed',
+                    error = 'Interrupted by server restart — click Retry to regenerate.',
+                    updated_at = ?
+                WHERE status IN ('rendering', 'uploading')
+                """,
+                (now,),
+            )
+            return int(cur.rowcount or 0)
 
     def get_jobs_for_date(self, date_str: str) -> List[Dict[str, Any]]:
         with self._conn() as conn:
@@ -260,6 +293,7 @@ class ReelDatabase:
         style: str = "auto",
         custom_script: str = "",
         notes: str = "",
+        publish_time: str = "",
     ) -> str:
         pid = f"plan_{uuid.uuid4().hex[:10]}"
         now = _utc_now()
@@ -267,27 +301,35 @@ class ReelDatabase:
             conn.execute(
                 """
                 INSERT INTO plan_items (
-                    id, planned_date, slot_num, topic, category, style,
+                    id, planned_date, slot_num, publish_time, topic, category, style,
                     custom_script, notes, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
                 """,
-                (pid, planned_date, int(slot_num), topic.strip(), category, style, custom_script.strip(), notes.strip(), now, now),
+                (
+                    pid, planned_date, int(slot_num), publish_time.strip(),
+                    topic.strip(), category, style, custom_script.strip(), notes.strip(), now, now,
+                ),
             )
         return pid
 
-    def list_plan_items(self, status: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    def list_plan_items(self, status: Optional[str] = None, limit: int = 200) -> List[Dict[str, Any]]:
         with self._conn() as conn:
             if status:
                 rows = conn.execute(
-                    "SELECT * FROM plan_items WHERE status = ? ORDER BY planned_date ASC, slot_num ASC LIMIT ?",
+                    "SELECT * FROM plan_items WHERE status = ? ORDER BY planned_date ASC, slot_num ASC, publish_time ASC LIMIT ?",
                     (status, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM plan_items ORDER BY planned_date ASC, slot_num ASC LIMIT ?",
+                    "SELECT * FROM plan_items ORDER BY planned_date ASC, slot_num ASC, publish_time ASC LIMIT ?",
                     (limit,),
                 ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_plan_item(self, plan_id: str) -> Optional[Dict[str, Any]]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM plan_items WHERE id = ?", (plan_id,)).fetchone()
+        return dict(row) if row else None
 
     def get_due_plan_item(self, planned_date: str, slot_num: int) -> Optional[Dict[str, Any]]:
         with self._conn() as conn:
@@ -295,14 +337,14 @@ class ReelDatabase:
                 """
                 SELECT * FROM plan_items
                 WHERE planned_date <= ? AND slot_num = ? AND status = 'pending'
-                ORDER BY planned_date ASC LIMIT 1
+                ORDER BY planned_date ASC, publish_time ASC LIMIT 1
                 """,
                 (planned_date, slot_num),
             ).fetchone()
         return dict(row) if row else None
 
     def update_plan_item(self, plan_id: str, **fields: Any) -> None:
-        allowed = {"status", "job_id", "planned_date", "slot_num", "topic", "style", "custom_script", "notes"}
+        allowed = {"status", "job_id", "planned_date", "slot_num", "publish_time", "topic", "category", "style", "custom_script", "notes"}
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             return

@@ -1,4 +1,4 @@
-"""End-to-end single-job production pipeline for ReelForge."""
+"""End-to-end single-job production pipeline with auto 16:9 long-format conversion (>2 min)."""
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +12,8 @@ from reelforge import config
 from reelforge.audio.tts import synthesize_story_audio
 from reelforge.audio.underscore import prepare_background_music
 from reelforge.brain.director import StoryDirector
-from reelforge.models import SourceMode
+from reelforge.brain.metadata import enrich_story_metadata
+from reelforge.models import SourceMode, VideoFormat
 from reelforge.progress import build_progress_payload
 from reelforge.qc.gatekeeper import verify_video
 from reelforge.storage.db import ReelDatabase
@@ -36,7 +37,7 @@ def run_generation_job(
     visual_mode: Optional[str] = None,
     min_duration_sec: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Generate storyboard, audio, per-beat visuals, rendered MP4, and QC report."""
+    """Generate storyboard, audio, per-beat visuals, rendered MP4 (9:16 or auto 16:9 >2m), and QC."""
     started_at = datetime.now(timezone.utc).isoformat()
     completed_stages: List[str] = []
     current_stage = "selecting_topic"
@@ -64,6 +65,7 @@ def run_generation_job(
         scheduled_date=scheduled_date,
         slot_num=slot_num,
         status="rendering",
+        video_format=plan.video_format.value,
     )
 
     def _report(stage: str, label: str, pct: int, detail: str = "", failed: Optional[str] = None) -> None:
@@ -89,14 +91,37 @@ def run_generation_job(
         narration_wav, words, duration_sec = synthesize_story_audio(plan, work_dir)
         completed_stages.append("generating_narration")
 
+        # Auto-convert to YouTube 16:9 Landscape Long Format whenever duration > 2 minutes (120s)
+        is_long = duration_sec > config.SHORT_MAX_DURATION_SEC
+        if is_long:
+            plan.video_format = VideoFormat.LONG
+            plan.target_width = config.LANDSCAPE_WIDTH
+            plan.target_height = config.LANDSCAPE_HEIGHT
+            logger.info(
+                "Job %s duration %.1fs > %.0fs: auto-converting to 16:9 landscape long-format (%sx%s).",
+                job_id, duration_sec, config.SHORT_MAX_DURATION_SEC, plan.target_width, plan.target_height,
+            )
+        else:
+            plan.video_format = VideoFormat.SHORT
+            plan.target_width = config.VIDEO_WIDTH
+            plan.target_height = config.VIDEO_HEIGHT
+
+        enrich_story_metadata(plan, is_long=is_long)
+        db.update_job(
+            job_id,
+            video_format=plan.video_format.value,
+            storyboard_json=plan.model_dump(mode="json"),
+        )
+
+        fmt_label = "16:9 Landscape" if is_long else "9:16 Short"
         current_stage = "preparing_music"
-        _report("preparing_music", "Generating ambient underscore", 32, f"{duration_sec:.1f}s audio")
+        _report("preparing_music", "Generating ambient underscore", 32, f"{duration_sec:.1f}s • {fmt_label}")
         seed = int(hashlib.sha256(job_id.encode("utf-8")).hexdigest()[:8], 16)
         bgm_wav = prepare_background_music(duration_sec, work_dir / "audio" / "bgm.wav", seed=seed)
         completed_stages.append("preparing_music")
 
         current_stage = "resolving_visuals"
-        _report("resolving_visuals", f"Resolving visuals (0/{len(plan.beats)})", 36)
+        _report("resolving_visuals", f"Resolving {fmt_label} visuals (0/{len(plan.beats)})", 36)
 
         def _on_visual(done: int, total: int, src: str) -> None:
             pct = 36 + int(round((done / max(1, total)) * 22))
@@ -105,11 +130,10 @@ def run_generation_job(
         resolve_all_visuals(plan, work_dir, visual_mode=visual_mode, on_progress=_on_visual)
         completed_stages.append("resolving_visuals")
 
-        # Persist resolved visual paths & beat timings
         db.update_job(job_id, storyboard_json=plan.model_dump(mode="json"))
 
         current_stage = "rendering_video"
-        _report("rendering_video", f"Rendering Ken Burns clips (0/{len(plan.beats)})", 58)
+        _report("rendering_video", f"Rendering {fmt_label} clips (0/{len(plan.beats)})", 58)
 
         def _on_render(done: int, total: int, desc: str) -> None:
             pct = 58 + int(round((done / max(1, total)) * 32))
@@ -127,7 +151,6 @@ def run_generation_job(
         )
         completed_stages.append("rendering_video")
 
-        # Allow custom scripts down to 8s if explicitly provided by user
         effective_min_dur = min_duration_sec
         if effective_min_dur is None and mode == SourceMode.CUSTOM_SCRIPT:
             effective_min_dur = 6.0
@@ -138,6 +161,10 @@ def run_generation_job(
             output_mp4,
             words_json_path=work_dir / "words.json",
             min_duration_sec=effective_min_dur,
+            max_duration_sec=config.LONG_MAX_DURATION_SEC if is_long else config.SHORT_MAX_DURATION_SEC,
+            expected_width=plan.target_width,
+            expected_height=plan.target_height,
+            video_format=plan.video_format.value,
         )
         qc_dict = qc.model_dump()
         (work_dir / "qc_report.json").write_text(json.dumps(qc_dict, indent=2), encoding="utf-8")
@@ -153,9 +180,9 @@ def run_generation_job(
             qc_json=qc_dict,
             progress_json=build_progress_payload(
                 stage=new_status,
-                stage_label="QC Passed • Ready to upload" if qc.passed else "QC Failed",
+                stage_label=f"QC Passed ({fmt_label})" if qc.passed else "QC Failed",
                 percent=95 if qc.passed else 92,
-                detail=f"{qc.checks.get('duration_sec', '--')}s • {qc.checks.get('integrated_lufs', '--')} LUFS",
+                detail=f"{qc.checks.get('duration_sec', '--')}s • {qc.checks.get('resolution', '--')} • {qc.checks.get('integrated_lufs', '--')} LUFS",
                 started_at=started_at,
                 completed_stages=completed_stages,
                 failed_stage=None if qc.passed else "running_qc",

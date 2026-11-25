@@ -66,30 +66,38 @@ def write_word_synced_ass(
     words: List[WordTiming],
     out_ass: Path,
     style: VisualStyle = VisualStyle.EDITORIAL_DARK,
-    words_per_group: int = 3,
+    words_per_group: int | None = None,
+    width: int = config.VIDEO_WIDTH,
+    height: int = config.VIDEO_HEIGHT,
 ) -> Path:
-    """Write a 1080x1920 ASS caption file with animated active-word highlight in safe zone."""
+    """Write an animated ASS caption file sized for 9:16 Shorts or 16:9 Landscape."""
     accent_primary = _ACCENT_ASS.get(style.value, "&H0022D3EE")
     accent_secondary = _SECONDARY_ACCENT_ASS.get(style.value, "&H0035A7FF")
+    is_landscape = width > height
 
-    # Layer 0: subtle dark backdrop pill/shadow; Layer 1: crisp heavy typography with micro-pop
+    font_size = 62 if is_landscape else 74
+    margin_v = config.LANDSCAPE_CAPTION_MARGIN_V if is_landscape else config.CAPTION_MARGIN_V
+    margin_lr = 110 if is_landscape else 72
+    group_words = words_per_group if words_per_group is not None else (5 if is_landscape else 3)
+    group_chars = 34 if is_landscape else 18
+
     header = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: {config.VIDEO_WIDTH}
-PlayResY: {config.VIDEO_HEIGHT}
+PlayResX: {width}
+PlayResY: {height}
 WrapStyle: 2
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{config.CAPTION_FONT_NAME},74,&H00FFFFFF,&H00FFFFFF,&H000A0D14,&HA0000000,-1,0,0,0,100,100,1.5,0,1,8,3,2,72,72,{config.CAPTION_MARGIN_V},1
+Style: Default,{config.CAPTION_FONT_NAME},{font_size},&H00FFFFFF,&H00FFFFFF,&H000A0D14,&HA0000000,-1,0,0,0,100,100,1.5,0,1,8,3,2,{margin_lr},{margin_lr},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events: List[str] = []
     clean_words = [w for w in words if w.word.strip()]
-    groups = _group_words(clean_words, max_words=max(1, words_per_group))
+    groups = _group_words(clean_words, max_words=max(1, group_words), max_chars=group_chars)
 
     for g_idx, group in enumerate(groups):
         next_group_start = groups[g_idx + 1][0].start_sec if g_idx + 1 < len(groups) else None

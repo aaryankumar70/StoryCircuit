@@ -1,4 +1,4 @@
-"""Lightweight native FFmpeg renderer for 1080x1920 Shorts (CPU-friendly)."""
+"""Lightweight native FFmpeg renderer for 9:16 Shorts and 16:9 Landscape videos."""
 from __future__ import annotations
 
 import logging
@@ -13,50 +13,49 @@ from reelforge.video.captions import write_word_synced_ass
 logger = logging.getLogger("reelforge.video.renderer")
 
 
-def _zoompan_expr(motion: MotionType, frames: int) -> str:
+def _zoompan_expr(motion: MotionType, frames: int, width: int, height: int) -> str:
     fmax = max(1, frames - 1)
+    size_fps = f"d={frames}:s={width}x{height}:fps={config.VIDEO_FPS}"
     if motion == MotionType.ZOOM_OUT:
         return (
             f"zoompan=z='1.12-0.11*(on/{fmax})':"
-            "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-            f"d={frames}:s={config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}:fps={config.VIDEO_FPS}"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':{size_fps}"
         )
     if motion == MotionType.PAN_LEFT:
         return (
             "zoompan=z='1.10':"
-            f"x='(iw-iw/zoom)*(1-on/{fmax})':y='ih/2-(ih/zoom/2)':"
-            f"d={frames}:s={config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}:fps={config.VIDEO_FPS}"
+            f"x='(iw-iw/zoom)*(1-on/{fmax})':y='ih/2-(ih/zoom/2)':{size_fps}"
         )
     if motion == MotionType.PAN_RIGHT:
         return (
             "zoompan=z='1.10':"
-            f"x='(iw-iw/zoom)*(on/{fmax})':y='ih/2-(ih/zoom/2)':"
-            f"d={frames}:s={config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}:fps={config.VIDEO_FPS}"
+            f"x='(iw-iw/zoom)*(on/{fmax})':y='ih/2-(ih/zoom/2)':{size_fps}"
         )
     if motion == MotionType.PULSE:
         return (
-            "zoompan=z='1.03+0.05*sin(on*0.14)':"
-            "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-            f"d={frames}:s={config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}:fps={config.VIDEO_FPS}"
+            "zoompan=z='1.04+0.06*sin(on*0.14)':"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':{size_fps}"
         )
     # Default ZOOM_IN
     return (
         f"zoompan=z='1.01+0.11*(on/{fmax})':"
-        "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"d={frames}:s={config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}:fps={config.VIDEO_FPS}"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':{size_fps}"
     )
 
 
-def _render_beat_clip(beat: BeatSpec, out_mp4: Path) -> Path:
+def _render_beat_clip(beat: BeatSpec, out_mp4: Path, *, width: int, height: int) -> Path:
     if not beat.resolved_image_path:
         raise FileNotFoundError(f"Beat {beat.index} missing resolved image.")
     duration = max(0.6, beat.end_sec - beat.start_sec)
     frames = max(18, int(round(duration * config.VIDEO_FPS)))
-    zp = _zoompan_expr(beat.motion, frames)
+    exact_dur = frames / float(config.VIDEO_FPS)
+    zp = _zoompan_expr(beat.motion, frames, width, height)
 
-    # Upscale slightly before zoompan for smooth subpixel motion without high RAM use
+    # Upscale 1.25x before zoompan for smooth subpixel motion without high RAM use
+    up_w = int(round(width * 1.25))
+    up_h = int(round(height * 1.25))
     vf = (
-        f"scale=1350:2400:flags=lanczos,"
+        f"scale={up_w}:{up_h}:flags=lanczos,"
         f"{zp},"
         f"fade=t=in:st=0:d=0.14,"
         f"format=yuv420p"
@@ -65,7 +64,7 @@ def _render_beat_clip(beat: BeatSpec, out_mp4: Path) -> Path:
         "ffmpeg", "-y",
         "-i", beat.resolved_image_path,
         "-vf", vf,
-        "-t", f"{duration:.3f}",
+        "-t", f"{exact_dur:.6f}",
         "-r", str(config.VIDEO_FPS),
         "-c:v", "libx264",
         "-preset", "veryfast",
@@ -74,7 +73,7 @@ def _render_beat_clip(beat: BeatSpec, out_mp4: Path) -> Path:
         "-an",
         str(out_mp4),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, timeout=180)
+    subprocess.run(cmd, check=True, capture_output=True, timeout=max(180, int(exact_dur * 15)))
     return out_mp4
 
 
@@ -87,15 +86,17 @@ def render_short_video(
     output_mp4: Path,
     on_progress: Optional[Callable[[int, int, str], None]] = None,
 ) -> Path:
-    """Render all animated beat clips, burn synced captions, mix audio, and produce final MP4."""
+    """Render all animated beat clips (9:16 or 16:9), burn synced captions, mix audio, and produce final MP4."""
     clips_dir = work_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
+    width = int(plan.target_width or config.VIDEO_WIDTH)
+    height = int(plan.target_height or config.VIDEO_HEIGHT)
 
     beat_clips: List[Path] = []
     total_steps = len(plan.beats) + 1
     for idx, beat in enumerate(plan.beats, start=1):
-        clip_path = clips_dir / f"clip_{beat.index:02d}.mp4"
-        beat_clips.append(_render_beat_clip(beat, clip_path))
+        clip_path = clips_dir / f"clip_{beat.index:03d}.mp4"
+        beat_clips.append(_render_beat_clip(beat, clip_path, width=width, height=height))
         if on_progress:
             on_progress(idx, total_steps, f"Clip {idx}/{len(plan.beats)}")
 
@@ -114,21 +115,30 @@ def render_short_video(
         ],
         check=True,
         capture_output=True,
-        timeout=120,
+        timeout=180,
     )
 
-    ass_path = write_word_synced_ass(words, work_dir / "captions.ass", style=plan.style)
-    # Escape colons and single quotes for FFmpeg subtitles filter
+    ass_path = write_word_synced_ass(
+        words,
+        work_dir / "captions.ass",
+        style=plan.style,
+        width=width,
+        height=height,
+    )
     ass_escaped = str(ass_path).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
+    est_dur = max((b.end_sec for b in plan.beats), default=60.0)
+    mux_timeout = max(300, int(est_dur * 5))
+
     output_mp4.parent.mkdir(parents=True, exist_ok=True)
-    # Mix narration (0 dB) + ambient music (-19 dB), then broadcast-normalize to -16 LUFS
+    # Mix narration (0 dB) + ambient music (-19 dB), broadcast-normalize, and guard true peak <= -1 dB
     filter_complex = (
         f"[0:v]subtitles='{ass_escaped}',format=yuv420p[vout];"
         f"[1:a]volume=1.0[narr];"
         f"[2:a]volume=0.11[mus];"
         f"[narr][mus]amix=inputs=2:duration=first:dropout_transition=2,"
-        f"loudnorm=I={config.TARGET_LUFS}:TP={config.MAX_TRUE_PEAK_DB}:LRA=8[aout]"
+        f"loudnorm=I={config.TARGET_LUFS}:TP={config.MAX_TRUE_PEAK_DB}:LRA=8,"
+        f"alimiter=limit=0.89[aout]"
     )
 
     cmd = [
@@ -151,7 +161,10 @@ def render_short_video(
         "-shortest",
         str(output_mp4),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+    subprocess.run(cmd, check=True, capture_output=True, timeout=mux_timeout)
     if on_progress:
         on_progress(total_steps, total_steps, "Final mux & loudness")
     return output_mp4
+
+
+render_video = render_short_video

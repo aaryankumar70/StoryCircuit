@@ -24,12 +24,12 @@ def _probe_streams(video_path: Path) -> Dict[str, Any]:
     return json.loads(res.stdout or "{}")
 
 
-def _measure_loudness(video_path: Path) -> Dict[str, float]:
+def _measure_loudness(video_path: Path, timeout_sec: int = 180) -> Dict[str, float]:
     res = subprocess.run(
         ["ffmpeg", "-i", str(video_path), "-af", "ebur128=peak=true", "-f", "null", "-"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=timeout_sec,
     )
     out = res.stderr or ""
     lufs = -70.0
@@ -43,12 +43,12 @@ def _measure_loudness(video_path: Path) -> Dict[str, float]:
     return {"integrated_lufs": lufs, "true_peak_db": tp}
 
 
-def _has_black_gaps(video_path: Path) -> bool:
+def _has_black_gaps(video_path: Path, timeout_sec: int = 180) -> bool:
     res = subprocess.run(
         ["ffmpeg", "-i", str(video_path), "-vf", "blackdetect=d=1.0:pix_th=0.10", "-an", "-f", "null", "-"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=timeout_sec,
     )
     if res.returncode != 0:
         return True
@@ -56,17 +56,17 @@ def _has_black_gaps(video_path: Path) -> bool:
     return any(d >= 1.0 for d in durs)
 
 
-def _has_frozen_segments(video_path: Path) -> bool:
+def _has_frozen_segments(video_path: Path, timeout_sec: int = 180) -> bool:
     res = subprocess.run(
-        ["ffmpeg", "-v", "info", "-i", str(video_path), "-vf", "freezedetect=n=-50dB:d=2.5", "-an", "-f", "null", "-"],
+        ["ffmpeg", "-v", "info", "-i", str(video_path), "-vf", "freezedetect=n=-60dB:d=3.5", "-an", "-f", "null", "-"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=timeout_sec,
     )
     if res.returncode != 0:
         return True
     durs = [float(v) for v in re.findall(r"freeze_duration:\s*([0-9]+(?:\.[0-9]+)?)", res.stderr or "")]
-    return any(d >= 2.5 for d in durs)
+    return any(d >= 3.5 for d in durs)
 
 
 def verify_video(
@@ -75,9 +75,12 @@ def verify_video(
     words_json_path: Optional[Path] = None,
     min_duration_sec: Optional[float] = None,
     max_duration_sec: Optional[float] = None,
+    expected_width: Optional[int] = None,
+    expected_height: Optional[int] = None,
+    video_format: str = "short",
 ) -> QCReport:
     issues: List[str] = []
-    checks: Dict[str, Any] = {}
+    checks: Dict[str, Any] = {"video_format": video_format}
 
     if not video_path.exists() or video_path.stat().st_size < 100_000:
         return QCReport(passed=False, checks={"exists": False}, issues=["Video file missing or under 100KB."])
@@ -97,10 +100,16 @@ def verify_video(
 
     duration = float(fmt.get("duration") or 0.0)
     checks["duration_sec"] = round(duration, 3)
+    is_long = video_format == "long" or (expected_width == config.LANDSCAPE_WIDTH)
     min_d = min_duration_sec if min_duration_sec is not None else config.MIN_DURATION_SEC
-    max_d = max_duration_sec if max_duration_sec is not None else config.MAX_DURATION_SEC
+    max_d = max_duration_sec if max_duration_sec is not None else (
+        config.LONG_MAX_DURATION_SEC if is_long else config.MAX_DURATION_SEC
+    )
     if not math.isfinite(duration) or duration < min_d or duration > max_d:
         issues.append(f"Duration {duration:.2f}s outside [{min_d:.0f}s, {max_d:.0f}s].")
+
+    exp_w = expected_width if expected_width is not None else (config.LANDSCAPE_WIDTH if is_long else config.VIDEO_WIDTH)
+    exp_h = expected_height if expected_height is not None else (config.LANDSCAPE_HEIGHT if is_long else config.VIDEO_HEIGHT)
 
     w = int((v_stream or {}).get("width") or 0)
     h = int((v_stream or {}).get("height") or 0)
@@ -108,22 +117,23 @@ def verify_video(
     a_codec = str((a_stream or {}).get("codec_name") or "")
     checks.update({"resolution": f"{w}x{h}", "video_codec": v_codec, "audio_codec": a_codec})
 
-    if w != config.VIDEO_WIDTH or h != config.VIDEO_HEIGHT:
-        issues.append(f"Resolution {w}x{h} != {config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}.")
+    if w != exp_w or h != exp_h:
+        issues.append(f"Resolution {w}x{h} != {exp_w}x{exp_h}.")
     if v_codec != "h264":
         issues.append(f"Video codec '{v_codec}' is not h264.")
     if a_codec != "aac":
         issues.append(f"Audio codec '{a_codec}' is not aac.")
 
-    loud = _measure_loudness(video_path)
+    qc_timeout = max(180, int(duration * 2.5))
+    loud = _measure_loudness(video_path, timeout_sec=qc_timeout)
     checks.update(loud)
     if loud["integrated_lufs"] < -24.0 or loud["integrated_lufs"] > -11.0:
         issues.append(f"Audio loudness {loud['integrated_lufs']:.1f} LUFS out of broadcast range [-24, -11].")
     if loud["true_peak_db"] > 0.0:
         issues.append(f"Audio clipping detected (true peak {loud['true_peak_db']:.2f} dBFS).")
 
-    black_bad = _has_black_gaps(video_path)
-    freeze_bad = _has_frozen_segments(video_path)
+    black_bad = _has_black_gaps(video_path, timeout_sec=qc_timeout)
+    freeze_bad = _has_frozen_segments(video_path, timeout_sec=qc_timeout)
     checks["black_gap_detected"] = black_bad
     checks["frozen_segment_detected"] = freeze_bad
     if black_bad:

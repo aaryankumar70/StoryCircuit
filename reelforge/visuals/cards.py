@@ -150,15 +150,18 @@ def _add_vignette(img: Image.Image) -> Image.Image:
     w, h = img.size
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    # Stronger gradient behind Shorts caption safe zone (y = 1150..1920)
+    # Stronger gradient behind bottom caption safe zone
+    bottom_start = 0.68 if w > h else 0.52
+    bottom_span = 1.0 - bottom_start
     for i in range(72):
-        alpha = int(175 * ((i / 72.0) ** 1.15))
-        y = int(h * 0.52 + (h * 0.48) * (i / 72.0))
-        draw.rectangle([0, y, w, y + 16], fill=(6, 8, 13, alpha))
-    for i in range(28):
-        alpha = int(125 * (1.0 - i / 28.0))
-        y = int(i * 11)
-        draw.rectangle([0, y, w, y + 11], fill=(6, 8, 13, alpha))
+        alpha = int((155 if w > h else 175) * ((i / 72.0) ** 1.15))
+        y = int(h * bottom_start + (h * bottom_span) * (i / 72.0))
+        step_h = max(8, int(h * bottom_span / 68) + 2)
+        draw.rectangle([0, y, w, min(h, y + step_h)], fill=(6, 8, 13, alpha))
+    for i in range(24):
+        alpha = int(115 * (1.0 - i / 24.0))
+        y = int(i * max(6, h // 160))
+        draw.rectangle([0, y, w, y + max(6, h // 160)], fill=(6, 8, 13, alpha))
     return Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
 
 
@@ -198,7 +201,9 @@ def _draw_top_pill(
     label = (text or "").strip().upper()[:30]
     if not label:
         return img
-    font = _load_font(_FONTS_MONO_BOLD, 38 if is_stat else 28)
+    w, h = img.size
+    is_landscape = w > h
+    font = _load_font(_FONTS_MONO_BOLD, (34 if is_landscape else 38) if is_stat else (26 if is_landscape else 28))
     rgba = img.convert("RGBA")
     tmp_draw = ImageDraw.Draw(rgba)
     bbox = tmp_draw.textbbox((0, 0), label, font=font)
@@ -206,7 +211,7 @@ def _draw_top_pill(
     dot_space = 26 if not is_stat else 0
     pw = tw + 48 + dot_space
     ph = th + 26
-    x1, y1 = 60, 136
+    x1, y1 = (54, 44) if is_landscape else (60, 136)
     x2, y2 = x1 + pw, y1 + ph
 
     shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -232,58 +237,68 @@ def compose_scene_frame(
     badge_text: str = "",
     stat_text: str = "",
     is_archival: bool = False,
+    width: int = VIDEO_WIDTH,
+    height: int = VIDEO_HEIGHT,
 ) -> Path:
-    """Frame any raster image cleanly into 1080x1920 with style cohesion and caption contrast."""
+    """Frame any raster image cleanly into target dimensions (9:16 or 16:9) with style cohesion."""
     pal = STYLE_PALETTES.get(style.value, STYLE_PALETTES[VisualStyle.EDITORIAL_DARK.value])
     with Image.open(src_image_path) as raw:
         src = raw.convert("RGB")
 
     sw, sh = src.size
     src_aspect = sw / max(1, sh)
-    target_aspect = VIDEO_WIDTH / VIDEO_HEIGHT
+    target_aspect = width / max(1, height)
+    is_landscape = width > height
 
-    if src_aspect > 0.95:
-        # Wide archival image: blurred ambient backdrop + rounded shadow-framed card
-        bg = src.resize((VIDEO_WIDTH, VIDEO_HEIGHT), Image.Resampling.LANCZOS)
+    # Frame inside blurred ambient backdrop when aspect ratio mismatches significantly
+    needs_card_frame = (src_aspect < 1.15) if is_landscape else (src_aspect > 0.95)
+    if needs_card_frame:
+        bg = src.resize((width, height), Image.Resampling.LANCZOS)
         bg = bg.filter(ImageFilter.GaussianBlur(radius=30))
         bg = ImageEnhance.Brightness(bg).enhance(0.42)
-        bg = _add_radial_glow(bg, (VIDEO_WIDTH // 2, 680), 380, pal["accent"], alpha=55)
+        bg = _add_radial_glow(bg, (width // 2, int(height * 0.42)), 380, pal["accent"], alpha=55)
 
-        card_w = VIDEO_WIDTH - 96
-        card_h = min(1040, int(card_w / max(0.3, src_aspect)))
+        if is_landscape:
+            card_h = height - 180
+            card_w = min(width - 220, int(card_h * max(0.4, src_aspect)))
+            x_off = (width - card_w) // 2
+            y_off = 64
+        else:
+            card_w = width - 96
+            card_h = min(1040, int(card_w / max(0.3, src_aspect)))
+            x_off = 48
+            y_off = max(230, (1240 - card_h) // 2)
+
         fg = src.resize((card_w, card_h), Image.Resampling.LANCZOS)
-        y_off = max(230, (1240 - card_h) // 2)
-
         rgba = bg.convert("RGBA")
         shadow = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
         ImageDraw.Draw(shadow).rounded_rectangle(
-            [48, y_off + 14, 48 + card_w, y_off + card_h + 22], radius=24, fill=(0, 0, 0, 170)
+            [x_off, y_off + 14, x_off + card_w, y_off + card_h + 22], radius=24, fill=(0, 0, 0, 170)
         )
         shadow = shadow.filter(ImageFilter.GaussianBlur(radius=20))
         rgba = Image.alpha_composite(rgba, shadow)
 
         mask = _rounded_mask((card_w, card_h), radius=24)
-        rgba.paste(fg, (48, y_off), mask)
+        rgba.paste(fg, (x_off, y_off), mask)
         draw = ImageDraw.Draw(rgba)
         draw.rounded_rectangle(
-            [47, y_off - 1, 48 + card_w + 1, y_off + card_h + 1],
+            [x_off - 1, y_off - 1, x_off + card_w + 1, y_off + card_h + 1],
             radius=24,
             outline=(*pal["accent"], 215),
             width=3,
         )
         canvas = rgba.convert("RGB")
     else:
-        # Portrait / tall image: clean center-fill crop to 1080x1920
         if src_aspect > target_aspect:
-            new_h = VIDEO_HEIGHT
+            new_h = height
             new_w = int(new_h * src_aspect)
         else:
-            new_w = VIDEO_WIDTH
+            new_w = width
             new_h = int(new_w / max(0.1, src_aspect))
         resized = src.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        left = max(0, (new_w - VIDEO_WIDTH) // 2)
-        top = max(0, (new_h - VIDEO_HEIGHT) // 2)
-        canvas = resized.crop((left, top, left + VIDEO_WIDTH, top + VIDEO_HEIGHT))
+        left = max(0, (new_w - width) // 2)
+        top = max(0, (new_h - height) // 2)
+        canvas = resized.crop((left, top, left + width, top + height))
 
     if is_archival and style == VisualStyle.VINTAGE_ARCHIVAL:
         canvas = ImageEnhance.Color(canvas).enhance(0.58)
@@ -331,16 +346,19 @@ def render_editorial_card(
     stat_text: str = "",
     badge_text: str = "STORY",
     seed_key: str = "",
+    width: int = VIDEO_WIDTH,
+    height: int = VIDEO_HEIGHT,
 ) -> Path:
-    """Render a crisp 1080x1920 layered editorial / stat / dossier card in pure Python."""
+    """Render a crisp layered editorial / stat / dossier card in 9:16 or 16:9 pure Python."""
     pal = STYLE_PALETTES.get(style.value, STYLE_PALETTES[VisualStyle.EDITORIAL_DARK.value])
     digest = int(hashlib.sha256((seed_key or headline or body_text).encode("utf-8")).hexdigest()[:8], 16)
+    is_landscape = width > height
 
-    img = _vertical_gradient(VIDEO_WIDTH, VIDEO_HEIGHT, pal["bg1"], pal["bg2"])
-    cx = 220 + (digest % 640)
-    cy = 380 + ((digest >> 8) % 380)
+    img = _vertical_gradient(width, height, pal["bg1"], pal["bg2"])
+    cx = int(width * 0.2) + (digest % max(120, int(width * 0.6)))
+    cy = int(height * 0.22) + ((digest >> 8) % max(120, int(height * 0.25)))
     img = _add_radial_glow(img, (cx, cy), 340, pal["accent"], alpha=70)
-    img = _add_radial_glow(img, (VIDEO_WIDTH - cx, cy + 380), 260, pal["accent2"], alpha=45)
+    img = _add_radial_glow(img, (width - cx, cy + int(height * 0.22)), 260, pal["accent2"], alpha=45)
 
     draw = ImageDraw.Draw(img)
     dot_color = (
@@ -348,22 +366,27 @@ def render_editorial_card(
         min(255, pal["bg2"][1] + 26),
         min(255, pal["bg2"][2] + 30),
     )
+    pattern_h = height - 160 if is_landscape else 1340
     if digest % 2 == 0:
-        for x in range(45, VIDEO_WIDTH, 60):
-            for y in range(45, 1320, 60):
+        for x in range(45, width, 60):
+            for y in range(45, pattern_h, 60):
                 draw.ellipse([x - 2, y - 2, x + 2, y + 2], fill=dot_color)
     else:
-        for x in range(0, VIDEO_WIDTH, 90):
-            draw.line([(x, 0), (x, 1340)], fill=dot_color, width=1)
-        for y in range(0, 1340, 90):
-            draw.line([(0, y), (VIDEO_WIDTH, y)], fill=dot_color, width=1)
+        for x in range(0, width, 90):
+            draw.line([(x, 0), (x, pattern_h)], fill=dot_color, width=1)
+        for y in range(0, pattern_h, 90):
+            draw.line([(0, y), (width, y)], fill=dot_color, width=1)
 
     head_clean, body_clean = _split_headline_and_body(headline, body_text)
     hero_stat = (stat_text or "").strip() or _extract_auto_stat(f"{head_clean} {body_clean}")
     layout_idx = 0 if hero_stat else (1 + (digest % 2))
 
-    # Main shadowed editorial panel (above caption safe zone y=1260+)
-    panel_box = (68, 220, VIDEO_WIDTH - 68, 1180)
+    # Main shadowed editorial panel (above caption safe zone)
+    if is_landscape:
+        panel_box = (96, 68, width - 96, height - 180)
+    else:
+        panel_box = (68, 220, width - 68, 1180)
+    px1, py1, px2, py2 = panel_box
     img = _draw_shadow_rounded_box(
         img,
         panel_box,
@@ -375,44 +398,46 @@ def render_editorial_card(
     draw = ImageDraw.Draw(img)
 
     # Top chrome bar inside card
+    inner_x = px1 + 48
+    inner_right = px2 - 48
+    bar_y = py1 + 48
     badge_font = _load_font(_FONTS_MONO_BOLD, 28)
     badge_lbl = (badge_text or "STORY").upper()[:24]
     bb = draw.textbbox((0, 0), badge_lbl, font=badge_font)
     bw = (bb[2] - bb[0]) + 44
-    draw.rounded_rectangle([116, 268, 116 + bw, 322], radius=10, fill=pal["accent"])
-    draw.text((138, 279), badge_lbl, font=badge_font, fill=pal["bg1"])
+    draw.rounded_rectangle([inner_x, bar_y, inner_x + bw, bar_y + 54], radius=10, fill=pal["accent"])
+    draw.text((inner_x + 22, bar_y + 11), badge_lbl, font=badge_font, fill=pal["bg1"])
 
     tag_right = "CASE FILE" if layout_idx == 2 else ("KEY METRIC" if layout_idx == 0 else "STORY BEAT")
     tr_font = _load_font(_FONTS_MONO_BOLD, 24)
     tb = draw.textbbox((0, 0), tag_right, font=tr_font)
-    draw.text((VIDEO_WIDTH - 116 - (tb[2] - tb[0]), 283), tag_right, font=tr_font, fill=pal["muted"])
-    draw.line([(116, 348), (VIDEO_WIDTH - 116, 348)], fill=dot_color, width=2)
+    draw.text((inner_right - (tb[2] - tb[0]), bar_y + 15), tag_right, font=tr_font, fill=pal["muted"])
+    draw.line([(inner_x, bar_y + 80), (inner_right, bar_y + 80)], fill=dot_color, width=2)
 
     title_fonts = _FONTS_SERIF_BLACK if style == VisualStyle.VINTAGE_ARCHIVAL else _FONTS_BLACK
-    max_text_w = VIDEO_WIDTH - 232
-    y_cursor = 382
+    max_text_w = inner_right - inner_x
+    y_cursor = bar_y + 114
 
     if layout_idx == 0 and hero_stat:
-        stat_size = 132 if len(hero_stat) <= 6 else (104 if len(hero_stat) <= 10 else 80)
+        stat_size = (108 if is_landscape else 132) if len(hero_stat) <= 6 else ((92 if is_landscape else 104) if len(hero_stat) <= 10 else 80)
         stat_font = _load_font(_FONTS_BLACK, stat_size)
-        draw.text((118, y_cursor + 4), hero_stat[:16], font=stat_font, fill=(6, 8, 13))
-        draw.text((116, y_cursor), hero_stat[:16], font=stat_font, fill=pal["accent"])
+        draw.text((inner_x + 2, y_cursor + 4), hero_stat[:16], font=stat_font, fill=(6, 8, 13))
+        draw.text((inner_x, y_cursor), hero_stat[:16], font=stat_font, fill=pal["accent"])
         sb_box = draw.textbbox((0, 0), hero_stat[:16], font=stat_font)
-        y_cursor += (sb_box[3] - sb_box[1]) + 42
+        y_cursor += (sb_box[3] - sb_box[1]) + (28 if is_landscape else 42)
 
     # High-impact headline with accent-colored lead line for visual pop
-    h_size = 66 if len(head_clean) <= 55 else 56
+    h_size = (58 if is_landscape else 66) if len(head_clean) <= 55 else (50 if is_landscape else 56)
     title_font = _load_font(title_fonts, h_size)
-    head_lines = _wrap_text_px(draw, head_clean, title_font, max_text_w)[:4]
+    head_lines = _wrap_text_px(draw, head_clean, title_font, max_text_w)[: (3 if is_landscape else 4)]
 
     if layout_idx == 1 and head_lines:
-        # Left vertical accent bar along the headline block
         block_h = len(head_lines) * (h_size + 16)
-        draw.rounded_rectangle([116, y_cursor + 6, 126, y_cursor + block_h - 6], radius=4, fill=pal["accent"])
-        x_head = 148
-        head_lines = _wrap_text_px(draw, head_clean, title_font, max_text_w - 32)[:4]
+        draw.rounded_rectangle([inner_x, y_cursor + 6, inner_x + 10, y_cursor + block_h - 6], radius=4, fill=pal["accent"])
+        x_head = inner_x + 32
+        head_lines = _wrap_text_px(draw, head_clean, title_font, max_text_w - 32)[: (3 if is_landscape else 4)]
     else:
-        x_head = 116
+        x_head = inner_x
 
     for idx_ln, ln in enumerate(head_lines):
         fill_col = pal["accent"] if (layout_idx == 1 and idx_ln == 0 and not hero_stat) else pal["text"]
@@ -420,24 +445,26 @@ def render_editorial_card(
         draw.text((x_head, y_cursor), ln, font=title_font, fill=fill_col)
         y_cursor += h_size + 16
 
-    if body_clean and y_cursor < 1020:
-        y_cursor += 18
-        draw.rounded_rectangle([116, y_cursor, 280, y_cursor + 6], radius=3, fill=pal["accent2"])
-        y_cursor += 32
+    body_limit_y = py2 - 90
+    if body_clean and y_cursor < body_limit_y - 80:
+        y_cursor += 16
+        draw.rounded_rectangle([inner_x, y_cursor, inner_x + 164, y_cursor + 6], radius=3, fill=pal["accent2"])
+        y_cursor += 28
 
-        body_font = _load_font(_FONTS_SANS_MED, 42)
-        body_lines = _wrap_text_px(draw, body_clean, body_font, max_text_w)[:5]
+        body_font = _load_font(_FONTS_SANS_MED, 38 if is_landscape else 42)
+        body_lines = _wrap_text_px(draw, body_clean, body_font, max_text_w)[: (4 if is_landscape else 5)]
         for ln in body_lines:
-            if y_cursor > 1105:
+            if y_cursor > body_limit_y:
                 break
-            draw.text((116, y_cursor), ln, font=body_font, fill=pal["muted"])
-            y_cursor += 56
+            draw.text((inner_x, y_cursor), ln, font=body_font, fill=pal["muted"])
+            y_cursor += 50 if is_landscape else 56
 
     # Subtle HUD corner ticks inside panel
-    draw.line([(92, 1138), (132, 1138)], fill=pal["accent"], width=3)
-    draw.line([(92, 1100), (92, 1138)], fill=pal["accent"], width=3)
-    draw.line([(VIDEO_WIDTH - 132, 1138), (VIDEO_WIDTH - 92, 1138)], fill=pal["accent"], width=3)
-    draw.line([(VIDEO_WIDTH - 92, 1100), (VIDEO_WIDTH - 92, 1138)], fill=pal["accent"], width=3)
+    c_in = 24
+    draw.line([(px1 + c_in, py2 - 42), (px1 + c_in + 40, py2 - 42)], fill=pal["accent"], width=3)
+    draw.line([(px1 + c_in, py2 - 80), (px1 + c_in, py2 - 42)], fill=pal["accent"], width=3)
+    draw.line([(px2 - c_in - 40, py2 - 42), (px2 - c_in, py2 - 42)], fill=pal["accent"], width=3)
+    draw.line([(px2 - c_in, py2 - 80), (px2 - c_in, py2 - 42)], fill=pal["accent"], width=3)
 
     img = _add_vignette(img)
     out_path.parent.mkdir(parents=True, exist_ok=True)

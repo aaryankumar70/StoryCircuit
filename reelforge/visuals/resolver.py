@@ -12,7 +12,7 @@ import requests
 from PIL import Image
 
 from reelforge import config
-from reelforge.models import BeatSpec, MediaPreference, STYLE_PROMPTS, StoryPlan
+from reelforge.models import BeatSpec, MediaPreference, StoryPlan, VideoFormat, get_style_prompt
 from reelforge.visuals.cards import compose_scene_frame, render_editorial_card
 
 logger = logging.getLogger("reelforge.visuals.resolver")
@@ -39,11 +39,18 @@ def _validate_raster_image(path: Path, min_side: int = 360) -> bool:
         return False
 
 
-def _fetch_pollinations_image(prompt: str, seed: int, raw_out: Path) -> bool:
+def _fetch_pollinations_image(
+    prompt: str,
+    seed: int,
+    raw_out: Path,
+    *,
+    width: int = 768,
+    height: int = 1344,
+) -> bool:
     encoded = urllib.parse.quote(prompt[:420], safe="")
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width=768&height=1344&model={urllib.parse.quote(config.POLLINATIONS_MODEL)}"
+        f"?width={width}&height={height}&model={urllib.parse.quote(config.POLLINATIONS_MODEL)}"
         f"&nologo=true&seed={seed}"
     )
     try:
@@ -135,14 +142,19 @@ def resolve_beat_visual(
     beat: BeatSpec,
     visuals_dir: Path,
     visual_mode: Optional[str] = None,
+    skip_pollinations: bool = False,
 ) -> Path:
-    """Resolve and render a 1080x1920 PNG for one beat, never failing."""
+    """Resolve and render a frame PNG (9:16 Short or 16:9 Landscape) for one beat, never failing."""
     visuals_dir.mkdir(parents=True, exist_ok=True)
     mode = (visual_mode or config.VISUAL_MODE).strip().lower()
     final_png = visuals_dir / f"beat_{beat.index:02d}.png"
     raw_img = visuals_dir / f"beat_{beat.index:02d}_raw.img"
 
-    style_suffix = STYLE_PROMPTS.get(plan.style.value, STYLE_PROMPTS["editorial_dark"])
+    tw = plan.target_width
+    th = plan.target_height
+    is_long = (plan.video_format == VideoFormat.LONG) or (tw > th)
+    gen_w, gen_h = (1344, 768) if is_long else (768, 1344)
+    style_suffix = get_style_prompt(plan.style, VideoFormat.LONG if is_long else VideoFormat.SHORT)
     seed = int(hashlib.sha256(f"{plan.title}:{beat.index}:{beat.text}".encode("utf-8")).hexdigest()[:8], 16)
 
     if mode != "cards_only":
@@ -156,6 +168,8 @@ def resolve_beat_visual(
                 stat_text=beat.callout_stat,
                 badge_text=plan.category,
                 seed_key=f"{plan.title}:{beat.index}",
+                width=tw,
+                height=th,
             )
             beat.resolved_image_path = str(final_png)
             beat.resolved_source = "editorial_card"
@@ -176,6 +190,8 @@ def resolve_beat_visual(
                     badge_text=plan.category,
                     stat_text=beat.callout_stat,
                     is_archival=True,
+                    width=tw,
+                    height=th,
                 )
                 beat.resolved_image_path = str(final_png)
                 beat.resolved_source = "archival"
@@ -183,19 +199,22 @@ def resolve_beat_visual(
 
         # 3. Per-beat AI image matching exact beat dialogue
         if mode in ("auto", "pollinations"):
-            full_prompt = f"{beat.visual_prompt}. {style_suffix}"
-            if _fetch_pollinations_image(full_prompt, seed, raw_img):
-                compose_scene_frame(
-                    raw_img,
-                    final_png,
-                    style=plan.style,
-                    badge_text="" if beat.index > 0 else plan.category,
-                    stat_text=beat.callout_stat,
-                    is_archival=False,
-                )
-                beat.resolved_image_path = str(final_png)
-                beat.resolved_source = "pollinations"
-                return final_png
+            if not skip_pollinations:
+                full_prompt = f"{beat.visual_prompt}. {style_suffix}"
+                if _fetch_pollinations_image(full_prompt, seed, raw_img, width=gen_w, height=gen_h):
+                    compose_scene_frame(
+                        raw_img,
+                        final_png,
+                        style=plan.style,
+                        badge_text="" if beat.index > 0 else plan.category,
+                        stat_text=beat.callout_stat,
+                        is_archival=False,
+                        width=tw,
+                        height=th,
+                    )
+                    beat.resolved_image_path = str(final_png)
+                    beat.resolved_source = "pollinations"
+                    return final_png
 
             # Secondary fallback to Wikimedia archival before card fallback
             if _fetch_wikimedia_image(beat.archival_query or plan.title, raw_img):
@@ -206,6 +225,8 @@ def resolve_beat_visual(
                     badge_text=plan.category,
                     stat_text=beat.callout_stat,
                     is_archival=True,
+                    width=tw,
+                    height=th,
                 )
                 beat.resolved_image_path = str(final_png)
                 beat.resolved_source = "archival_fallback"
@@ -220,6 +241,8 @@ def resolve_beat_visual(
         stat_text=beat.callout_stat,
         badge_text=plan.category,
         seed_key=f"{plan.title}:{beat.index}",
+        width=tw,
+        height=th,
     )
     beat.resolved_image_path = str(final_png)
     beat.resolved_source = "editorial_card_fallback"
@@ -234,7 +257,13 @@ def resolve_all_visuals(
 ) -> None:
     visuals_dir = work_dir / "visuals"
     total = len(plan.beats)
+    consecutive_pollinations_misses = 0
     for idx, beat in enumerate(plan.beats, start=1):
-        resolve_beat_visual(plan, beat, visuals_dir, visual_mode=visual_mode)
+        skip_poll = consecutive_pollinations_misses >= 3
+        resolve_beat_visual(plan, beat, visuals_dir, visual_mode=visual_mode, skip_pollinations=skip_poll)
+        if beat.resolved_source == "pollinations":
+            consecutive_pollinations_misses = 0
+        elif not skip_poll and beat.media_preference == MediaPreference.AI_IMAGE:
+            consecutive_pollinations_misses += 1
         if on_progress:
             on_progress(idx, total, beat.resolved_source or "resolved")

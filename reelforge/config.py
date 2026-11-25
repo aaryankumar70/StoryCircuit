@@ -29,13 +29,17 @@ DB_PATH = Path(os.environ.get("REELFORGE_DB_PATH") or (DATA_DIR / "reelforge.db"
 for _d in (DATA_DIR, OUTPUT_DIR, ASSETS_DIR, MUSIC_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
-# Video specifications (1080x1920 vertical 9:16 Shorts)
+# Video specifications (9:16 Shorts <= 120s, auto 16:9 Landscape > 120s)
 VIDEO_WIDTH = 1080
 VIDEO_HEIGHT = 1920
+LANDSCAPE_WIDTH = 1920
+LANDSCAPE_HEIGHT = 1080
 VIDEO_FPS = 30
+SHORT_MAX_DURATION_SEC = float(os.environ.get("SHORT_MAX_DURATION_SEC", "120.0"))
 
 # Caption safe zone (below top overlay, above YouTube Shorts bottom UI)
 CAPTION_MARGIN_V = 410
+LANDSCAPE_CAPTION_MARGIN_V = 72
 CAPTION_FONT_NAME = os.environ.get("CAPTION_FONT_NAME", "Noto Sans Black")
 
 # LLM Brain
@@ -56,14 +60,16 @@ TTS_VOICE_PRIMARY = os.environ.get("TTS_VOICE_PRIMARY", "en-US-AndrewNeural")
 TTS_VOICE_SECONDARY = os.environ.get("TTS_VOICE_SECONDARY", "en-US-AvaNeural")
 TTS_RATE = os.environ.get("TTS_RATE", "+4%")
 
-# Schedule
+# Schedule & Automation
 SCHEDULER_TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "Asia/Kolkata")
 SLOT1_TIME = os.environ.get("SLOT1_TIME", "12:30")
 SLOT2_TIME = os.environ.get("SLOT2_TIME", "20:30")
 MAX_DAILY_VIDEOS = int(os.environ.get("MAX_DAILY_VIDEOS", "2"))
+AUTO_SCHEDULER_ENABLED = os.environ.get("AUTO_SCHEDULER_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+AUTO_GARBAGE_CLEANUP = os.environ.get("AUTO_GARBAGE_CLEANUP", "1").strip().lower() not in {"0", "false", "no"}
 
 # YouTube
-YOUTUBE_PUBLISHING_MODE = os.environ.get("YOUTUBE_PUBLISHING_MODE", "simulation").strip().lower()
+YOUTUBE_PUBLISHING_MODE = os.environ.get("YOUTUBE_PUBLISHING_MODE", "live").strip().lower()
 YOUTUBE_PRIVACY_STATUS = os.environ.get("YOUTUBE_PRIVACY_STATUS", "private").strip().lower()
 YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID", "").strip()
 YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
@@ -146,6 +152,7 @@ DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", "8080"))
 
 # Quality Control
 MIN_DURATION_SEC = float(os.environ.get("MIN_DURATION_SEC", "18.0"))
-MAX_DURATION_SEC = float(os.environ.get("MAX_DURATION_SEC", "90.0"))
+MAX_DURATION_SEC = float(os.environ.get("MAX_DURATION_SEC", "120.0"))
+LONG_MAX_DURATION_SEC = float(os.environ.get("LONG_MAX_DURATION_SEC", "3600.0"))
 TARGET_LUFS = float(os.environ.get("TARGET_LUFS", "-16.0"))
 MAX_TRUE_PEAK_DB = float(os.environ.get("MAX_TRUE_PEAK_DB", "-1.0"))

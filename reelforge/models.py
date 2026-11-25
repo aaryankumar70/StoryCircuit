@@ -1,4 +1,4 @@
-"""Typed domain models for ReelForge."""
+"""Typed domain models for ReelForge (StoryCircuit)."""
 from __future__ import annotations
 
 from enum import Enum
@@ -10,6 +10,11 @@ class SourceMode(str, Enum):
     RANDOM = "random"
     PLAN = "plan"
     CUSTOM_SCRIPT = "custom_script"
+
+
+class VideoFormat(str, Enum):
+    SHORT = "short"  # 1080x1920 vertical 9:16 (<= 120s)
+    LONG = "long"    # 1920x1080 landscape 16:9 (> 120s)
 
 
 class VisualStyle(str, Enum):
@@ -42,6 +47,14 @@ STYLE_PROMPTS: Dict[str, str] = {
         "clean visual metaphor, vertical 9:16 composition, no text, no watermark"
     ),
 }
+
+
+def get_style_prompt(style: VisualStyle, video_format: VideoFormat = VideoFormat.SHORT) -> str:
+    """Return style prompt adapted to vertical 9:16 Shorts or widescreen 16:9 landscape."""
+    base = STYLE_PROMPTS.get(style.value, STYLE_PROMPTS[VisualStyle.EDITORIAL_DARK.value])
+    if video_format == VideoFormat.LONG:
+        return base.replace("vertical 9:16 composition", "widescreen 16:9 cinematic composition")
+    return base
 
 
 class MotionType(str, Enum):
@@ -84,6 +97,9 @@ class StoryPlan(BaseModel):
     tags: List[str] = Field(default_factory=list)
     source_mode: SourceMode = SourceMode.RANDOM
     source_ref: str = ""
+    video_format: VideoFormat = VideoFormat.SHORT
+    target_width: int = 1080
+    target_height: int = 1920
 
     @property
     def full_script(self) -> str:

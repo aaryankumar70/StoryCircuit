@@ -1,12 +1,13 @@
-"""Per-beat TTS synthesis using Edge-TTS with exact WordBoundary timestamps."""
+"""Per-beat TTS synthesis using Edge-TTS with exact WordBoundary timestamps and clean fallbacks."""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import edge_tts
 
@@ -16,6 +17,13 @@ from reelforge.models import StoryPlan, WordTiming
 logger = logging.getLogger("reelforge.audio.tts")
 
 BEAT_GAP_SEC = 0.16
+
+
+def _clean_tts_text(text: str) -> str:
+    """Strip markdown formatting while keeping spoken punctuation intact."""
+    cleaned = re.sub(r"[*_`~#]+", "", text or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or "Story segment."
 
 
 def _probe_duration(audio_path: Path) -> float:
@@ -43,13 +51,37 @@ async def _synth_beat_edge(
             if ctype == "audio":
                 f.write(chunk["data"])
             elif ctype == "WordBoundary":
-                # Edge-TTS offset and duration are in 100-nanosecond ticks
                 start_s = float(chunk.get("offset", 0)) / 10_000_000.0
                 dur_s = max(0.06, float(chunk.get("duration", 0)) / 10_000_000.0)
                 word_txt = str(chunk.get("text", "")).strip()
                 if word_txt:
                     timings.append(WordTiming(word=word_txt, start_sec=start_s, end_sec=start_s + dur_s))
     return timings
+
+
+async def _synth_all_beats_edge(
+    plan: StoryPlan,
+    audio_dir: Path,
+) -> Dict[int, Tuple[bool, List[WordTiming]]]:
+    """Synthesize all beats in a single event loop with bounded retries."""
+    results: Dict[int, Tuple[bool, List[WordTiming]]] = {}
+    for idx, beat in enumerate(plan.beats):
+        voice = config.TTS_VOICE_SECONDARY if beat.speaker == "secondary" else config.TTS_VOICE_PRIMARY
+        raw_mp3 = audio_dir / f"beat_{idx:03d}.mp3"
+        spoken = _clean_tts_text(beat.text)
+        ok = False
+        raw_words: List[WordTiming] = []
+        for attempt in range(2):
+            try:
+                raw_words = await _synth_beat_edge(spoken, voice, config.TTS_RATE, raw_mp3)
+                if raw_mp3.exists() and raw_mp3.stat().st_size > 500:
+                    ok = True
+                    break
+            except Exception as exc:
+                logger.warning("Edge-TTS attempt %s failed on beat %s: %s", attempt + 1, idx, exc)
+                await asyncio.sleep(0.5)
+        results[idx] = (ok, raw_words)
+    return results
 
 
 def _fallback_proportional_timings(text: str, start_offset: float, duration: float, speaker: str) -> List[WordTiming]:
@@ -70,7 +102,7 @@ def _fallback_proportional_timings(text: str, start_offset: float, duration: flo
 
 def _synth_beat_espeak(text: str, out_wav: Path) -> None:
     subprocess.run(
-        ["espeak-ng", "-s", "155", "-w", str(out_wav), text],
+        ["espeak-ng", "-s", "155", "-w", str(out_wav), _clean_tts_text(text)],
         check=True,
         capture_output=True,
         timeout=30,
@@ -88,11 +120,17 @@ def synthesize_story_audio(
     audio_dir = work_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
 
+    edge_results: Dict[int, Tuple[bool, List[WordTiming]]] = {}
+    if config.TTS_ENGINE == "edge" and plan.beats:
+        try:
+            edge_results = asyncio.run(_synth_all_beats_edge(plan, audio_dir))
+        except Exception as exc:
+            logger.warning("Edge-TTS batch failed (%s); using espeak-ng fallback.", exc)
+
     beat_wavs: List[Path] = []
     all_words: List[WordTiming] = []
     cursor_sec = 0.0
 
-    # Generate short silence gap wav once
     gap_wav = audio_dir / "gap.wav"
     subprocess.run(
         [
@@ -107,35 +145,34 @@ def synthesize_story_audio(
     )
 
     for idx, beat in enumerate(plan.beats):
-        voice = config.TTS_VOICE_SECONDARY if beat.speaker == "secondary" else config.TTS_VOICE_PRIMARY
-        raw_mp3 = audio_dir / f"beat_{idx:02d}.mp3"
-        beat_wav = audio_dir / f"beat_{idx:02d}.wav"
+        raw_mp3 = audio_dir / f"beat_{idx:03d}.mp3"
+        beat_wav = audio_dir / f"beat_{idx:03d}.wav"
 
-        raw_words: List[WordTiming] = []
+        ok_edge, raw_words = edge_results.get(idx, (False, []))
         used_edge = False
-        if config.TTS_ENGINE == "edge":
+        if ok_edge and raw_mp3.exists():
             try:
-                raw_words = asyncio.run(_synth_beat_edge(beat.text, voice, config.TTS_RATE, raw_mp3))
-                if raw_mp3.exists() and raw_mp3.stat().st_size > 500:
-                    subprocess.run(
-                        ["ffmpeg", "-y", "-i", str(raw_mp3), "-ar", "44100", "-ac", "1", str(beat_wav)],
-                        check=True,
-                        capture_output=True,
-                        timeout=30,
-                    )
-                    used_edge = True
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", str(raw_mp3), "-ar", "44100", "-ac", "1", str(beat_wav)],
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+                used_edge = True
             except Exception as exc:
-                logger.warning("Edge-TTS failed on beat %s (%s); trying espeak-ng fallback.", idx, exc)
+                logger.warning("FFmpeg decode failed for Edge-TTS beat %s: %s", idx, exc)
 
         if not used_edge:
             _synth_beat_espeak(beat.text, beat_wav)
+            norm_wav = beat_wav.with_suffix(".norm.wav")
             subprocess.run(
-                ["ffmpeg", "-y", "-i", str(beat_wav), "-ar", "44100", "-ac", "1", str(beat_wav.with_suffix(".norm.wav"))],
+                ["ffmpeg", "-y", "-i", str(beat_wav), "-ar", "44100", "-ac", "1", str(norm_wav)],
                 check=True,
                 capture_output=True,
                 timeout=30,
             )
-            beat_wav.with_suffix(".norm.wav").replace(beat_wav)
+            norm_wav.replace(beat_wav)
+            raw_words = []
 
         dur = _probe_duration(beat_wav)
         beat.start_sec = round(cursor_sec, 3)
@@ -157,7 +194,6 @@ def synthesize_story_audio(
             cursor_sec += BEAT_GAP_SEC
         beat.end_sec = round(cursor_sec, 3)
 
-    # Pad tail slightly for clean ending breath
     tail_wav = audio_dir / "tail.wav"
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.45", str(tail_wav)],
@@ -180,7 +216,7 @@ def synthesize_story_audio(
         ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_txt), "-c:a", "pcm_s16le", str(narration_wav)],
         check=True,
         capture_output=True,
-        timeout=60,
+        timeout=max(60, len(beat_wavs) * 2),
     )
 
     total_dur = _probe_duration(narration_wav)

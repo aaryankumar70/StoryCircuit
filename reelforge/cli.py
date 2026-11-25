@@ -12,6 +12,7 @@ from reelforge import config
 from reelforge.models import SourceMode
 from reelforge.pipeline import run_generation_job
 from reelforge.scheduler.daily import publish_job_to_youtube, run_daily_slots, serve_scheduler_loop
+from reelforge.storage.cleanup import cleanup_ended_day_videos
 from reelforge.storage.db import ReelDatabase
 
 
@@ -37,6 +38,7 @@ def main() -> None:
     p_plan = sub.add_parser("plan-add", help="Queue a topic/script into the multi-day plan")
     p_plan.add_argument("--date", required=True, help="YYYY-MM-DD")
     p_plan.add_argument("--slot", type=int, choices=[1, 2], default=1)
+    p_plan.add_argument("--time", default="", help="Custom publish time HH:MM")
     p_plan.add_argument("--topic", required=True)
     p_plan.add_argument("--category", default="story")
     p_plan.add_argument("--style", default="auto")
@@ -49,6 +51,8 @@ def main() -> None:
 
     p_sched = sub.add_parser("scheduler", help="Run continuous 2-video/day scheduler daemon")
     p_sched.add_argument("--poll", type=int, default=300)
+
+    sub.add_parser("cleanup", help="Delete rendered video files from ended days")
 
     p_up = sub.add_parser("upload", help="Upload a QC-passed job to YouTube")
     p_up.add_argument("job_id")
@@ -85,6 +89,7 @@ def main() -> None:
         pid = db.add_plan_item(
             planned_date=args.date,
             slot_num=args.slot,
+            publish_time=args.time,
             topic=args.topic,
             category=args.category,
             style=args.style,
@@ -100,6 +105,10 @@ def main() -> None:
 
     if args.cmd == "scheduler":
         serve_scheduler_loop(poll_seconds=args.poll)
+        return
+
+    if args.cmd == "cleanup":
+        print(json.dumps(cleanup_ended_day_videos(db), indent=2))
         return
 
     if args.cmd == "upload":
