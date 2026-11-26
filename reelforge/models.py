@@ -67,8 +67,16 @@ class MotionType(str, Enum):
 
 class MediaPreference(str, Enum):
     AI_IMAGE = "ai_image"
+    BROLL_VIDEO = "broll_video"
     ARCHIVAL = "archival"
-    GRAPHIC_CARD = "graphic_card"
+
+
+class CharacterSpec(BaseModel):
+    name: str = "Atlas"
+    role: str = "narrator"
+    pose: str = "explaining"  # "explaining" | "pointing" | "shocked" | "thinking" | "shrug"
+    emotion: str = "curious"
+    facing: str = "right"
 
 
 class BeatSpec(BaseModel):
@@ -76,12 +84,17 @@ class BeatSpec(BaseModel):
     speaker: str = "narrator"  # "narrator" | "primary" | "secondary"
     text: str
     visual_prompt: str
+    broll_query: str = ""
     archival_query: str = ""
     media_preference: MediaPreference = MediaPreference.AI_IMAGE
     motion: MotionType = MotionType.ZOOM_IN
+    characters: List[CharacterSpec] = Field(default_factory=list)
+    camera_shot: str = "zoom_in"  # "wide" | "medium" | "closeup" | "pan_left" | "pan_right" | "zoom_in" | "zoom_out"
+    host_appearance: str = "cameo"  # "none" | "cameo" | "presenter"
     callout_title: str = ""
     callout_stat: str = ""
     resolved_image_path: Optional[str] = None
+    resolved_video_path: Optional[str] = None
     resolved_source: Optional[str] = None
     start_sec: float = 0.0
     end_sec: float = 0.0

@@ -1,1 +1,1 @@
-"""Zero-cost per-beat visual generation, archival lookup, and procedural graphic cards."""
+"""Zero-cost 30 FPS 2D animated world & character visual engine plus deduplicated media resolver."""

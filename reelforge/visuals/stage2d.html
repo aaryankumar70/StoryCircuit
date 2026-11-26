@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: transparent; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script>
+(() => {
+  const canvas = document.getElementById("stage");
+  const ctx = canvas.getContext("2d", { alpha: true });
+
+  const PALETTES = {
+    editorial_dark: { bg1: "#090d16", bg2: "#151f33", accent: "#22d3ee", accent2: "#f59e0b", text: "#f8fafc", panel: "rgba(10,14,24,0.78)" },
+    vintage_archival: { bg1: "#18110c", bg2: "#332419", accent: "#e0a96d", accent2: "#f3d5a5", text: "#faf3e8", panel: "rgba(24,16,11,0.80)" },
+    graphic_noir: { bg1: "#0b0910", bg2: "#24101d", accent: "#f43f5e", accent2: "#38bdf8", text: "#f8fafc", panel: "rgba(14,10,20,0.80)" },
+    cinematic_painterly: { bg1: "#0a1724", bg2: "#16354d", accent: "#48cae4", accent2: "#fbbf24", text: "#f0f9ff", panel: "rgba(10,22,34,0.78)" },
+    blueprint_tech: { bg1: "#061021", bg2: "#0d2345", accent: "#38bdf8", accent2: "#34d399", text: "#eef7ff", panel: "rgba(8,18,38,0.80)" },
+  };
+
+  let MANIFEST = { width: 1080, height: 1920, fps: 30, style: "editorial_dark", title: "", category: "story", beats: [], words: [], character_sprites: {} };
+  const LOADED_IMAGES = new Map();
+  const CHARACTER_SPRITES = new Map();
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function easeOutCubic(t) { return 1 - Math.pow(1 - clamp(t, 0, 1), 3); }
+  function quinticInOut(t) {
+    const x = clamp(t, 0, 1);
+    return x < 0.5 ? 16 * Math.pow(x, 5) : 1 - Math.pow(-2 * x + 2, 5) / 2;
+  }
+
+  function findBeatAtTime(tSec) {
+    const beats = MANIFEST.beats || [];
+    for (let i = 0; i < beats.length; i++) {
+      if (tSec >= beats[i].start_sec && tSec <= beats[i].end_sec + 0.001) return beats[i];
+    }
+    return beats[beats.length - 1] || { index: 0, start_sec: 0, end_sec: 5, characters: [], host_appearance: "none", camera_shot: "zoom_in" };
+  }
+
+  function findActiveWord(tSec) {
+    const words = MANIFEST.words || [];
+    for (let i = 0; i < words.length; i++) {
+      if (tSec >= words[i].start_sec && tSec <= words[i].end_sec) return words[i];
+    }
+    return null;
+  }
+
+  function drawFullBleedKenBurns(img, w, h, beat, beatLocalT, dimForPresenter) {
+    const dur = Math.max(1.0, (beat.end_sec || 4) - (beat.start_sec || 0));
+    const p = quinticInOut(beatLocalT / dur);
+    const shot = beat.camera_shot || "zoom_in";
+    const imgAsp = img.width / Math.max(1, img.height);
+    const scrAsp = w / Math.max(1, h);
+
+    let zoom = lerp(1.03, 1.14, p);
+    let panX = 0;
+    let panY = 0;
+    if (shot === "zoom_out") zoom = lerp(1.15, 1.03, p);
+    else if (shot === "closeup") zoom = lerp(1.10, 1.20, p);
+    else if (shot === "pan_left") { zoom = 1.12; panX = lerp(34, -34, p); }
+    else if (shot === "pan_right") { zoom = 1.12; panX = lerp(-34, 34, p); }
+
+    // Subtle organic handheld breath
+    panX += Math.sin(beatLocalT * 1.1) * 4;
+    panY += Math.cos(beatLocalT * 0.9) * 3;
+
+    let dw, dh;
+    if (imgAsp > scrAsp) {
+      dh = h * zoom;
+      dw = dh * imgAsp;
+    } else {
+      dw = w * zoom;
+      dh = dw / imgAsp;
+    }
+
+    ctx.save();
+    ctx.translate(w / 2 + panX, h / 2 + panY);
+    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+
+    // Subtle cinematic vignette (+ gentle darkening when presenter stands in foreground)
+    const vig = ctx.createRadialGradient(w / 2, h * 0.42, w * 0.22, w / 2, h * 0.42, Math.max(w, h) * 0.74);
+    vig.addColorStop(0, dimForPresenter ? "rgba(6,8,14,0.22)" : "rgba(0,0,0,0.04)");
+    vig.addColorStop(1, dimForPresenter ? "rgba(6,8,14,0.82)" : "rgba(6,8,14,0.64)");
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  function drawOfflineGradientFallback(pal, w, h) {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, pal.bg1);
+    g.addColorStop(0.55, pal.bg2);
+    g.addColorStop(1, pal.bg1);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  function getSprite(pose) {
+    const key = String(pose || "explaining").toLowerCase();
+    return CHARACTER_SPRITES.get(key) || CHARACTER_SPRITES.get("explaining") || CHARACTER_SPRITES.get("pointing") || CHARACTER_SPRITES.values().next().value || null;
+  }
+
+  function drawHostSprite(beat, pal, w, h, tSec, beatLocalT, isSpeaking) {
+    const app = beat.host_appearance || "none";
+    if (app === "none") return;
+
+    const chars = beat.characters || [];
+    const pose = (chars[0] && chars[0].pose) || "explaining";
+    const sprite = getSprite(pose);
+    if (!sprite) return;
+
+    const isLand = w > h;
+    const enter = easeOutCubic(beatLocalT * 3.6);
+    const breath = Math.sin(tSec * 2.3) * 3.5;
+    const talkBounce = isSpeaking ? Math.sin(tSec * 9.0) * 2.5 : 0;
+
+    if (app === "presenter") {
+      // Large crisp illustrated host anchored cleanly above the caption safe zone
+      const targetH = isLand ? h * 0.56 : h * 0.44;
+      const aspect = sprite.width / Math.max(1, sprite.height);
+      const drawH = targetH;
+      const drawW = drawH * aspect;
+      const cx = isLand ? w * 0.24 : w * 0.50;
+      const baseY = isLand ? h * 0.90 : h * 0.75;
+      const slideY = (1 - enter) * 48;
+
+      ctx.save();
+      ctx.globalAlpha = enter;
+      ctx.shadowColor = "rgba(0,0,0,0.65)";
+      ctx.shadowBlur = 28;
+      ctx.shadowOffsetY = 10;
+      ctx.drawImage(sprite, cx - drawW / 2, baseY - drawH + breath + talkBounce + slideY, drawW, drawH);
+      ctx.restore();
+      return;
+    }
+
+    // "cameo": clean chest-up portrait inside circular rimmed reaction disc
+    const r = isLand ? 115 : 128;
+    const cx = isLand ? w * 0.13 : w * 0.20;
+    const cy = isLand ? h * 0.77 : h * 0.66;
+    const popScale = lerp(0.85, 1.0, enter);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(popScale, popScale);
+    ctx.globalAlpha = enter;
+
+    // Subtle frosted dark disc + soft drop shadow
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.65)";
+    ctx.shadowBlur = 22;
+    ctx.fillStyle = pal.panel;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(0, 0, r - 3, 0, Math.PI * 2); ctx.clip();
+    // Frame chest-up portion of the sprite inside the cameo circle
+    const sw = r * 2.15;
+    const sh = sw * (sprite.height / Math.max(1, sprite.width));
+    ctx.drawImage(sprite, -sw / 2, -r * 0.94 + breath * 0.6 + talkBounce * 0.8, sw, sh);
+    ctx.restore();
+
+    ctx.strokeStyle = pal.accent;
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawMinimalHUD(beat, pal, w, h, beatLocalT) {
+    const isLand = w > h;
+    const enter = easeOutCubic(beatLocalT * 3.0);
+
+    ctx.save();
+    // Subtle top-left category tag (clean floating label, no heavy border box)
+    const cat = (MANIFEST.category || "STORY").toUpperCase();
+    const px = isLand ? 52 : 56;
+    const py = isLand ? 42 : 110;
+    ctx.fillStyle = pal.accent;
+    ctx.beginPath(); ctx.arc(px + 6, py, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowColor = "rgba(0,0,0,0.85)";
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = "rgba(248,250,252,0.88)";
+    ctx.font = `800 ${isLand ? 20 : 22}px monospace`;
+    ctx.textBaseline = "middle";
+    ctx.fillText(cat, px + 20, py + 1);
+
+    // Optional clean floating stat/year kinetic typography (zero boxes or borders!)
+    if (beat.callout_stat) {
+      ctx.globalAlpha = enter;
+      const rightX = w - (isLand ? 56 : 58);
+      const topY = (isLand ? 48 : 114) + (1 - enter) * -14;
+      ctx.textAlign = "right";
+      ctx.shadowColor = "rgba(0,0,0,0.9)";
+      ctx.shadowBlur = 18;
+
+      ctx.fillStyle = pal.accent2;
+      ctx.font = `900 ${isLand ? 56 : 66}px sans-serif`;
+      ctx.fillText(String(beat.callout_stat).slice(0, 14), rightX, topY + 26);
+
+      // Thin animated accent bar beneath stat
+      const barW = Math.min(220, ctx.measureText(String(beat.callout_stat).slice(0, 14)).width) * enter;
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = pal.accent;
+      ctx.fillRect(rightX - barW, topY + 62, barW, 4);
+
+      if (beat.callout_title) {
+        ctx.shadowBlur = 14;
+        ctx.fillStyle = pal.text;
+        ctx.font = `700 ${isLand ? 22 : 24}px sans-serif`;
+        ctx.fillText(String(beat.callout_title).slice(0, 28), rightX, topY + 88);
+      }
+      ctx.textAlign = "left";
+    }
+    ctx.restore();
+  }
+
+  window.setManifest = async function(manifest) {
+    MANIFEST = manifest;
+    canvas.width = manifest.width || 1080;
+    canvas.height = manifest.height || 1920;
+    LOADED_IMAGES.clear();
+    CHARACTER_SPRITES.clear();
+
+    const promises = [];
+    for (const b of (manifest.beats || [])) {
+      if (b.image_data_url) {
+        promises.push(new Promise((resolve) => {
+          const im = new Image();
+          im.onload = () => { LOADED_IMAGES.set(b.index, im); resolve(); };
+          im.onerror = () => resolve();
+          im.src = b.image_data_url;
+        }));
+      }
+    }
+    for (const [k, url] of Object.entries(manifest.character_sprites || {})) {
+      promises.push(new Promise((resolve) => {
+        const im = new Image();
+        im.onload = () => { CHARACTER_SPRITES.set(k, im); resolve(); };
+        im.onerror = () => resolve();
+        im.src = url;
+      }));
+    }
+    await Promise.all(promises);
+    return true;
+  };
+
+  window.renderAtTime = function(tSec, format = "jpeg", quality = 0.94, transparent = false) {
+    const w = canvas.width;
+    const h = canvas.height;
+    const isLand = w > h;
+    const pal = PALETTES[MANIFEST.style] || PALETTES.editorial_dark;
+    const beat = findBeatAtTime(tSec);
+    const beatLocalT = Math.max(0, tSec - (beat.start_sec || 0));
+    const activeWord = findActiveWord(tSec);
+    const isSpeaking = Boolean(activeWord);
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (!transparent) {
+      const extImg = LOADED_IMAGES.get(beat.index);
+      if (extImg) {
+        drawFullBleedKenBurns(extImg, w, h, beat, beatLocalT, beat.host_appearance === "presenter");
+      } else {
+        drawOfflineGradientFallback(pal, w, h);
+      }
+    }
+
+    // Illustrated host sprite (presenter or corner cameo)
+    drawHostSprite(beat, pal, w, h, tSec, beatLocalT, isSpeaking);
+
+    // Bottom gradient scrim so ASS captions stay razor sharp
+    const scrimGrad = ctx.createLinearGradient(0, h * (isLand ? 0.68 : 0.58), 0, h);
+    scrimGrad.addColorStop(0, "rgba(6,8,14,0)");
+    scrimGrad.addColorStop(0.55, "rgba(6,8,14,0.58)");
+    scrimGrad.addColorStop(1, "rgba(6,8,14,0.88)");
+    ctx.fillStyle = scrimGrad;
+    ctx.fillRect(0, h * (isLand ? 0.68 : 0.58), w, h);
+
+    drawMinimalHUD(beat, pal, w, h, beatLocalT);
+
+    // Crisp 0.14s transition dip between cuts
+    if (beatLocalT < 0.14 && beat.index > 0) {
+      ctx.fillStyle = `rgba(4,6,12,${((1 - beatLocalT / 0.14) * 0.45).toFixed(3)})`;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    if (transparent) {
+      return canvas.toDataURL("image/png").split(",")[1];
+    }
+    const mime = format === "png" ? "image/png" : "image/jpeg";
+    return canvas.toDataURL(mime, quality).split(",")[1];
+  };
+})();
+</script>
+</body>
+</html>

@@ -9,13 +9,13 @@ from reelforge.brain.metadata import build_youtube_tags, clean_youtube_title, en
 from reelforge.brain.splitter import analyze_and_split_script
 from reelforge.audio.underscore import generate_ambient_underscore
 from reelforge.brain.llm_client import ZeroCostLLM
-from reelforge.models import BeatSpec, SourceMode, StoryPlan, VideoFormat, VisualStyle, WordTiming
+from reelforge.models import BeatSpec, CharacterSpec, SourceMode, StoryPlan, VideoFormat, VisualStyle, WordTiming
 from reelforge.qc.gatekeeper import verify_video
 from reelforge.storage.cleanup import cleanup_ended_day_videos
 from reelforge.storage.db import ReelDatabase
 from reelforge.video.captions import write_word_synced_ass
 from reelforge.video.renderer import render_short_video
-from reelforge.visuals.cards import compose_scene_frame, render_editorial_card
+from reelforge.visuals.scene2d import render_2d_beat_preview
 from reelforge.youtube.uploader import YouTubeUploader
 
 
@@ -120,31 +120,35 @@ def test_garbage_remover_deletes_ended_day_videos_and_preserves_history(tmp_path
     assert is_dup is True
 
 
-def test_landscape_16x9_cards_captions_metadata_and_uploader(tmp_path):
-    card = render_editorial_card(
-        tmp_path / "land_card.png",
-        style=VisualStyle.CINEMATIC_PAINTERLY,
-        headline="Long Documentary Breakdown",
-        body_text="When a script exceeds two minutes, StoryCircuit automatically renders 16:9 widescreen.",
-        stat_text="16:9",
-        badge_text="science",
-        width=1920,
-        height=1080,
-    )
-    with Image.open(card) as im:
-        assert im.size == (1920, 1080)
-
-    # Tall source photo framed cleanly on 1920x1080 blurred backdrop
+def test_landscape_16x9_2d_scene_captions_metadata_and_uploader(tmp_path):
     tall = tmp_path / "tall.png"
     Image.new("RGB", (600, 1000), (80, 110, 140)).save(tall)
-    framed = compose_scene_frame(
-        tall,
-        tmp_path / "land_framed.png",
-        style=VisualStyle.EDITORIAL_DARK,
-        width=1920,
-        height=1080,
+
+    preview_plan = StoryPlan(
+        title="Long Documentary Breakdown",
+        hook="StoryCircuit renders 16:9 widescreen 2D scenes automatically.",
+        category="science",
+        style=VisualStyle.CINEMATIC_PAINTERLY,
+        video_format=VideoFormat.LONG,
+        target_width=1920,
+        target_height=1080,
+        beats=[
+            BeatSpec(
+                index=0,
+                text="When a script exceeds two minutes, StoryCircuit automatically renders 16:9 widescreen.",
+                visual_prompt="scientist in lab",
+                host_appearance="cameo",
+                characters=[CharacterSpec(name="Atlas", pose="pointing")],
+                callout_stat="16:9",
+                callout_title="WIDESCREEN",
+                resolved_image_path=str(tall),
+                start_sec=0.0,
+                end_sec=4.0,
+            )
+        ],
     )
-    with Image.open(framed) as im:
+    land_png = render_2d_beat_preview(preview_plan, tmp_path / "land_scene.png", beat_index=0, work_dir=tmp_path)
+    with Image.open(land_png) as im:
         assert im.size == (1920, 1080)
 
     ass = write_word_synced_ass(
@@ -206,36 +210,33 @@ def test_landscape_16x9_cards_captions_metadata_and_uploader(tmp_path):
 
 
 def test_real_ffmpeg_landscape_render_and_qc(tmp_path):
-    """Verify actual FFmpeg 16:9 render, ASS subtitle burn, loudnorm+alimiter, and QC pass."""
+    """Verify actual Chromium 2D animation -> FFmpeg 16:9 render, ASS subtitle burn, loudnorm+alimiter, and QC pass."""
     import json
     import subprocess
 
-    card = render_editorial_card(
-        tmp_path / "b0.png",
-        style=VisualStyle.EDITORIAL_DARK,
-        headline="1920x1080 Landscape Test",
-        body_text="Verifying automatic widescreen conversion and audio loudness gatekeeper.",
-        width=1920,
-        height=1080,
-    )
     plan = StoryPlan(
         title="Landscape Render Test",
         hook="Testing widescreen output.",
+        category="science",
+        style=VisualStyle.EDITORIAL_DARK,
         video_format=VideoFormat.LONG,
         target_width=1920,
         target_height=1080,
         beats=[
             BeatSpec(
                 index=0,
+                speaker="primary",
                 text="Testing widescreen output.",
-                visual_prompt="test",
-                resolved_image_path=str(card),
+                visual_prompt="2D scientist in lab",
+                host_appearance="presenter",
+                characters=[CharacterSpec(name="Atlas", pose="pointing")],
+                camera_shot="zoom_in",
+                callout_stat="16:9",
                 start_sec=0.0,
                 end_sec=4.0,
             ),
         ],
     )
-    # Create a 4s spoken-like audio wave via ffmpeg sine/anoisesrc so ebur128 hits broadcast range
     narr = tmp_path / "narr.wav"
     subprocess.run(
         [
@@ -247,11 +248,11 @@ def test_real_ffmpeg_landscape_render_and_qc(tmp_path):
         capture_output=True,
         timeout=30,
     )
-    bgm = generate_ambient_underscore(4.0, tmp_path / "bgm.wav")
+    bgm = generate_ambient_underscore(4.0, tmp_path / "bgm.wav", beat_cut_times=[2.0])
     words = [
-        WordTiming(word="Testing", start_sec=0.1, end_sec=1.2),
-        WordTiming(word="widescreen", start_sec=1.3, end_sec=2.5),
-        WordTiming(word="output.", start_sec=2.6, end_sec=3.6),
+        WordTiming(word="Testing", start_sec=0.1, end_sec=1.2, speaker="primary"),
+        WordTiming(word="widescreen", start_sec=1.3, end_sec=2.5, speaker="primary"),
+        WordTiming(word="output.", start_sec=2.6, end_sec=3.6, speaker="primary"),
     ]
     words_json = tmp_path / "words.json"
     words_json.write_text(json.dumps([w.model_dump() for w in words]), encoding="utf-8")
@@ -264,6 +265,7 @@ def test_real_ffmpeg_landscape_render_and_qc(tmp_path):
         words=words,
         work_dir=tmp_path,
         output_mp4=out_mp4,
+        duration_sec=4.0,
     )
     qc = verify_video(
         out_mp4,

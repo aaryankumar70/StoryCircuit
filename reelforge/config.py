@@ -54,10 +54,20 @@ OLLAMA_TIMEOUT_SEC = int(os.environ.get("OLLAMA_TIMEOUT_SEC", "120"))
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 
-# Visuals
-VISUAL_MODE = os.environ.get("VISUAL_MODE", "auto").strip().lower()
+# Visuals & Multi-Source Media (Hybrid Documentary + Stick Host)
+VISUAL_MODE = os.environ.get("VISUAL_MODE", "hybrid").strip().lower()
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
+PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
+HF_API_TOKEN = os.environ.get("HF_API_TOKEN", "").strip()
+HF_IMAGE_MODEL = os.environ.get("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip()
 POLLINATIONS_MODEL = os.environ.get("POLLINATIONS_MODEL", "flux").strip()
-POLLINATIONS_TIMEOUT_SEC = int(os.environ.get("POLLINATIONS_TIMEOUT_SEC", "18"))
+POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "").strip()
+POLLINATIONS_TIMEOUT_SEC = int(os.environ.get("POLLINATIONS_TIMEOUT_SEC", "65"))
+AI_IMAGE_PACING_SEC = float(os.environ.get("AI_IMAGE_PACING_SEC", "6.0"))
+VIDEO_ENCODE_PRESET = os.environ.get("VIDEO_ENCODE_PRESET", "medium").strip()
+VIDEO_CRF = int(os.environ.get("VIDEO_CRF", "18"))
+CHARACTER_DIR = ASSETS_DIR / "character"
+CHARACTER_DIR.mkdir(parents=True, exist_ok=True)
 
 # TTS
 TTS_ENGINE = os.environ.get("TTS_ENGINE", "edge").strip().lower()

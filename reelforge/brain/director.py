@@ -1,4 +1,4 @@
-"""Script writer and per-beat visual director for ReelForge (StoryCircuit)."""
+"""Script writer and pure-media documentary + illustrated host choreography director."""
 from __future__ import annotations
 
 import logging
@@ -11,6 +11,7 @@ from reelforge.brain.metadata import enrich_story_metadata
 from reelforge.brain.topic_pool import pick_fresh_topic
 from reelforge.models import (
     BeatSpec,
+    CharacterSpec,
     MediaPreference,
     MotionType,
     SourceMode,
@@ -37,6 +38,10 @@ _STYLES = [
     VisualStyle.BLUEPRINT_TECH,
 ]
 
+CHARACTER_POSES = ("explaining", "pointing", "shocked", "thinking", "shrug")
+CAMERA_SHOTS = ("wide", "medium", "closeup", "pan_left", "pan_right", "zoom_in", "zoom_out")
+HOST_APPEARANCES = ("none", "cameo", "presenter")
+
 
 def _pick_style(requested: str, db: Optional[ReelDatabase] = None) -> VisualStyle:
     if requested and requested != "auto":
@@ -58,73 +63,121 @@ def _split_custom_script_lines(script_text: str) -> List[Dict[str, str]]:
     raw_lines = [ln.strip() for ln in re.split(r"[\r\n]+", script_text.strip()) if ln.strip()]
     beats: List[Dict[str, str]] = []
     speaker_map: Dict[str, str] = {}
+    speaker_names: Dict[str, str] = {}
 
     for raw in raw_lines:
         speaker = "narrator"
+        speaker_name = "Atlas"
         text = raw
         m = re.match(r"^\[?([A-Za-z][A-Za-z0-9 _-]{0,20})\]?\s*:\s*(.+)$", raw)
         if m:
-            label = m.group(1).strip().lower()
+            raw_label = m.group(1).strip()
+            label = raw_label.lower()
             text = m.group(2).strip()
             if label not in speaker_map:
                 speaker_map[label] = "primary" if len(speaker_map) == 0 else "secondary"
+                speaker_names[label] = raw_label.title()
             speaker = speaker_map[label]
+            speaker_name = speaker_names[label]
 
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
         for sent in sentences:
             words = sent.split()
-            if len(words) > 22:
-                # Split long sentences cleanly into <= 20-word dynamic visual beats
-                step = 18
+            if len(words) > 20:
+                step = 16
                 for i in range(0, len(words), step):
                     part = " ".join(words[i:i + step]).strip()
                     if i + step < len(words):
                         part = part.rstrip(",;")
                     if part:
-                        beats.append({"speaker": speaker, "text": part})
+                        beats.append({"speaker": speaker, "speaker_name": speaker_name, "text": part})
             else:
-                beats.append({"speaker": speaker, "text": sent})
+                beats.append({"speaker": speaker, "speaker_name": speaker_name, "text": sent})
 
     return beats
 
 
 def _extract_stat_callout(sentence: str) -> str:
-    """Pull a concise number/year/percentage badge if naturally present in the beat."""
     m = re.search(r"\b(\d{4}|\d+(?:\.\d+)?%|\$[\d,.]+[MBK]?|\d+(?:,\d{3})+)\b", sentence)
     return m.group(1) if m else ""
 
 
-def _heuristic_visual_prompt(sentence: str, topic: str, beat_idx: int) -> Dict[str, Any]:
-    """Deterministic scene-matched visual prompt when LLM is unavailable or times out."""
+def _infer_pose(text: str, beat_idx: int) -> str:
+    lower = text.lower()
+    if any(k in lower for k in ("shock", "impossible", "vanish", "died", "dead", "panic", "scream", "explosion", "never", "kill")):
+        return "shocked"
+    if any(k in lower for k in ("why", "mystery", "unknown", "puzzle", "question", "how", "wonder", "secret")):
+        return "thinking"
+    if any(k in lower for k in ("actually", "turns out", "strange", "weird", "bizarre", "nobody", "literally")):
+        return "shrug"
+    if any(k in lower for k in ("warn", "danger", "deadly", "percent", "million", "thousand", "meters", "1")):
+        return "pointing"
+    return CHARACTER_POSES[beat_idx % len(CHARACTER_POSES)]
+
+
+_BROLL_STOPWORDS = {
+    "what", "seemed", "like", "there", "when", "where", "which", "while", "these", "those",
+    "this", "that", "they", "their", "them", "with", "from", "into", "about", "nearly",
+    "could", "would", "should", "years", "year", "only", "most", "some", "many", "very",
+    "scientists", "researchers", "experts", "estimate", "people", "today", "actually",
+    "twelve", "hundred", "thousand", "million", "billion", "official", "officially",
+}
+
+
+def _infer_beat_cues(
+    sentence: str,
+    topic: str,
+    category: str,
+    beat_idx: int,
+    *,
+    speaker: str = "narrator",
+    speaker_name: str = "Atlas",
+) -> Dict[str, Any]:
+    """Deterministic pure-media documentary visual cues when LLM is offline or for custom scripts."""
     clean = re.sub(r"[^A-Za-z0-9\s,'-]", " ", sentence).strip()
     stat = _extract_stat_callout(sentence)
-    lower = clean.lower()
+    pose = _infer_pose(clean, beat_idx)
 
     if beat_idx == 0:
         pref = MediaPreference.AI_IMAGE
-    elif stat and beat_idx % 3 == 1:
-        pref = MediaPreference.GRAPHIC_CARD
-    elif any(k in lower for k in ("18", "19", "ancient", "war", "apollo", "nasa", "ship", "expedition")):
-        pref = MediaPreference.ARCHIVAL if beat_idx % 2 == 1 else MediaPreference.AI_IMAGE
-    else:
+        host_app = "presenter"
+    elif beat_idx % 3 == 1:
+        pref = MediaPreference.BROLL_VIDEO
+        host_app = "cameo" if beat_idx % 2 == 1 else "none"
+    elif beat_idx % 3 == 2:
         pref = MediaPreference.AI_IMAGE
+        host_app = "none" if beat_idx % 2 == 0 else "cameo"
+    else:
+        pref = MediaPreference.ARCHIVAL
+        host_app = "cameo"
 
-    prompt = (
-        f"Scene depicting: {clean}. Context: {topic}. "
-        "Specific subject in sharp foreground focus, dramatic storytelling composition"
-    )
-    query_words = [w for w in re.findall(r"[A-Za-z0-9]{4,}", f"{topic} {clean}")][:5]
+    shots = ("zoom_in", "pan_right", "zoom_out", "pan_left", "closeup")
+    topic_words = [w for w in re.findall(r"[A-Za-z]{4,}", topic) if w.lower() not in _BROLL_STOPWORDS][:2]
+    beat_words = [
+        w for w in re.findall(r"[A-Za-z]{4,}", clean)
+        if w.lower() not in _BROLL_STOPWORDS and w.lower() not in {t.lower() for t in topic_words}
+    ][:3]
+    unique_query = " ".join(topic_words + beat_words)
+    broll_query = " ".join(beat_words[:3] or topic_words[:2] or [category])
+
     return {
-        "visual_prompt": prompt,
-        "archival_query": " ".join(query_words),
+        "visual_prompt": (
+            f"Cinematic documentary visual illustration: {clean}. Story context: {topic}. "
+            "Dramatic lighting, detailed foreground subject, atmospheric depth, no text, no watermarks."
+        ),
+        "broll_query": broll_query,
+        "archival_query": unique_query,
         "media_preference": pref.value,
+        "characters": [{"name": speaker_name or "Atlas", "role": "narrator", "pose": pose, "facing": "right"}],
+        "camera_shot": shots[beat_idx % len(shots)],
+        "host_appearance": host_app,
         "callout_stat": stat,
-        "callout_title": " ".join(clean.split()[:5]).upper() if pref == MediaPreference.GRAPHIC_CARD else "",
+        "callout_title": " ".join(clean.split()[:3]).upper() if stat else "",
     }
 
 
 class StoryDirector:
-    """Builds StoryPlans with dialogue-matched visual beats for all 3 workflow modes."""
+    """Builds StoryPlans for pure-media documentary + illustrated Signature Host videos."""
 
     def __init__(self, llm: Optional[ZeroCostLLM] = None):
         self.llm = llm or ZeroCostLLM()
@@ -199,10 +252,11 @@ class StoryDirector:
         source_mode: SourceMode,
     ) -> StoryPlan:
         system_prompt = (
-            "You are a viral documentary YouTube Shorts director. "
-            "Write gripping, accurate, non-generic 50-75 second scripts split into 9 to 12 beats. "
-            "Each beat MUST have a concrete visual_prompt describing the exact physical scene, subject, "
-            "and action matching that beat's spoken line (never abstract metaphors or repeated templates). "
+            "You are a cinematic YouTube documentary director. Every single beat is backed by real visual media: "
+            "either dramatic AI editorial illustrations ('ai_image'), real 1080p stock video B-roll ('broll_video'), "
+            "or real historical/science archival photos ('archival')—never plain text cards or code boxes. "
+            "An illustrated documentary host appears periodically ('presenter' on hook/reveal, 'cameo' reacting on select beats, 'none' for pure cinema). "
+            "Write gripping, accurate 45-65s scripts split into 10 to 13 beats (3-5s each). Beat 0 must be a strong hook (never 'Did you know'). "
             "Respond strictly in valid JSON."
         )
         avoid_str = "; ".join(avoid_titles[:15]) if avoid_titles else "none"
@@ -211,32 +265,36 @@ class StoryDirector:
             f"Category: {category}\n"
             f"Background facts: {facts or 'Use verifiable real-world details.'}\n"
             f"Avoid repeating these past topics: {avoid_str}\n\n"
-            "Return JSON with this exact schema:\n"
+            "Return JSON:\n"
             "{\n"
-            '  "title": "high-CTR curiosity title under 75 chars",\n'
-            '  "hook": "first spoken line under 14 words",\n'
-            '  "description": "engaging 2-3 sentence YouTube summary",\n'
+            '  "title": "high-CTR curiosity title under 70 chars",\n'
+            '  "hook": "first spoken line under 13 words",\n'
+            '  "description": "engaging 2-3 sentence summary",\n'
             '  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6"],\n'
             '  "beats": [\n'
             "    {\n"
-            '      "text": "1 punchy spoken sentence (10-20 words)",\n'
-            '      "visual_prompt": "concrete scene matching exact spoken sentence",\n'
-            '      "archival_query": "2-4 word search query for real historical/science photo or empty",\n'
-            '      "media_preference": "ai_image | archival | graphic_card",\n'
-            '      "callout_stat": "short stat/year like 1914 or empty",\n'
-            '      "callout_title": "3-5 word card title if graphic_card else empty"\n'
+            '      "text": "1 punchy spoken sentence (9-17 words)",\n'
+            '      "media_preference": "ai_image | broll_video | archival",\n'
+            '      "visual_prompt": "vivid 1-sentence scene or visual metaphor illustrating this exact line (no text in image)",\n'
+            '      "broll_query": "2-3 concrete filmable nouns for stock video (e.g. ocean storm waves)",\n'
+            '      "archival_query": "unique 3-4 word real photo query or empty",\n'
+            '      "host_appearance": "presenter | cameo | none",\n'
+            '      "pose": "explaining | pointing | shocked | thinking | shrug",\n'
+            '      "camera_shot": "zoom_in | zoom_out | pan_left | pan_right | closeup",\n'
+            '      "callout_stat": "short crisp number/year ONLY when a dramatic stat helps (e.g. 1859 or 17.6 HRS) else empty",\n'
+            '      "callout_title": "2-3 word label ONLY if callout_stat is set else empty"\n'
             "    }\n"
             "  ]\n"
             "}\n"
             "Rules:\n"
-            "- Never start with 'Did you know'.\n"
-            "- Total spoken words across all beats: 125 to 180 words.\n"
-            "- Use 'graphic_card' on 1 or 2 stat/twist beats, 'archival' on 1-2 real photo beats, and 'ai_image' on the rest.\n"
+            "- Total spoken words: 120 to 165 words.\n"
+            "- Mix media_preference across beats: ~6 ai_image (including visual metaphors for scientific/historical events), ~4 broll_video, ~2 archival.\n"
+            "- Use host_appearance='presenter' on Beat 0 and 1 twist/ending beat; 'cameo' on ~3-4 beats; 'none' on ~5-6 full-screen cinematic beats.\n"
         )
 
-        data = self.llm.generate_json(system_prompt, user_prompt, temperature=0.7)
+        data = self.llm.generate_json(system_prompt, user_prompt, temperature=0.65)
         if data and isinstance(data.get("beats"), list) and len(data["beats"]) >= 5:
-            beats = self._parse_beats(data["beats"], topic)
+            beats = self._parse_beats(data["beats"], topic, category)
             if beats:
                 return StoryPlan(
                     title=str(data.get("title") or topic)[:85],
@@ -244,7 +302,7 @@ class StoryDirector:
                     category=category,
                     style=style,
                     beats=beats,
-                    description=str(data.get("description") or f"{topic} — short documentary breakdown."),
+                    description=str(data.get("description") or f"{topic} — documentary breakdown."),
                     tags=[str(t) for t in (data.get("tags") or [category, "shorts", "story"])][:10],
                     source_mode=source_mode,
                     source_ref=topic,
@@ -265,25 +323,27 @@ class StoryDirector:
             raise ValueError("Could not parse any spoken lines from custom script.")
 
         inferred_title = title or " ".join(raw_beats[0]["text"].split()[:7]).rstrip(".,!?")
-
-        # Ask LLM in batches of 16 beats ONLY for visual cues while strictly locking spoken text
         cue_by_idx: Dict[int, Dict[str, Any]] = {}
         first_llm_meta: Dict[str, Any] = {}
         batch_size = 16
+
         for start_i in range(0, len(raw_beats), batch_size):
             batch = raw_beats[start_i:start_i + batch_size]
             indexed_lines = "\n".join(f"{start_i + offset}: {b['text']}" for offset, b in enumerate(batch))
             system_prompt = (
-                "You are a visual storyboard director. Given numbered spoken lines, return a matching "
-                "visual_prompt for EVERY index so the image matches what the speaker says word-for-word. "
-                "Do NOT rewrite the spoken lines. Respond in valid JSON."
+                "You are a documentary visual director. For EVERY numbered line, return a concrete visual_prompt "
+                "(no text in image), 2-3 word broll_query, media_preference ('ai_image'|'broll_video'|'archival'), "
+                "host_appearance ('presenter'|'cameo'|'none'), pose, and optional crisp callout_stat. "
+                "Do NOT rewrite spoken lines. Respond in valid JSON."
             )
             user_prompt = (
                 f"Title: {inferred_title}\n"
                 f"Lines:\n{indexed_lines}\n\n"
                 'Return JSON: {"title": "...", "description": "...", "tags": [...], '
-                '"visuals": [{"index": 0, "visual_prompt": "...", "archival_query": "...", '
-                '"media_preference": "ai_image|archival|graphic_card", "callout_stat": "...", "callout_title": "..."}]}'
+                '"visuals": [{"index": 0, "media_preference": "ai_image|broll_video|archival", '
+                '"visual_prompt": "...", "broll_query": "...", "archival_query": "...", '
+                '"host_appearance": "presenter|cameo|none", "pose": "explaining|pointing|shocked|thinking|shrug", '
+                '"callout_stat": "...", "callout_title": "..."}]}'
             )
             llm_data = self.llm.generate_json(system_prompt, user_prompt, temperature=0.45)
             if start_i == 0 and isinstance(llm_data, dict):
@@ -298,8 +358,21 @@ class StoryDirector:
 
         beats: List[BeatSpec] = []
         for idx, rb in enumerate(raw_beats):
-            cue = cue_by_idx.get(idx) or _heuristic_visual_prompt(rb["text"], inferred_title, idx)
-            beats.append(self._make_beat(idx, rb["speaker"], rb["text"], cue, inferred_title))
+            fallback_cue = _infer_beat_cues(
+                rb["text"],
+                inferred_title,
+                category,
+                idx,
+                speaker=rb["speaker"],
+                speaker_name=rb.get("speaker_name", "Atlas"),
+            )
+            cue = dict(fallback_cue)
+            llm_cue = cue_by_idx.get(idx)
+            if llm_cue:
+                for k, v in llm_cue.items():
+                    if v not in (None, "", []):
+                        cue[k] = v
+            beats.append(self._make_beat(idx, rb["speaker"], rb["text"], cue, inferred_title, category))
 
         final_title = title or str(first_llm_meta.get("title") or inferred_title)[:85]
         plan = StoryPlan(
@@ -338,7 +411,7 @@ class StoryDirector:
                 f"That single detail still makes {topic} unforgettable today.",
             ]
         beats = [
-            self._make_beat(i, "narrator", sent, _heuristic_visual_prompt(sent, topic, i), topic)
+            self._make_beat(i, "narrator", sent, _infer_beat_cues(sent, topic, category, i), topic, category)
             for i, sent in enumerate(sentences[:12])
         ]
         plan = StoryPlan(
@@ -354,7 +427,7 @@ class StoryDirector:
         )
         return enrich_story_metadata(plan)
 
-    def _parse_beats(self, raw_beats: List[Any], topic: str) -> List[BeatSpec]:
+    def _parse_beats(self, raw_beats: List[Any], topic: str, category: str) -> List[BeatSpec]:
         parsed: List[BeatSpec] = []
         for idx, item in enumerate(raw_beats):
             if not isinstance(item, dict):
@@ -362,7 +435,7 @@ class StoryDirector:
             txt = str(item.get("text", "")).strip()
             if not txt:
                 continue
-            parsed.append(self._make_beat(idx, "narrator", txt, item, topic))
+            parsed.append(self._make_beat(idx, "narrator", txt, item, topic, category))
         return parsed
 
     @staticmethod
@@ -372,23 +445,44 @@ class StoryDirector:
         text: str,
         cue: Dict[str, Any],
         topic: str,
+        category: str = "story",
     ) -> BeatSpec:
-        pref_raw = str(cue.get("media_preference", "ai_image")).strip().lower()
+        defaults = _infer_beat_cues(text, topic, category, idx, speaker=speaker)
+
+        pref_raw = str(cue.get("media_preference", defaults["media_preference"])).strip().lower()
         try:
             pref = MediaPreference(pref_raw)
         except ValueError:
             pref = MediaPreference.AI_IMAGE
-        vprompt = str(cue.get("visual_prompt") or "").strip()
-        if not vprompt:
-            vprompt = f"Dramatic scene showing: {text}. Topic: {topic}."
+
+        shot = str(cue.get("camera_shot") or defaults["camera_shot"]).strip().lower()
+        if shot not in CAMERA_SHOTS:
+            shot = defaults["camera_shot"]
+
+        host_app = str(cue.get("host_appearance") or defaults["host_appearance"]).strip().lower()
+        if host_app not in HOST_APPEARANCES:
+            host_app = defaults["host_appearance"]
+
+        pose = str(cue.get("pose") or defaults["characters"][0]["pose"]).strip().lower()
+        if pose not in CHARACTER_POSES:
+            pose = defaults["characters"][0]["pose"]
+
+        characters = [CharacterSpec(name="Atlas", role="narrator", pose=pose, facing="right")]
+        vprompt = str(cue.get("visual_prompt") or defaults["visual_prompt"]).strip()
+        broll_query = str(cue.get("broll_query") or defaults["broll_query"]).strip()
+
         return BeatSpec(
             index=idx,
             speaker=speaker,
             text=text,
             visual_prompt=vprompt,
+            broll_query=broll_query,
             archival_query=str(cue.get("archival_query") or "").strip(),
             media_preference=pref,
             motion=_MOTIONS[idx % len(_MOTIONS)],
-            callout_title=str(cue.get("callout_title") or "").strip()[:60],
-            callout_stat=str(cue.get("callout_stat") or "").strip()[:24],
+            characters=characters,
+            camera_shot=shot,
+            host_appearance=host_app,
+            callout_title=str(cue.get("callout_title") or "").strip()[:48],
+            callout_stat=str(cue.get("callout_stat") or "").strip()[:20],
         )

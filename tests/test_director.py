@@ -11,7 +11,7 @@ class _StubLLM:
         return None
 
 
-def test_custom_script_preserves_exact_words_and_speakers(tmp_path):
+def test_custom_script_preserves_exact_words_and_host_cues(tmp_path):
     db = ReelDatabase(tmp_path / "test.db")
     director = StoryDirector(llm=_StubLLM())
     script = (
@@ -32,9 +32,11 @@ def test_custom_script_preserves_exact_words_and_speakers(tmp_path):
     assert "1912 brass diving bell" in plan.beats[0].text
     assert "three contradictory sonar readings" in plan.beats[1].text
     assert all(b.visual_prompt for b in plan.beats)
+    assert all(b.broll_query for b in plan.beats)
+    assert all(b.host_appearance in ("presenter", "cameo", "none") for b in plan.beats)
 
 
-def test_random_mode_produces_non_empty_beats_offline(tmp_path):
+def test_random_mode_produces_non_empty_media_beats_offline(tmp_path):
     db = ReelDatabase(tmp_path / "test.db")
     director = StoryDirector(llm=_StubLLM())
     plan = director.build_story(
@@ -50,3 +52,4 @@ def test_random_mode_produces_non_empty_beats_offline(tmp_path):
     )
     assert len(plan.beats) >= 4
     assert all(b.visual_prompt for b in plan.beats)
+    assert all(b.broll_query for b in plan.beats)

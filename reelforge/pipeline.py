@@ -123,17 +123,18 @@ def run_generation_job(
 
         fmt_label = "16:9 Landscape" if is_long else "9:16 Short"
         current_stage = "preparing_music"
-        _report("preparing_music", "Generating ambient underscore", 32, f"{duration_sec:.1f}s • {fmt_label}")
+        _report("preparing_music", "Generating ambient underscore & transition SFX", 32, f"{duration_sec:.1f}s • {fmt_label}")
         seed = int(hashlib.sha256(job_id.encode("utf-8")).hexdigest()[:8], 16)
-        bgm_wav = prepare_background_music(duration_sec, work_dir / "audio" / "bgm.wav", seed=seed)
+        cut_times = [b.start_sec for b in plan.beats[1:]]
+        bgm_wav = prepare_background_music(duration_sec, work_dir / "audio" / "bgm.wav", seed=seed, beat_cut_times=cut_times)
         completed_stages.append("preparing_music")
 
         current_stage = "resolving_visuals"
-        _report("resolving_visuals", f"Resolving {fmt_label} visuals (0/{len(plan.beats)})", 36)
+        _report("resolving_visuals", f"Preparing {fmt_label} 2D scenes (0/{len(plan.beats)})", 36)
 
         def _on_visual(done: int, total: int, src: str) -> None:
             pct = 36 + int(round((done / max(1, total)) * 22))
-            _report("resolving_visuals", f"Resolving visuals ({done}/{total})", pct, f"Beat {done}/{total} • {src}")
+            _report("resolving_visuals", f"Preparing scenes ({done}/{total})", pct, f"Beat {done}/{total} • {src}")
 
         resolve_all_visuals(plan, work_dir, visual_mode=visual_mode, on_progress=_on_visual)
         completed_stages.append("resolving_visuals")
@@ -141,12 +142,12 @@ def run_generation_job(
         db.update_job(job_id, storyboard_json=plan.model_dump(mode="json"))
 
         current_stage = "rendering_video"
-        _report("rendering_video", f"Rendering {fmt_label} clips (0/{len(plan.beats)})", 58)
+        _report("rendering_video", f"Rendering {fmt_label} 2D animation", 58)
 
         def _on_render(done: int, total: int, desc: str) -> None:
             pct = 58 + int(round((done / max(1, total)) * 32))
-            label = "Burning captions & mixing audio" if done >= total else f"Rendering clips ({done}/{len(plan.beats)})"
-            _report("rendering_video", label, pct, desc)
+            label = "Burning captions & mixing audio" if done >= total else f"Rendering 2D animation ({pct}%)"
+            _report("rendering_video", label, min(90, pct), desc)
 
         render_short_video(
             plan=plan,
@@ -155,6 +156,7 @@ def run_generation_job(
             words=words,
             work_dir=work_dir,
             output_mp4=output_mp4,
+            duration_sec=duration_sec,
             on_progress=_on_render,
         )
         completed_stages.append("rendering_video")

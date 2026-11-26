@@ -50,11 +50,13 @@
 │   │   ├── splitter.py          # Balanced 1-to-2-minute Shorts splitter & estimator
 │   │   └── topic_pool.py        # AI + Wikipedia + 30 curated non-repeating topic seeds
 │   ├── visuals/
-│   │   ├── cards.py             # 9:16 & 16:9 Pillow editorial/stat cards & image framing
-│   │   └── resolver.py          # Pollinations + NASA/Wikimedia + offline card fallback
+│   │   ├── stage2d.html         # Headless Chromium Canvas compositor (Ken Burns, host sprites, kinetic HUD)
+│   │   ├── render2d.mjs         # Node CDP -> FFmpeg pipe & transparent B-roll overlay renderer
+│   │   ├── scene2d.py           # Python bridge for hybrid media + illustrated host rendering
+│   │   └── resolver.py          # Pixabay HD video/photo + Pollinations/HF AI + NASA/Wikimedia resolver
 │   ├── video/
 │   │   ├── captions.py          # Word-synced animated .ass captions (9:16 & 16:9 safe zones)
-│   │   └── renderer.py          # Native FFmpeg zoompan clips, caption burn & loudnorm+limiter
+│   │   └── renderer.py          # Hybrid 30 FPS scene render, film grain, caption burn & loudnorm+limiter
 │   ├── qc/
 │   │   └── gatekeeper.py        # FFprobe, ebur128 loudness, blackdetect & freezedetect
 │   ├── scheduler/
@@ -156,7 +158,7 @@
 | :--- | :--- | :--- |
 | `OLLAMA_HOST` / `OLLAMA_MODEL` | `http://127.0.0.1:11434` / `qwen2.5:3b-instruct` | Local zero-cost script & cue LLM |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | `""` / `gemini-3-flash-preview` | Optional free-tier cloud LLM |
-| `VISUAL_MODE` | `auto` | `auto`, `pollinations`, `archival`, or `cards_only` |
+| `VISUAL_MODE` | `hybrid` | `hybrid`, `broll`, `pollinations`, or `archival` |
 | `TTS_ENGINE` / `TTS_RATE` | `edge` / `+4%` | Edge-TTS primary & secondary voices |
 | `SCHEDULER_TIMEZONE` | `Asia/Kolkata` | Local timezone for daily slots, scheduling, and cleanup |
 | `SLOT1_TIME` / `SLOT2_TIME` | `12:30` / `20:30` | Default daily YouTube publish times |
